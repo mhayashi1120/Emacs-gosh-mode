@@ -1,0 +1,9 @@
+* gather and cache all information
+* gather method document? comment?
+* add ChangeLog 
+* Name change
+ gauche-ext?
+ gauche-mod?
+ gauche-edit?
+ gauche+x?
+ gauche+ext

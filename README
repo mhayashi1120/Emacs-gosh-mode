@@ -1,0 +1,24 @@
+Edit gauche script on Emacs
+==================
+
+Documentation
+-------------
+
+Nothing
+
+License
+-------
+
+Distributed under the term of GPLv3.
+
+
+.emacs Sample
+-------------
+
+(require 'gauche-config)
+(setq scheme-program-name "gosh -i")
+
+Note
+----
+scheme-complete.el is fixed some problem that happen in gauche.
+That have capable compatibility, so replace the existing one.
