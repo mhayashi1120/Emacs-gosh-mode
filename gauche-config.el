@@ -17,9 +17,13 @@
 (autoload 'scheme-mode "cmuscheme" "Major mode for Scheme." t)
 (autoload 'run-scheme "cmuscheme" "Run an inferior Scheme process." t)
 
+(when (and scheme-program-name (not (string-match "gosh" scheme-program-name)))
+  (setq scheme-program-name "gosh -i"))
+
 ;;TODO reconsider require or not.
 ;; (require 'quack nil t)
 
+(require 'gauche-const)
 (require 'gauche-refactor)
 (require 'gauche-browse)
 (require 'gauche-env)

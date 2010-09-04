@@ -16,7 +16,7 @@ CHECKFLAGS = $(FLAGS)
 VERSION = 0.1.0
 
 RELEASE_FILES = \
-	gauche-browse.el gauche-config.el \
+	gauche-browse.el gauche-config.el gauche-const.el \
 	gauche-env.el gauche-refactor.el \
 	refactor.el \
 	scm-browse.el scm-const.el\

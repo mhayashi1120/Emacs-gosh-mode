@@ -7,6 +7,23 @@
 
 ;;; Code:
 
+
+;;
+;; font-lock
+;;
+
+
+(scm-case-defun scm-font-lock-keywords (arg)
+  )
+
+(font-lock-add-keywords
+ 'scheme-mode
+ '((scm-font-lock-keywords . font-lock-keyword-face)))
+
+;;
+;; eldoc
+;;
+
 (defun scm-base-type (x)
   (if (not (consp x))
       x
@@ -65,9 +82,7 @@
 	      (lambda (exp)
 		(let ((str (scm-object-to-string exp)))
 		  (when (eq target-exp exp)
-		    (add-text-properties 0 (length str) 
-					 (list 'face 'eldoc-highlight-function-argument)
-					 str))
+		    (propertize str 'face 'eldoc-highlight-function-argument))
 		  str))
 	      sexp)
 	     " ")
@@ -82,7 +97,9 @@
   (catch 'found
     (mapc
      (lambda (x)
-       (when (and (symbolp x) (string-match "\\.\\.\\.$" (symbol-name x)))
+       (when (and (vectorp x)
+		  (> (length x) 0) 
+		  (string-match "\\.\\.\\.$" (symbol-name (aref x 0))))
 	 (throw 'found x)))
      sexp)
     nil))
@@ -93,7 +110,7 @@
       (setq res (cons (car ls) res))
       (setq ls (cdr ls)))
     (when (not (null ls))
-      (setq res (cons (intern (concat (scm-object-to-string ls) "...")) res)))
+      (setq res (cons (vector (intern (concat (scm-object-to-string ls) "..."))) res)))
     (reverse res)))
 
 (defun scm-eldoc-print-current-symbol-info ()

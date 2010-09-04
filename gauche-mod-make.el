@@ -15,6 +15,7 @@
       (list
        "gauche-browse.el"
        "gauche-config.el"
+       "gauche-const.el"
        "gauche-env.el"
        "gauche-refactor.el"
        "refactor.el"

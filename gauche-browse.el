@@ -72,10 +72,25 @@
     (switch-to-buffer (car point))
     (goto-char (cdr point))))
 
+;;
+;; font-lock
+;;
+
+(defcustom gauche-user-keyword-regexp nil
+  "*User defined keyword regexp")
+
+(defun gauche-font-lock-keywords (bound)
+  (and (not (featurep 'quack))
+       (or (re-search-forward (concat "\\_<" gauche-defined-keyword-regexp "\\_>") bound t)
+	   (re-search-forward (concat "\\_<" gauche-user-keyword-regexp "\\_>") bound t))))
+
+(scm-set-alist 'scm-font-lock-keywords-functions 'gauche 'gauche-font-lock-keywords)
+
 
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
 ;; eldoc
+;;
 
 (defun gauche-eldoc-highlight-sexp (sexp highlight)
   (let ((index (nth 0 highlight))
