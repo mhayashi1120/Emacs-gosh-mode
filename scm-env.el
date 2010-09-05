@@ -1678,10 +1678,12 @@ d:/home == /cygdrive/d/home
                (funcall method state indent-point normal-indent)))))))
 
 (defun scm-object-to-string (obj)
-  (with-output-to-string
-    (princ (scm-elisp-to-scheme-string obj))))
+  ;; avoid `max-lisp-eval-depth' error
+  (condition-case err
+      (with-output-to-string
+	(princ (scm-elisp-to-scheme-string obj)))
+    (error "")))
 
-;;TODO consider max recursive depth?
 (defun scm-elisp-to-scheme-string (obj)
   (cond
    ((eq obj nil)

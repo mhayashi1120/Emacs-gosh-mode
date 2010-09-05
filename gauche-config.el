@@ -17,7 +17,8 @@
 (autoload 'scheme-mode "cmuscheme" "Major mode for Scheme." t)
 (autoload 'run-scheme "cmuscheme" "Run an inferior Scheme process." t)
 
-(when (and scheme-program-name (not (string-match "gosh" scheme-program-name)))
+(when (or (not (boundp 'scheme-program-name)) 
+	  (and scheme-program-name (not (string-match "gosh" scheme-program-name))))
   (setq scheme-program-name "gosh -i"))
 
 ;;TODO reconsider require or not.
