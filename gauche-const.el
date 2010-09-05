@@ -7,7 +7,7 @@
 
 ;;; Code:
 
-(defconst gauche-defined-keyword-list
+(defconst gauche-defined-procedure-keyword-list
   '( 
     ;; define methods
     "define" "define-class" "define-condition-type" "define-constant"
@@ -39,8 +39,8 @@
     "with-string-io" "with-time-counter"
     ))
 
-(defvar gauche-defined-keyword-regexp
-  (regexp-opt gauche-defined-keyword-list))
+(defvar gauche-defined-procedure-keyword-regexp
+  (regexp-opt gauche-defined-procedure-keyword-list))
 
 (provide 'gauche-const)
 

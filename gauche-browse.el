@@ -76,15 +76,25 @@
 ;; font-lock
 ;;
 
-(defcustom gauche-user-keyword-regexp nil
-  "*User defined keyword regexp")
+(defcustom gauche-user-procedure-regexp nil
+  "*User defined keyword regexp that is faced `font-lock-keyword-face'.")
 
 (defun gauche-font-lock-keywords (bound)
   (and (not (featurep 'quack))
-       (or (re-search-forward (concat "\\_<" gauche-defined-keyword-regexp "\\_>") bound t)
-	   (re-search-forward (concat "\\_<" gauche-user-keyword-regexp "\\_>") bound t))))
+       (or (re-search-forward (concat "(\\(" gauche-defined-procedure-keyword-regexp "\\)\\_>") bound t)
+	   (re-search-forward (concat "(\\(" gauche-user-procedure-regexp "\\)\\_>") bound t))))
 
 (scm-set-alist 'scm-font-lock-keywords-functions 'gauche 'gauche-font-lock-keywords)
+
+;;TODO
+;; (defconst gauche-font-lock-define-variable-regexp
+;;   (concat "(\\(define-constant\\|define-values\\)\\s-+\\(\\sw+\\)"))
+
+;; (defun gauche-font-lock-defined-variables (bound)
+;;   (and (not (featurep 'quack))
+;;        (re-search-forward gauche-font-lock-define-variable-regexp bound t)))
+
+;; (scm-set-alist 'scm-font-lock-variables-functions 'gauche 'gauche-font-lock-defined-variables)
 
 
 

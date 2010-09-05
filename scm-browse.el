@@ -14,11 +14,23 @@
 
 
 (scm-case-defun scm-font-lock-keywords (arg)
-  )
+  "font lock first capture as `font-lock-keyword-face'"
+  (set-match-data nil))
 
 (font-lock-add-keywords
  'scheme-mode
- '((scm-font-lock-keywords . font-lock-keyword-face)))
+ '((scm-font-lock-keywords 1 font-lock-keyword-face)))
+
+;; (scm-case-defun scm-font-lock-variables (arg)
+;;   "font lock first capture as `font-lock-keyword-face',
+;; second capture as `font-lock-variable-name-face'."
+;;   (set-match-data nil))
+
+;; (font-lock-add-keywords
+;;  'scheme-mode
+;;  '((scm-font-lock-variables 
+;;     (1 font-lock-keyword-face)
+;;     (2 font-lock-variable-name-face))))
 
 ;;
 ;; eldoc
