@@ -35,6 +35,7 @@
        (backward-char 1)))
     continue))
 
+;;TODO define-method define-constant define-syntax
 (defun gauche-refactor-find-binding-region (name)
   (catch 'done
     (let ((name-regexp (refactor-create-regexp name)))
@@ -96,7 +97,6 @@
 (defun gauche-refactor-rename-symbol (old-name new-name)
   "Rename symbol at point."
   (interactive (gauche-refactor-rename-symbol-read-args))
-  (barf-if-buffer-read-only)
   (let (region)
     (setq region (gauche-refactor-find-binding-region old-name))
     (refactor-rename-region old-name new-name region)))

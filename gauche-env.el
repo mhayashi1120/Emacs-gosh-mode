@@ -33,6 +33,7 @@
 (defun gauche-available-modules (&optional sym)
   (let ((version-dir
          (concat
+	  ;;TODO version specific?
           (car (directory-files gauche-repo-path t "^[0-9]"))
           "/lib"))
         (site-dir gauche-site-repo-path)
@@ -60,14 +61,7 @@
          (dir
           (scm-find-file-in-path
            file
-           (append
-            (list
-             (concat gauche-site-repo-path "/site/lib"))
-            (mapcar
-             #'(lambda (x) (concat x "/lib"))
-             (reverse
-              (directory-files gauche-repo-path t "^[0-9]")))
-            (gauche-environ-load-path)))))
+	   (gauche-load-path))))
     (when dir
       (let (syms modules)
 	(scm-with-find-file (concat dir "/" file)

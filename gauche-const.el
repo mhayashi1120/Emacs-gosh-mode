@@ -28,7 +28,7 @@
     "let-keywords*" "let-match" "let-optionals*" "let-syntax"
     "let-values" "let/cc" "let1" "letrec-syntax" "make" "match"
     "multiple-value-bind" "parameterize" "parse-options" "receive"
-    "rxmatch-case" "rxmatch-cond" "rxmatch-if" "rxmatch-let"
+    "rlet1" "rxmatch-case" "rxmatch-cond" "rxmatch-if" "rxmatch-let"
     "syntax-rules" "unwind-protect" "unless" "until" "when" "while"
     "with-builder" "with-error-handler" "with-error-to-port"
     "with-input-conversion" "with-input-from-port"

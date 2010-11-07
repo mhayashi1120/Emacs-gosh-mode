@@ -2680,7 +2680,7 @@
      (update! (syntax))
      (update-direct-method! (lambda ()))
      (update-direct-subclass! (lambda ()))
-     (use (special symbol scheme-gauche-available-modules))
+     (use (special symbol gauche-available-modules))
      (use-version (syntax))
      (values-ref (syntax))
      (vector-copy (lambda (vector :optional start end fill) vector))

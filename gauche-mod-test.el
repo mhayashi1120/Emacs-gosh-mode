@@ -16,18 +16,17 @@
 
 (defconst gauche-mod-test-code1
   "
-(define-module my.test.module
+\(define-module my.test.module
   (export 
    hoge hoge-rest
    hoge-opt hoge-key hoge-key-opt))
 
-(define (hoge args))
-(define (hoge-rest . args))
-(define (hoge-opt :optional arg1 (arg2 #f)))
-(define (hoge-key :key (key1 #f) key2))
-(define (hoge-key-opt :optional arg1 (arg2 #f) :key (key1 #f) key2))
-"
-  )
+\(define (hoge args))
+\(define (hoge-rest . args))
+\(define (hoge-opt :optional arg1 (arg2 #f)))
+\(define (hoge-key :key (key1 #f) key2))
+\(define (hoge-key-opt :optional arg1 (arg2 #f) :key (key1 #f) key2))
+")
 
 ;;TODO more test
 (dont-compile

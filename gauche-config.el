@@ -68,6 +68,7 @@
 (put 'parameterize 'scheme-indent-function 1)
 (put 'parse-options 'scheme-indent-function 1)
 (put 'receive 'scheme-indent-function 2)
+(put 'rlet1 'scheme-indent-function 2)
 (put 'rxmatch-case 'scheme-indent-function 1)
 (put 'rxmatch-cond 'scheme-indent-function 0)
 (put 'rxmatch-if 'scheme-indent-function 2)

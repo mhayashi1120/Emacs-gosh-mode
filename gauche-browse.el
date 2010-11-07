@@ -65,7 +65,7 @@
     (save-window-excursion
       ;;TODO
       (info "gauche-refj.info")
-      (Info-search (format "-- \\(Function\\|Macro\\|Special Form\\): %s " symbol-name))
+      (Info-search (format "-- \\(Generic function\\|Function\\|Macro\\|Special Form\\|Variable\\): %s " (regexp-quote symbol-name)))
       (setq point (cons (current-buffer) (line-beginning-position))))
     (unless point
       (error "%s not found." symbol-name))
@@ -102,6 +102,7 @@
 ;; eldoc
 ;;
 
+;;TODO http://practical-scheme.net/chaton/gauche/a/2010/09/10#entry-4c8a78c0-8c5fd
 (defun gauche-eldoc-highlight-sexp (sexp highlight)
   (let ((index (nth 0 highlight))
 	(sym (nth 1 highlight))

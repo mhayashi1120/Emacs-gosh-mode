@@ -484,9 +484,13 @@ when scm-complete can't infer the current implementation."
 	     (save-excursion
 	       (goto-char (point-min))
 	       (or
-		(and (looking-at "#! *\\([^ \t\n]+\\)")
-		     (let ((script (file-name-nondirectory (match-string 1))))
-		       (cdr (assoc script *scm-interpreter-alist*))))
+		(when (looking-at "#! *\\([^ \t\n]+\\)\\(?:[ \t]\\(.*\\)\\)?")
+		  (let ((command (file-name-nondirectory (match-string 1)))
+			(arg (match-string 2)))
+		    (or
+		     (cdr (assoc command *scm-interpreter-alist*))
+		     ;; env command arg
+		     (cdr (assoc arg *scm-interpreter-alist*)))))
 		(cond
 		 ((re-search-forward "(define-module +\\(.\\)" nil t)
 		  (if (equal "(" (match-string 1))
