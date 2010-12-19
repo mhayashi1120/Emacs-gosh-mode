@@ -7,3 +7,23 @@
  gauche-edit?
  gauche+x?
  gauche+ext
+
+* Renew
+** can enable change binary
+/usr/local/bin/gosh
+/usr/local/gauche-current/bin/gosh
+
+if executable script
+if in library buffer.
+(string-match "^/usr/local/share/gauche" buffer-file-name)
+
+can select gosh binary easily
+
+support after install gauche completely.
+In other word, execute emacs and install gauche is not supported.
+
+
+
+
+
+
