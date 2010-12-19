@@ -1,7 +1,6 @@
 ;;; scm-env.el --- Programming language scheme basic utilities
 
 ;; TODO forked version of scheme-complete.el
-;; separate chicken and mzscheme
 
 
 ;;; Commentary:
@@ -16,62 +15,6 @@
 ;; special lookups (XXXX add more impls, try to abstract better)
 
 ;;; Code:
-
-(defvar *scm-chicken-base-repo*
-  (or (getenv "CHICKEN_REPOSITORY")
-      (let ((dir
-             (car (remove-if-not #'file-directory-p
-                                 '("/usr/lib/chicken"
-                                   "/usr/local/lib/chicken"
-                                   "/opt/lib/chicken"
-                                   "/opt/local/lib/chicken"
-                                   )))))
-        (and dir
-             (car (reverse (sort (directory-files dir t "^[0-9]+$")
-                                 #'string-lessp)))))
-      (and (fboundp 'shell-command-to-string)
-           (let* ((res (shell-command-to-string
-                        "csi -e '(print (repository-path))'"))
-                  (res (substring res 0 (- (length res) 1))))
-             (and res (file-directory-p res) res)))
-      "/usr/local/lib/chicken"))
-
-(defvar *scm-chicken-repo-dirs*
-  (remove-if-not
-   #'(lambda (x) (and (stringp x) (not (equal x ""))))
-   (let ((home (getenv "CHICKEN_HOME")))
-     (if (and home (not (equal home "")))
-         (let ((res (split-string home ";"))) ;
-           (if (member *scm-chicken-base-repo* res)
-               res
-             (cons *scm-chicken-repo-dirs* res))) 
-       (list *scm-chicken-base-repo*)))))
-
-(defun scm-chicken-available-modules (&optional sym)
-  (append
-   (mapcar #'symbol-name (mapcar #'car *scm-chicken-modules*))
-   (mapcar
-    #'(lambda (f)
-        (let ((f (file-name-sans-extension f)))
-          (if (equalp "import" (file-name-extension f))
-              (file-name-sans-extension f)
-            f)))
-    (directory-files "." nil "^[^.].*\\.scm$" t))
-   (scm-append-map
-    #'(lambda (dir)
-        (mapcar
-         #'(lambda (f)
-             (let ((f (file-name-sans-extension f)))
-               (if (equalp "import" (file-name-extension f))
-                   (file-name-sans-extension f)
-                 f)))
-         (if (string-match "/4" dir)
-             (directory-files dir nil "^[^.].*\\.import\\.\\(so\\|scm\\)$" t)
-           (directory-files dir nil "^[^.].*\\.\\(so\\|scm\\)$" t))))
-    *scm-chicken-repo-dirs*)))
-
-
-
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; utilities
@@ -260,6 +203,7 @@ This function come from apel"
         (forward-sexp -1)
         (car (scm-read-from-string (buffer-substring (point) end)))))))
 
+;;FIXME TODO regex literal
 (defun scm-read-from-string (string)
   (condition-case err
       (read-from-string string)
@@ -469,10 +413,8 @@ when scm-complete can't infer the current implementation."
 
 ;; most implementations use their name as the script name
 (defvar *scm-interpreter-alist*
-  '(("csi"  . chicken)
-    ("gosh" . gauche)
+  '(("gosh" . gauche)
     ("gsi"  . gambit)
-    ("mred" . mzscheme)
     ))
 
 (defvar *scm-imported-modules* '())
@@ -493,16 +435,7 @@ when scm-complete can't infer the current implementation."
 		     (cdr (assoc arg *scm-interpreter-alist*)))))
 		(cond
 		 ((re-search-forward "(define-module +\\(.\\)" nil t)
-		  (if (equal "(" (match-string 1))
-		      'guile
-		    'gauche))
-		 ((re-search-forward "(\\(?:use\\|require-library\\) " nil t)
-		  'chicken)
-		 ((re-search-forward
-		   "#\\(?:lang\\|reader\\)" nil t)
-		  'mzscheme)
-		 ((re-search-forward "(module\\s-" nil t)
-		  (if (looking-at "\\s-*\\sw") 'chicken 'mzscheme)))))
+                  'gauche))))
 	     scm-default-implementation))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -713,10 +646,7 @@ when scm-complete can't infer the current implementation."
 (defun scm-skip-shebang ()
   ;; skip shebang if present
   (if (looking-at "#!")
-      ;; guile skips until a closing !#
-      (if (eq 'guile (scm-current-implementation))
-          (re-search-forward "!#" nil t)
-        (forward-line))))
+      (forward-line)))
 
 (defun scm-current-imports ()
   (let ((imports '())
@@ -909,8 +839,7 @@ when scm-complete can't infer the current implementation."
 		  ((and (listp decls) (assq 'export-all decls))
 		   (goto-char (point-max))))))
               ((export provide)
-               (unless (and (eq 'provide sym)
-                            (eq 'chicken (scm-current-implementation)))
+               (unless (and (eq 'provide sym))
                  (setq res (nconc (cdr (scm-nth-sexp-at-point 0)) res))))
               ((export-all)
                (goto-char (point-max)))
@@ -985,76 +914,6 @@ when scm-complete can't infer the current implementation."
 (scm-case-defun scm-module-exports-internal (mod)
   nil)
 
-(scm-set-alist 'scm-module-exports-internal-functions 'chicken 'scm-module-exports/chicken)
-(scm-set-alist 'scm-module-exports-internal-functions 'mzscheme 'scm-module-exports/mzscheme)
-
-(defun scm-module-exports/chicken (mod)
-  (let ((predefined (assq mod *scm-chicken-modules*)))
-    (if predefined
-        (list nil (cdr predefined))
-      (let* ((mod-str (symbol-name mod))
-             (export-file
-              (concat *scm-chicken-base-repo* "/" mod-str ".exports"))
-             (setup-file
-              (concat *scm-chicken-base-repo* "/" mod-str ".setup-info"))
-             ;; look for the source in the current directory
-             (source-file (concat mod-str ".scm"))
-             ;; try the chicken 4 modules db
-             (modules-db (concat *scm-chicken-base-repo* "/modules.db")))
-        (cond
-         ((eq mod 'scheme)
-          (list nil *scm-r5rs-info*))
-         ((file-exists-p source-file)
-          (list source-file
-                (scm-with-find-file source-file
-                  (let ((env (scm-current-globals))
-                        (exports (scm-current-exports)))
-                    (if (consp exports)
-                        (remove-if-not #'(lambda (x) (memq (car x) exports)) env)
-                      env)))))
-         ((file-exists-p export-file)
-          (list export-file
-                (mapcar #'(lambda (x) (cons (intern x) '((lambda obj))))
-                        (scm-file->lines export-file))))
-         (t
-          (let ((setup-file-exports
-                 (and (file-exists-p setup-file)
-                      (scm-with-find-file setup-file
-                        (let* ((alist (scm-nth-sexp-at-point 0))
-                               (cell (assq 'exports alist)))
-                          (cdr cell))))))
-            (cond
-             (setup-file-exports
-              (list setup-file
-                    (mapcar #'(lambda (x) (cons (intern x) '((lambda obj))))
-                            setup-file-exports)))
-             ((file-exists-p modules-db)
-              (list modules-db
-                    (mapcar
-                     #'(lambda (x)
-                         (cons (intern (car (split-string (substring x 1))))
-                               '((lambda ()))))
-                     (remove-if-not
-                      #'(lambda (x) (string-match (concat " " mod-str ")") x))
-                      (scm-file->lines modules-db))))))))
-         )))))
-
-(defun scm-module-exports/mzscheme (mod)
-  (let ((dir (scm-find-file-in-path
-              (symbol-name mod)
-              '("."
-                "/usr/local/lib/plt/collects"
-                "/usr/local/lib/plt/collects/mzlib"))))
-    (when dir
-      ;; XXXX parse, don't use regexps
-      (list
-       (concat dir "/" (symbol-name mod))
-       (scm-with-find-file (concat dir "/" (symbol-name mod))
-         (when (re-search-forward "(provide" nil t)
-           (backward-sexp)
-           (backward-char)
-           (mapcar #'list (cdr (ignore-errors (scm-nth-sexp-at-point 0))))
-           ))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; For cygwin path 
@@ -1280,10 +1139,7 @@ d:/home == /cygdrive/d/home
 (defun scm-current-env ()
   (let ((in-mod-p (scm-inside-module-p)))
     ;; r5rs
-    (let ((env (if in-mod-p
-                   '(((import
-                       (special symbol scm-chicken-available-modules))))
-                 (list *scm-r5rs-info*))))
+    (let ((env (list *scm-r5rs-info*)))
       ;; base language
       (let ((base (cdr (assq (scm-current-implementation)
                              *scm-implementation-exports*))))

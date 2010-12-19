@@ -1,6 +1,6 @@
 # -*- mode: makefile; -*-
 #
-# Makefile for gauche-mod
+# Makefile for gauche-ext
 #
 
 TAR	= tar
@@ -8,7 +8,7 @@ RM	= /bin/rm -f
 
 EMACS	= emacs
 
-FLAGS   = -batch -q -no-site-file -l gauche-mod-make.el
+FLAGS   = -batch -q -no-site-file -l gauche-ext-make.el
 
 # For windows emacs
 CHECKFLAGS = $(FLAGS)
@@ -30,23 +30,23 @@ GOMI	= *.elc *~
 default: elc
 
 check: clean
-	$(EMACS) $(CHECKFLAGS) -f check-gauche-mod $(CONFIG)
+	$(EMACS) $(CHECKFLAGS) -f check-gauche-ext $(CONFIG)
 
 elc:
-	$(EMACS) $(FLAGS) -f compile-gauche-mod $(CONFIG)
+	$(EMACS) $(FLAGS) -f compile-gauche-ext $(CONFIG)
 
 what-where:
-	$(EMACS) $(FLAGS) -f what-where-gauche-mod $(CONFIG)
+	$(EMACS) $(FLAGS) -f what-where-gauche-ext $(CONFIG)
 
 install: elc
-	$(EMACS) $(FLAGS) -f install-gauche-mod $(CONFIG)
+	$(EMACS) $(FLAGS) -f install-gauche-ext $(CONFIG)
 
 clean:
 	-$(RM) $(GOMI)
 
 release: archive
-	$(RM) -f $(ARCHIVE_DIR_PREFIX)/gauche-mod-$(VERSION).tar.bz2 $(ARCHIVE_DIR_PREFIX)/gauche-mod-$(VERSION).tar.gz
-	mv /tmp/gauche-mod-$(VERSION).tar.bz2 /tmp/gauche-mod-$(VERSION).tar.gz $(ARCHIVE_DIR_PREFIX)/
+	$(RM) -f $(ARCHIVE_DIR_PREFIX)/gauche-ext-$(VERSION).tar.bz2 $(ARCHIVE_DIR_PREFIX)/gauche-ext-$(VERSION).tar.gz
+	mv /tmp/gauche-ext-$(VERSION).tar.bz2 /tmp/gauche-ext-$(VERSION).tar.gz $(ARCHIVE_DIR_PREFIX)/
 
 archive:
 	rm -rf /tmp/gahche-mod-$(VERSION)

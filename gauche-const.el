@@ -39,6 +39,8 @@
     "with-string-io" "with-time-counter"
     ))
 
+(defconst gauche-regexp-literal-regexp "#/\\(\\(?:\\/\\|[^/]\\)+\\)/")
+
 (defvar gauche-defined-procedure-keyword-regexp
   (regexp-opt gauche-defined-procedure-keyword-list))
 
