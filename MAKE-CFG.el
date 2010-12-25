@@ -6,7 +6,7 @@
 
 (setq load-path (cons "~/.emacs.d/util" load-path))
 
-(setq INSTALL-DIR (expand-file-name "../share/site-lisp/gauche-ext" (invocation-directory)))
+(setq INSTALL-DIR (expand-file-name "../share/site-lisp/gauche-mode" (invocation-directory)))
 
 
 

@@ -27,3 +27,6 @@ In other word, execute emacs and install gauche is not supported.
 
 
 
+* eldoc
+(define hoge fuga)
+means recursive fuga

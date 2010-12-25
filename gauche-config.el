@@ -26,10 +26,7 @@
 
 (require 'gauche-const)
 (require 'gauche-refactor)
-(require 'gauche-browse)
-(require 'gauche-env)
-
-(require 'scm-edit)
+(require 'gauche-mode)
 
 
 
@@ -99,28 +96,15 @@
 
 
 
-(add-to-list 'interpreter-mode-alist '("gosh" . scheme-mode))
+(add-to-list 'interpreter-mode-alist '("gosh" . gauche-mode))
 
 (font-lock-add-keywords
- 'scheme-mode
+ 'gauche-mode
  '(("\\`#.+" 0 font-lock-comment-delimiter-face)))
 
-(add-hook 'scheme-mode-hook
-	  (lambda ()
-	    (make-local-variable 'eldoc-documentation-function)
-	    (setq eldoc-documentation-function 'scm-eldoc-print-current-symbol-info)
-	    (eldoc-mode)))
-
-;;TODO fix key conventions
-;; fix name space
-(add-hook 'scheme-mode-hook
-	  (lambda ()
-	    (define-key scheme-mode-map "\M-\C-i" 'scm-smart-complete)
-	    (define-key scheme-mode-map "\C-cj" 'gauche-jump-to-module)
-	    (define-key scheme-mode-map "\C-ch" 'gauche-jump-to-info)
-	    (define-key scheme-mode-map "\C-cR" 'gauche-refactor-rename-symbol)
-	    (define-key scheme-mode-map "\C-c\er" 'gauche-refactor-rename-symbol-afaiui)
-	    ))
+;;TODO this is outof config user .emacs
+(add-to-list 'auto-mode-alist 
+             '("\\.scm\\(?:\\.[0-9]+\\)?$" . gauche-mode))
 
 
 
