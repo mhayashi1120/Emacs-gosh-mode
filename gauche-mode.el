@@ -6,7 +6,11 @@
 
 ;;; Code:
 
+(eval-when-compile
+  (require 'cl))
+
 (require 'eldoc nil t)
+(require 'scheme)
 (require 'gauche-const)
 (require 'gauche-refactor)
 
@@ -21,7 +25,7 @@
       (apply 'call-process (expand-file-name command dir) nil (current-buffer) nil args)
       (buffer-string))))
 
-;; (defvar gauche-default-version nil)
+(defvar gauche-default-version nil)
 (defvar gauche-default-repo-path nil)
 (defvar gauche-default-site-repo-path nil)
 
@@ -328,6 +332,28 @@
   "Face used to error highlight mode line module name."
   :group 'gauche)
 
+(defvar gauche-sticky-mode-update-timer nil)
+
+(defvar gauche-sticky-modeline-format
+  `("[Gauche: " 
+    "Valid=>"  gauche-sticky-modeline-validate " "
+    "Module=>" (:propertize gauche-sticky-which-module-current
+                            face gauche-modeline-normal-face)
+    "]")
+  "Format for displaying the function in the mode line.")
+
+(defvar gauche-sticky-validated-time nil)
+(make-variable-buffer-local 'gauche-sticky-validated-time)
+
+(defvar gauche-sticky-modeline-updated nil)
+(make-variable-buffer-local 'gauche-sticky-modeline-updated)
+
+(defvar gauche-sticky-which-module-current nil)
+(make-variable-buffer-local 'gauche-sticky-which-module-current)
+
+(defvar gauche-sticky-modeline-validate nil)
+(make-variable-buffer-local 'gauche-sticky-modeline-validate)
+
 (defun gauche-initialize-stickey-mode ()
   (unless (assq 'gauche-sticky-mode mode-line-format)
     (let ((rest (memq 'mode-line-modes mode-line-format)))
@@ -336,8 +362,6 @@
                           '("" gauche-sticky-modeline-format " "))
                     (cdr rest)))))
   (add-hook 'gauche-mode-hook 'gauche-sticky-mode))
-
-(defvar gauche-sticky-mode-update-timer nil)
 
 (define-minor-mode gauche-sticky-mode 
   ""
@@ -364,9 +388,6 @@
       (setq gauche-sticky-modeline-updated (point))
       (force-mode-line-update))))
 
-(defvar gauche-sticky-validated-time nil)
-(make-variable-buffer-local 'gauche-sticky-validated-time)
-
 (defun gauche-sticky-validate-update ()
   (let ((valid (gauche-backend-switch-context (current-buffer) default-directory)))
     (setq gauche-sticky-modeline-validate
@@ -374,23 +395,6 @@
               '(:propertize "OK" face gauche-modeline-normal-face)
             '(:propertize "NG" face gauche-modeline-error-face))))
   (setq gauche-sticky-validated-time (float-time)))
-
-(defvar gauche-sticky-modeline-format
-  `("[Gauche: " 
-    "Valid=>"  gauche-sticky-modeline-validate
-    " Module=>" (:propertize gauche-sticky-which-module-current
-                            face gauche-modeline-normal-face)
-    "]")
-  "Format for displaying the function in the mode line.")
-
-(defvar gauche-sticky-modeline-updated nil)
-(make-variable-buffer-local 'gauche-sticky-modeline-updated)
-
-(defvar gauche-sticky-which-module-current nil)
-(make-variable-buffer-local 'gauche-sticky-which-module-current)
-
-(defvar gauche-sticky-modeline-validate nil)
-(make-variable-buffer-local 'gauche-sticky-modeline-validate)
 
 (defun gauche-sticky-which-module-update ()
   (let (module)
@@ -411,7 +415,8 @@
 ;;
 
 (defcustom gauche-user-procedure-regexp nil
-  "*User defined keyword regexp that is faced `font-lock-keyword-face'.")
+  "*User defined keyword regexp that is faced `font-lock-keyword-face'."
+  :group 'gauche)
 
 (defun gauche-font-lock-keywords (bound)
   (and (not (featurep 'quack))
@@ -426,6 +431,7 @@
 
 ;; syntax
 
+;;TODO obsolete
 (defconst gauche-font-lock-syntactic-keywords
   `(
     (,gauche-regexp-literal-regexp (1 (6)) (2 (7)) (4 (7)))
@@ -1038,17 +1044,17 @@ This function come from apel"
 
 (defgroup gauche-complete nil
   "Smart tab completion"
-  :group 'scheme)
+  :group 'gauche)
 
 (defcustom gauche-complete-smart-indent-p t
   "Toggles using `scm-smart-indent' for `gauche-complete-or-indent'."
   :type 'boolean
-  :group 'gauche-complete)
+  :group 'gauche)
 
 ;; (defcustom gauche-complete-learn-syntax-p nil
 ;;   "Toggles parsing of syntax-rules macros for completion info."
 ;;   :type 'boolean
-;;   :group 'gauche-complete)
+;;   :group 'gauche)
 
 (defvar *gauche-interleave-definitions-p* nil)
 
@@ -2014,7 +2020,7 @@ d:/home == /cygdrive/d/home
           (or (null (cdr x))
               (memq (cadr x) '(procedure object nil))
               (and (consp (cadr x))
-                   (memq (caadr x) (lambda syntax special)))))
+                   (memq (caadr x) '(lambda syntax special)))))
         env)))
      ;; complete everything
      (t
@@ -2089,7 +2095,7 @@ d:/home == /cygdrive/d/home
     obj)
    ((eq (car obj) 'quote)
     (let (ret)
-      (mapcar
+      (mapc
        (lambda (x)
 	 (setq ret (cons (gauche-elisp-to-scheme-string x) ret)))
        (cdr obj))
