@@ -13,40 +13,54 @@
 (defcustom gauche-default-command "gosh"
   "Gauche program name.")
 
-(defun gauche-call-command-to-string (command &rest args)
-  (with-temp-buffer
-    (apply 'call-process command nil (current-buffer) nil args)
-    (buffer-string)))
+(defvar gauche-default-command-internal nil)
 
-(defvar gauche-default-version nil)
+(defun gauche-call-command-to-string (gosh command &rest args)
+  (let ((dir (file-name-directory gosh)))
+    (with-temp-buffer
+      (apply 'call-process (expand-file-name command dir) nil (current-buffer) nil args)
+      (buffer-string))))
+
+;; (defvar gauche-default-version nil)
 (defvar gauche-default-repo-path nil)
 (defvar gauche-default-site-repo-path nil)
 
-(defvar gauche-cached-load-path-alist nil)
+;;TODO load-path load-path influenced by GAUCHE_LOAD_PATH
+(defvar gauche-command-alist nil)
 
-(defun gauche-default-initialize ()
-  (setq gauche-default-version
-        (let ((ver (gauche-call-command-to-string gauche-default-command "-V")))
-          (when (string-match "version[ \t]+\\([0-9][0-9.]+\\)" ver)
-            (match-string 1 ver))))
-  (setq gauche-default-repo-path
-        ;; TODO not var to function?
-        (or (let* ((res (gauche-call-command-to-string "gauche-config" "--syslibdir"))
-                   (res (substring res 0 -1)))
-              (and res (file-directory-p res)
-                   (let* ((dir (file-name-directory res))
-                          (dir2 (file-name-directory
-                                 (directory-file-name dir))))
-                     (directory-file-name dir2))))
-            (car (remove-if-not 'file-directory-p
-                                '("/usr/share/gauche"
-                                  "/usr/local/share/gauche"
-                                  "/opt/share/gauche"
-                                  "/opt/local/share/gauche")))
+(defun gauche-register-command (command)
+  (let* ((full (executable-find command)))
+    (or (assoc full gauche-command-alist)
+        (let* ((ver (let ((ver (gauche-call-command-to-string full full "-V")))
+                      (when (string-match "version[ \t]+\\([0-9][0-9.]+\\)" ver)
+                        (match-string 1 ver))))
+               (repo (let* ((res (gauche-call-command-to-string full "gauche-config" "--syslibdir"))
+                            (res (substring res 0 -1))) ;remove trailing newline
+                       (and res (file-directory-p res)
+                            (let* ((dir (file-name-directory res))
+                                   (dir2 (file-name-directory
+                                          (directory-file-name dir))))
+                              (directory-file-name dir2)))))
+               (path (gauche-exact-load-path full t))
+               (item (list full ver repo path)))
+          (setq gauche-command-alist
+                (cons item gauche-command-alist))
+          item))))
 
-            "/usr/local/share/gauche"))
-  (setq gauche-default-site-repo-path
-        (concat gauche-default-repo-path "/site/lib")))
+(defun gauche-initialize ()
+  (gauche-default-initialize)
+  (gauche-initialize-stickey-mode))
+
+(defun gauche-default-initialize (&optional default-command)
+  (when default-command
+    (setq gauche-default-command default-command))
+  (let ((info (gauche-register-command gauche-default-command)))
+    (setq gauche-default-command-internal (nth 0 info)
+          gauche-default-version (nth 1 info)
+          gauche-default-repo-path (nth 2 info))
+    ;;todo remove ? non need?
+    (setq gauche-default-site-repo-path
+          (concat gauche-default-repo-path "/site/lib"))))
 
 ;;TODO dummy
 (defun gauche-available-modules (&optional dummy)
@@ -75,24 +89,30 @@
             (gauche-directory-tree-files dir t "\\.scm"))))
        (cons version-dir (cons site-dir other-dirs)))))))
 
-;;TODO consider dynamic-load
-(defun gauche-parse-module-exports (mod)
+(defun gauche-current-module-to-file (mod)
   (let* ((file (concat (subst-char-in-string ?. ?/ (symbol-name mod)) ".scm"))
          (dir
           (gauche-scheme-find-file-in-path
            file
-	   (gauche-load-path))))
+           ;;TODO current-executable and switch load-path
+	   (gauche-load-path)
+           )))
     (when dir
-      (let (syms modules)
-	(gauche-with-find-file (concat dir "/" file)
-          (setq syms (gauche-parse-exported-symbols))
-          (setq modules (gauche-parse-base-modules)))
-	;;TODO merge derived module to base module
-	(mapc
-	 (lambda (mod)
-	   (setq syms (append (nth 1 (gauche-parse-module-exports mod)) syms)))
-	 modules)
-	(list (concat dir "/" file) syms)))))
+      (concat dir "/" file))))
+
+;;TODO consider dynamic-load
+(defun gauche-parse-file-exports (file)
+  (let (syms modules)
+    (gauche-with-find-file file
+      (setq syms (gauche-parse-exported-symbols))
+      (setq modules (gauche-parse-base-modules)))
+    ;;TODO merge derived module to base module
+    (mapc
+     (lambda (mod)
+       (let ((f (gauche-current-module-to-file mod)))
+         (setq syms (append (gauche-parse-file-exports f) syms))))
+     modules)
+    syms))
 
 (defun gauche-parse-base-modules ()
   (let (mod modules)
@@ -124,23 +144,26 @@
 	(mapcar 'gauche-cygwin-path-to-unix-path path))
     (split-string (or (getenv "GAUCHE_LOAD_PATH") "") path-separator)))
 
+;;TODO make obsolete
 (defvar gauche-load-path nil)
-
 (defun gauche-load-path ()
   (or gauche-load-path
-      (setq gauche-load-path (gauche-exact-load-path))))
+      (setq gauche-load-path (gauche-exact-load-path gauche-default-command-internal))))
 
-(defun gauche-exact-load-path ()
-  (let ((list '())
-	(args nil))
+(defun gauche-exact-load-path (command &optional restrict-system)
+  (let ((process-environment (copy-sequence process-environment))
+        (list '())
+	(args '()))
+    (when restrict-system
+      (setenv "GAUCHE_LOAD_PATH" nil))
     (setq args (list "-e" "(map print *load-path*)"))
     (with-temp-buffer
-      (apply 'call-process gauche-default-command nil (current-buffer) nil args)
+      (apply 'call-process command nil (current-buffer) nil args)
       (goto-char (point-min))
       (while (not (eobp))
 	(setq list (cons (buffer-substring (line-beginning-position) (line-end-position)) list))
 	(forward-line 1))
-      list)))
+      (nreverse list))))
 
 (defun gauche-current-exports (&optional only-current)
   (let ((res '()))
@@ -160,7 +183,7 @@
                    (let ((parents (cdr (assq 'extend decls))))
                      (setq res (nconc (mapcar 'car
                                               (gauche-append-map
-                                               'gauche-scheme-module-exports
+                                               'gauche-module-exports-definitions
                                                parents))
                                       res))))
                  (cond
@@ -177,7 +200,7 @@
                  (let ((parents (cdr (gauche-nth-sexp-at-point 0))))
                    (setq res (nconc (mapcar 'car
                                             (gauche-append-map
-                                             'gauche-scheme-module-exports
+                                             'gauche-module-exports-definitions
                                              parents))
                                     res)))))
               ((module)
@@ -202,7 +225,7 @@
       (goto-char first)
       nil)))
 
-(defun gauche-jump-to-module ()
+(defun gauche-jump-thingatpt ()
   (interactive)
   (let* ((symname (thing-at-point 'symbol))
 	 (sym (intern symname)))
@@ -213,7 +236,7 @@
       (mapc
        (lambda (f)
       	 (when (memq sym (gauche-exports-functions f))
-	   ;;TODO opend or not
+	   ;;TODO opend or not find-file-noselect
       	   (find-file f)
       	   (when (gauche-jump-to-definition sym)
 	     (throw 'found t))))
@@ -230,10 +253,10 @@
     (setq prefix (match-string 1 sym))
     (mapc
      (lambda (m)
-       (let ((mname (symbol-name (car m))))
+       (let ((mname (symbol-name (nth 1 m))))
 	 (if (member prefix (split-string mname "[.]"))
-	     (setq first-candidate (cons (cadr m) first-candidate))
-	   (setq second-candidate (cons (cadr m) second-candidate)))))
+	     (setq first-candidate (cons (nth 0 m) first-candidate))
+	   (setq second-candidate (cons (nth 0 m) second-candidate)))))
      gauche-cache-module-exports)
     (append first-candidate second-candidate)))
 
@@ -241,20 +264,147 @@
   (gauche-with-find-file mod-file
     (gauche-current-exports)))
 
-(defun gauche-jump-to-info (symbol-name)
+(defun gauche-show-info (symbol-name)
   (interactive 
    (let ((sym (thing-at-point 'symbol)))
      (list sym)))
-  (let (point)
-    (save-window-excursion
-      ;;TODO
-      (info "gauche-refj.info")
-      (Info-search (format "-- \\(Generic function\\|Function\\|Macro\\|Special Form\\|Variable\\): %s " (regexp-quote symbol-name)))
-      (setq point (cons (current-buffer) (line-beginning-position))))
-    (unless point
-      (error "%s not found." symbol-name))
-    (switch-to-buffer (car point))
-    (goto-char (cdr point))))
+  (info-lookup-symbol symbol-name))
+
+(defun gauche-parse-current-module ()
+  (save-excursion
+    (save-restriction
+      (widen)
+      (catch 'return
+        ;; avoid starts of "(with-module"
+        (when (looking-at "(")
+          (backward-char))
+        (while (and (not (bobp))
+                    (not (looking-at "^(")))  ; while not top level
+          (when (looking-at "(with-module[ \t\n]+\\([^ \t\n()]+\\)")
+            (throw 'return (match-string-no-properties 1)))
+          (gauche-beginning-of-list))
+        (goto-char (point-min))
+        (when (re-search-forward "(select-module[ \t\n]+\\([^ \t\n()]+\\)" nil t)
+          (throw 'return (match-string-no-properties 1)))
+        (when (re-search-forward "(define-module[ \t\n]+\\([^ \t\n()]+\\)" nil t)
+          (throw 'return (match-string-no-properties 1)))
+        nil))))
+
+
+
+;;
+;; which module minor mode
+;;
+
+(defface gauche-modeline-normal-face
+  '((((class color) (min-colors 88) (background light))
+     :inherit font-lock-function-name-face)
+    (((class grayscale mono) (background dark))
+     :inherit font-lock-function-name-face)
+    (((class color) (background light))
+     :inherit font-lock-function-name-face)
+    (((class color) (min-colors 88) (background dark))
+     :foreground "Blue1")
+    (((background dark))
+     :foreground "Blue1")
+    (t
+     :foreground "LightSkyBlue"))
+  "Face used to highlight mode line module name."
+  :group 'gauche)
+
+(defface gauche-modeline-error-face
+  '((((class color) (min-colors 88) (background light))
+     :inherit font-lock-warning-face)
+    (((class grayscale mono) (background dark))
+     :inherit font-lock-warning-face)
+    (((class color) (background light))
+     :inherit font-lock-warning-face)
+    (((class color) (min-colors 88) (background dark))
+     :foreground "Red1")
+    (((background dark))
+     :foreground "Red1")
+    (t
+     :foreground "OrangeRed1"))
+  "Face used to error highlight mode line module name."
+  :group 'gauche)
+
+(defun gauche-initialize-stickey-mode ()
+  (unless (assq 'gauche-sticky-mode mode-line-format)
+    (let ((rest (memq 'mode-line-modes mode-line-format)))
+      (setcdr rest
+              (cons (list 'gauche-sticky-mode 
+                          '("" gauche-sticky-modeline-format " "))
+                    (cdr rest)))))
+  (add-hook 'gauche-mode-hook 'gauche-sticky-mode))
+
+(defvar gauche-sticky-mode-update-timer nil)
+
+(define-minor-mode gauche-sticky-mode 
+  ""
+  nil nil nil
+  (when (timerp gauche-sticky-mode-update-timer)
+    (cancel-timer gauche-sticky-mode-update-timer))
+  (setq gauche-sticky-mode-update-timer nil)
+  (when gauche-sticky-mode 
+    (setq gauche-sticky-mode-update-timer
+          (run-with-idle-timer idle-update-delay t 'gauche-sticky-modeline-update))))
+
+(defun gauche-sticky-modeline-update ()
+  ;; check buffer to avoid endless freeze 
+  (when (and (eq major-mode 'gauche-mode)
+             (not (minibufferp (current-buffer))))
+    (unless (eq gauche-sticky-modeline-updated (point))
+      (let ((prev (cadr gauche-sticky-which-module-current))
+            (module (gauche-sticky-which-module-update)))
+        (when (or (null gauche-buffer-change-time)
+                  (null gauche-sticky-validated-time)
+                  (> gauche-buffer-change-time
+                     gauche-sticky-validated-time))
+          (gauche-sticky-validate-update)))
+      (setq gauche-sticky-modeline-updated (point))
+      (force-mode-line-update))))
+
+(defvar gauche-sticky-validated-time nil)
+(make-variable-buffer-local 'gauche-sticky-validated-time)
+
+(defun gauche-sticky-validate-update ()
+  (let ((valid (gauche-backend-switch-context (current-buffer) default-directory)))
+    (setq gauche-sticky-modeline-validate
+          (if valid
+              '(:propertize "OK" face gauche-modeline-normal-face)
+            '(:propertize "NG" face gauche-modeline-error-face))))
+  (setq gauche-sticky-validated-time (float-time)))
+
+(defvar gauche-sticky-modeline-format
+  `("[Gauche: " 
+    "Valid=>"  gauche-sticky-modeline-validate
+    " Module=>" (:propertize gauche-sticky-which-module-current
+                            face gauche-modeline-normal-face)
+    "]")
+  "Format for displaying the function in the mode line.")
+
+(defvar gauche-sticky-modeline-updated nil)
+(make-variable-buffer-local 'gauche-sticky-modeline-updated)
+
+(defvar gauche-sticky-which-module-current nil)
+(make-variable-buffer-local 'gauche-sticky-which-module-current)
+
+(defvar gauche-sticky-modeline-validate nil)
+(make-variable-buffer-local 'gauche-sticky-modeline-validate)
+
+(defun gauche-sticky-which-module-update ()
+  (let (module)
+    (condition-case err
+        (setq module (gauche-parse-current-module))
+      (error nil))
+    (setq gauche-sticky-which-module-current `(:eval ,module))
+    module))
+
+(put 'gauche-sticky-modeline-format 'risky-local-variable t)
+(put 'gauche-sticky-which-module-current 'risky-local-variable t)
+(put 'gauche-sticky-modeline-validate 'risky-local-variable t)
+
+
 
 ;;
 ;; font-lock
@@ -334,11 +484,10 @@
 (unless gauche-mode-map
   (let ((map (copy-keymap scheme-mode-map)))
     
-    ;;TODO fix key conventions
     (define-key map "\M-\C-i" 'gauche-smart-complete)
-    (define-key map "\C-cj" 'gauche-jump-to-module)
-    (define-key map "\C-ch" 'gauche-jump-to-info)
-    (define-key map "\C-cR" 'gauche-refactor-rename-symbol)
+    (define-key map "\C-c\C-j" 'gauche-jump-thingatpt)
+    (define-key map "\C-c\M-?" 'gauche-show-info)
+    (define-key map "\C-c\C-r" 'gauche-refactor-rename-symbol)
     (define-key map "\C-c\er" 'gauche-refactor-rename-symbol-afaiui)
 
     (setq gauche-mode-map map)))
@@ -346,18 +495,19 @@
 
 (defvar gauche-mode-hook nil)
 
-;;TODO sche-mode-hook -> gauche-mode-hook
 (add-hook 'gauche-mode-hook
 	  (lambda ()
-	    (make-local-variable 'eldoc-documentation-function)
-	    (setq eldoc-documentation-function 'gauche-eldoc-print-current-symbol-info)
+            (set (make-local-variable 'eldoc-documentation-function)
+                 'gauche-eldoc-print-current-symbol-info)
 	    (eldoc-mode)))
-
 
 (define-derived-mode gauche-mode scheme-mode "Gauche"
   "Gauche editing mode"
   (set (make-local-variable 'font-lock-syntactic-keywords) 
        gauche-font-lock-syntactic-keywords)
+  (set (make-local-variable 'after-change-functions)
+       'gauche-after-change-function)
+  (setq gauche-buffer-change-time (float-time))
   (gauche-syntax-table-reset)
   (use-local-map gauche-mode-map)
   (run-mode-hooks 'gauche-mode-hook))
@@ -387,7 +537,7 @@
     (unless target-exp
       (setq target-exp (nth index real-sexp)))
     (unless target-exp
-      (gauche-aif (gauche-eldoc-sexp-rest-arg real-sexp)
+      (gauche-aif (gauche-eldoc--sexp-rest-arg real-sexp)
 	  (setq target-exp it)))
     (concat "("
 	    (mapconcat
@@ -465,7 +615,7 @@
       (gauche-object-to-string sexp)
     (gauche-eldoc-highlight-sexp sexp highlight)))
 
-(defun gauche-eldoc-sexp-rest-arg (sexp)
+(defun gauche-eldoc--sexp-rest-arg (sexp)
   (catch 'found
     (mapc
      (lambda (x)
@@ -677,6 +827,16 @@ This function come from apel"
   (while (and (> (point) (point-min)) (eq ?\\ (char-before)))
     (search-backward "\"" nil t)))
 
+(defun gauche-beginning-of-list ()
+  (let (top)
+    (while (and (not (setq top (looking-at "^(")))
+                (not (bobp))
+                (condition-case err
+                    (progn (backward-sexp) t)
+                  (scan-error nil))))
+    (unless (or (bobp) top)
+      (backward-char))))
+
 ;; for the enclosing sexp, returns a cons of the leading symbol (if
 ;; any) and the current position within the sexp (starting at 0)
 ;; (defun gauche-enclosing-sexp-prefix ()
@@ -885,11 +1045,6 @@ This function come from apel"
   :type 'boolean
   :group 'gauche-complete)
 
-(defcustom gauche-complete-cache-p t
-  "Toggles caching of module/load export information."
-  :type 'boolean
-  :group 'gauche-complete)
-
 ;; (defcustom gauche-complete-learn-syntax-p nil
 ;;   "Toggles parsing of syntax-rules macros for completion info."
 ;;   :type 'boolean
@@ -1029,7 +1184,7 @@ TODO key should be module-file?? multiple executable make complex.
                    (+ 1 (if (numberp scan-internal) scan-internal 2)))
                   (backward-sexp)
                   (if (< (point) start)
-                      (setq vars (append (gauche-scheme-current-definitions) vars))
+                      (setq vars (append (gauche-parse-read-trailing-definitions) vars))
                     ))))))))
     (reverse vars)))
 
@@ -1071,17 +1226,17 @@ TODO key should be module-file?? multiple executable make complex.
      (gauche-append-map 'gauche-parse-extract-import-module-exports (cdr sexp)))
     ((library)
      (if (and (stringp (cadr sexp)) (file-exists-p (cadr sexp)))
-         (gauche-scheme-module-exports (intern (cadr sexp)))))
+         (gauche-module-exports-definitions (intern (cadr sexp)))))
     ((lib)
      (if (and (equal "srfi" (caddr sexp))
               (stringp (cadr sexp))
               (string-match "^[0-9]+\\." (cadr sexp)))
-         (gauche-scheme-module-exports
+         (gauche-module-exports-definitions
           (intern (file-name-sans-extension (concat "srfi-" (cadr sexp)))))
-       (gauche-scheme-module-exports
+       (gauche-module-exports-definitions
         (intern (apply 'concat (append (cddr sexp) (list (cadr sexp))))))))
     (t
-     (gauche-scheme-module-exports sexp))))
+     (gauche-module-exports-definitions sexp))))
 
 (defun gauche-parse-sexp-imports (sexp)
   (case (and (consp sexp) (car sexp))
@@ -1091,7 +1246,7 @@ TODO key should be module-file?? multiple executable make complex.
      (gauche-append-map 'gauche-parse-sexp-imports
                      (gauche-append-map 'cdr (cdr sexp))))
     ((use require-extension)
-     (gauche-append-map 'gauche-scheme-module-exports (cdr sexp)))
+     (gauche-append-map 'gauche-module-exports-definitions (cdr sexp)))
     ((import)
      (gauche-append-map 'gauche-parse-extract-import-module-exports (cdr sexp)))
     ((autoload)
@@ -1219,7 +1374,7 @@ TODO key should be module-file?? multiple executable make complex.
                   (cddddr sexp))))))
         ((begin begin0)
          (forward-sexp)
-         (gauche-scheme-current-definitions))
+         (gauche-parse-read-trailing-definitions))
         (t
          '())))))
 
@@ -1278,7 +1433,7 @@ TODO key should be module-file?? multiple executable make complex.
     globals))
 
 ;; for internal defines, etc.
-(defun gauche-scheme-current-definitions (&optional enclosing-end)
+(defun gauche-parse-read-trailing-definitions (&optional enclosing-end)
   (let ((defs '())
         (end (or enclosing-end (point-max))))
     (save-excursion
@@ -1303,44 +1458,63 @@ TODO key should be module-file?? multiple executable make complex.
        (< i (length *gauche-scheme-srfi-info*))
        (let ((info (cdr (aref *gauche-scheme-srfi-info* i))))
          (if (and (consp info) (null (cdr info)) (symbolp (car info)))
-             (gauche-scheme-module-exports (car info))
+             (gauche-module-exports-definitions (car info))
            info))))
 
-(defun gauche-scheme-module-exports (mod)
+(defun gauche-module-exports-definitions (mod)
   ;; TODO consider recursive
   (unless (member mod gauche-processing-modules)
     (push mod gauche-processing-modules))
   (cond
    ((and (consp mod) (eq 'srfi (car mod)))
     (gauche-append-map 'gauche-scheme-srfi-exports (cdr mod)))
-   ((and (symbolp mod) (string-match "^srfi-" (symbol-name mod)))
+   ((and (symbolp mod) (string-match "^srfi-[0-9]+$" (symbol-name mod)))
     (gauche-scheme-srfi-exports
      (string-to-number (substring (symbol-name mod) 5))))
    (t
-    (let ((cached (assq mod gauche-cache-module-exports)))
-      ;; remove stale caches
-      (when (and cached
-                 (stringp (nth 1 cached))
-                 (ignore-errors
-                   (let ((mtime (nth 5 (file-attributes (nth 1 cached))))
-                         (ptime (nth 2 cached)))
-		     (not (or (equal mtime ptime)
-			      (time-less-p mtime ptime))))))
-        (setq gauche-cache-module-exports
-              (assq-delete-all mod gauche-cache-module-exports))
-        (setq cached nil))
+    (let* ((file (gauche-current-module-to-file mod))
+           (cached (gauche-cache-find-by-file file 'gauche-cache-module-exports)))
       (if cached
           (nth 3 cached)
         ;; (re)compute module exports
-	(let ((res (gauche-parse-module-exports mod)))
+	(let ((res (gauche-parse-file-exports file)))
 	  (when res
-	    (when (and gauche-complete-cache-p (nth 0 res))
-	      (push (list mod
-			  (nth 0 res)
-			  (nth 5 (file-attributes (nth 0 res)))
-			  (nth 1 res))
-		    gauche-cache-module-exports))
-	    (nth 1 res))))))))
+            (push (list file mod (gauche-file-mtime file) res)
+                  gauche-cache-module-exports))
+          res))))))
+
+(defun gauche-module-global-definitions (mod)
+  (let* ((file (gauche-current-module-to-file mod))
+         (cached (gauche-cache-find-by-file file 'gauche-cache-file-globals)))
+    (if cached
+        (nth 3 cached)
+      ;; (re)compute module exports
+      (let ((res (gauche-parse-file-globals file)))
+        (when res
+          (push (list file
+                      mod
+                      (gauche-file-mtime file)
+                      res)
+                gauche-cache-file-globals))
+        res))))
+
+(defun gauche-cache-find-by-file (file cache-var)
+  (let* ((predicate (lambda (item) 
+                      (equal (nth 0 item) file)))
+         (cached (find-if predicate (symbol-value cache-var))))
+    (when (and cached
+               (stringp (nth 0 cached))
+               (ignore-errors
+                 (let ((mtime (gauche-file-mtime (nth 0 cached)))
+                       (ctime (nth 2 cached)))
+                   (not (or (equal mtime ctime)
+                            (time-less-p mtime ctime))))))
+      (set cache-var (delete-if predicate (symbol-value cache-var)))
+      (setq cached nil))
+    cached))
+
+(defun gauche-file-mtime (file)
+  (nth 5 (file-attributes file)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; For cygwin path 
@@ -1926,6 +2100,142 @@ d:/home == /cygdrive/d/home
        (gauche-elisp-to-scheme-string x))
      obj))))
 
+(defun gauche-load-file (file)
+  (gauche-backend-eval (format "(load \"%s\")" file)))
+
+
+;;
+;; Backend
+;;
+
+(defvar gauche-backend-lock-process nil)
+(make-variable-buffer-local 'gauche-backend-lock-process)
+
+(defun gauche-backend-kill ()
+  (kill-process (gauche-backend-check-process)))
+
+(defun gauche-backend-eval (sexp-string)
+  ;;TODO unbaranced parenthese must be error before send.
+  (let* ((proc (gauche-backend-check-process))
+         (hash (concat (md5 sexp-string) " "))
+         (eval-form  (format 
+                      "(guard (e (else (print \"%s\" (slot-ref e 'message)))) %s)\n"
+                      hash sexp-string))
+         result start end)
+    (with-current-buffer (process-buffer proc)
+      (gauche-backend-wait-locking)
+      (setq start (point-max))
+      (setq gauche-backend-lock-process t)
+      (unwind-protect
+          (progn
+            (process-send-string proc eval-form)
+            (let ((inhibit-quit t))
+              ;; wait output from command
+              (while (= start (point-max))
+                (gauche-backend-wait proc))
+              ;; wait return prompt from process.
+              (while (not (gauche-backend-prompt-match))
+                (gauche-backend-wait proc))
+              ;;remove trailing newline
+              (setq end (1- (match-beginning 0))))
+            (unless end
+              (signal 'quit nil)))
+        (setq gauche-backend-lock-process nil))
+      (setq result (buffer-substring start end))
+      (if (string-match (concat "^" hash "\\(.*\\)") result)
+          (signal 'gauche-backend-error (list (match-string 1 result)))
+        result))))
+
+;;TODO backend error must be multiple???
+;; dynamically put error properties
+(put 'gauche-backend-error 'error-conditions '(gauche-backend-error error))
+(put 'gauche-backend-error 'error-message "Gauche backend error")
+
+(defvar gauche-backend-suppress-discard-input nil)
+
+;; Should use `sleep-for' not `sit-for'.
+;; To indicate following two example, in `sit-for' loop, type a key then `sit-for' means nothing.
+;;
+;; (while t
+;;   (message "%s.%s" (format-time-string "%c") (nth 2 (current-time)))
+;;   (sit-for 0.5))
+
+;; (while t
+;;   (message "%s.%s" (format-time-string "%c") (nth 2 (current-time)))
+;;   (sleep-for 0.5))
+
+(defun gauche-backend-wait-locking ()
+  (while gauche-backend-lock-process
+    (unless gauche-backend-suppress-discard-input
+      (discard-input))
+    (sleep-for 0.5)))
+
+;;TODO need two time C-g
+(defun gauche-backend-wait (proc)
+  (sleep-for 0.5)
+  (unless gauche-backend-suppress-discard-input
+    (discard-input))
+  (when quit-flag
+    (kill-process proc)
+    (setq inhibit-quit nil)
+    (signal 'quit nil)))
+
+(defvar gauche-backend-prompt-regexp "^gosh>[ \t]*\\'")
+(defconst gauche-backend-buffer-format " *Gauche-mode<%s>* ")
+(defvar gauche-backend-process-alist nil)
+
+(defun gauche-backend-prompt-match ()
+  (save-excursion
+    (goto-char (point-max))
+    (forward-line 0)
+    (looking-at gauche-backend-prompt-regexp)))
+
+(defun gauche-backend-check-process ()
+  (let* ((command gauche-default-command-internal)
+         proc)
+    (if (and (setq proc (cdr (assoc command gauche-backend-process-alist)))
+             (eq (process-status proc) 'run))
+        proc
+      ;;TODO switch by executable
+      (let* ((buffer (gauche-backend-buffer command)))
+        (setq proc (start-process "Gauche backend" buffer command))
+        (gauche-set-alist 'gauche-backend-process-alist command proc)
+        (sleep-for 1) ;; wait for first prompt
+        proc))))
+
+(defun gauche-backend-buffer (command)
+  (let ((buffer (get-buffer-create (format gauche-backend-buffer-format command))))
+    (with-current-buffer buffer
+      (kill-all-local-variables)
+      (erase-buffer))
+    buffer))
+
+(defun gauche-backend-chdir (new-dir)
+  (gauche-backend-eval (format "(sys-chdir \"%s\")" (expand-file-name new-dir))))
+
+(defvar gauche-backend-temp-file nil)
+(make-variable-buffer-local 'gauche-backend-temp-file)
+
+;;TODO detect changing GAUCHE_LOAD_PATH??
+(defun gauche-backend-switch-context (buffer directory)
+  (condition-case err
+      (let* ((gauche-backend-suppress-discard-input t)
+             file)
+        (with-current-buffer buffer
+          (if (and buffer-file-name
+                   (not (buffer-modified-p buffer)))
+              (setq file buffer-file-name)
+            (unless gauche-backend-temp-file
+              (setq gauche-backend-temp-file 
+                    (make-temp-file "gauche-mode")))
+            (setq file gauche-backend-temp-file)
+            (let ((coding-system-for-write buffer-file-coding-system))
+              (write-region (point-min) (point-max) file nil 'no-msg))))
+        (gauche-backend-eval (format "(sys-chdir \"%s\")" directory))
+        (gauche-backend-eval (format "(load \"%s\")" file))
+        t)
+    (error nil)))
+
 
 
 (defadvice scheme-send-last-sexp
@@ -1970,22 +2280,9 @@ d:/home == /cygdrive/d/home
        (symbol-name (car c)))))
    (gauche-parse-current-imports)))
 
-(when (require 'auto-complete-config nil t)
-
-  (ac-config-default)
-
-  (ac-define-source gauche-symbols
-    '((candidates . gauche-ac-candidates)
-      (symbol . "f")
-      (prefix . "(\\(\\(?:\\sw\\|\\s_\\)+\\)")
-      (cache)))
-
-  (add-hook 'gauche-mode-hook 'gauche-ac-initialize))
-
 ;; TODO
 ;; when buffer starts with #!/usr/local/gauche-current/bin/gosh
 ;; when buffer is /usr/local/gauche-current/share/lib/* filename
-(defvar gauche-buffer-executable nil)
 
 (defvar gauche-current-executable nil)
 (make-variable-buffer-local 'gauche-current-executable)
@@ -1998,13 +2295,38 @@ d:/home == /cygdrive/d/home
                   (when (looking-at auto-mode-interpreter-regexp)
                     (let ((command (match-string-no-properties 2)))
                       (match-string-no-properties 2))))
-            gauche-default-command))))
+                (and buffer-file-name
+                     (gauche-guessed-executable buffer-file-name))
+                gauche-default-command-internal))))
+
+(defun gauche-guessed-executable (file)
+  (catch 'found
+    (mapc
+     (lambda (item)
+       (mapc
+        (lambda (path)
+          (when (string-match (concat "^" (regexp-quote path)) file)
+            (throw 'found (nth 0 item))))
+        (nth 3 item)))
+     gauche-command-alist)
+    gauche-default-command-internal))
+
+
+
+(defvar gauche-buffer-change-time nil)
+(make-variable-buffer-local 'gauche-buffer-change-time)
+
+(defun gauche-after-change-function (start end old-len)
+  ;;check executable
+  (when (< end 255)
+    (setq gauche-current-executable nil))
+  (setq gauche-buffer-change-time (float-time)))
 
 
 
 (require 'info-look)
 
-(defvar gauche-info-appendixes
+(defconst gauche-info-appendixes-ja
   '(
     ("(gauche-refj.info)Index - 手続きと構文索引" nil 
      "^[ \t]+-- [^:]+:[ \t]*" nil)
@@ -2013,17 +2335,24 @@ d:/home == /cygdrive/d/home
     ("(gauche-refj.info)Index - クラス索引"      nil
      "^[ \t]+-- [^:]+:[ \t]*" nil)
     ("(gauche-refj.info)Index - 変数索引"        nil
-     "^[ \t]+-- [^:]+:[ \t]*" nil))
-  ;; '(("(gauche-refe.info)Function and Syntax Index" nil 
-  ;;    "^[ \t]+-- [^:]+:[ \t]*" nil)
-  ;;   ("(gauche-refe.info)Module Index"   nil
-  ;;    "^[ \t]+-- [^:]+:[ \t]*" nil)
-  ;;   ("(gauche-refe.info)Class Index"      nil
-  ;;    "^[ \t]+-- [^:]+:[ \t]*" nil)
-  ;;   ("(gauche-refe.info)Variable Index"        nil
-  ;;    "^[ \t]+-- [^:]+:[ \t]*" nil)
-  ;;   )
-  )
+     "^[ \t]+-- [^:]+:[ \t]*" nil)))
+
+(defconst gauche-info-appendixes-en
+  '(("(gauche-refe.info)Function and Syntax Index" nil 
+     "^[ \t]+-- [^:]+:[ \t]*" nil)
+    ("(gauche-refe.info)Module Index"   nil
+     "^[ \t]+-- [^:]+:[ \t]*" nil)
+    ("(gauche-refe.info)Class Index"      nil
+     "^[ \t]+-- [^:]+:[ \t]*" nil)
+    ("(gauche-refe.info)Variable Index"        nil
+     "^[ \t]+-- [^:]+:[ \t]*" nil)
+    ))
+
+(defvar gauche-info-appendixes
+  (if (and current-language-environment
+           (string= current-language-environment "Japanese"))
+       gauche-info-appendixes-ja
+    gauche-info-appendixes-en))
 
 (info-lookup-add-help
  ;; For
@@ -2036,10 +2365,6 @@ d:/home == /cygdrive/d/home
  :doc-spec `(,@gauche-info-appendixes)
  :parse-rule  nil
  :other-modes nil)
-
-
-
-(gauche-default-initialize)
 
 
 

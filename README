@@ -20,5 +20,5 @@ Distributed under the term of GPLv3.
 
 Note
 ----
-This program extend scheme-complete.el and fix some problem that happen in gauche.
-
+scheme-complete.el is fixed some problem that happen in gauche.
+That have capable compatibility, so replace the existing one.

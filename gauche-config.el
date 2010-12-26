@@ -96,6 +96,20 @@
 
 
 
+(when (require 'auto-complete-config nil t)
+
+  (ac-config-default)
+
+  (ac-define-source gauche-symbols
+    '((candidates . gauche-ac-candidates)
+      (symbol . "f")
+      (prefix . "(\\(\\(?:\\sw\\|\\s_\\)+\\)")
+      (cache)))
+
+  (add-hook 'gauche-mode-hook 'gauche-ac-initialize))
+
+
+
 (add-to-list 'interpreter-mode-alist '("gosh" . gauche-mode))
 
 (font-lock-add-keywords
@@ -105,6 +119,11 @@
 ;;TODO this is outof config user .emacs
 (add-to-list 'auto-mode-alist 
              '("\\.scm\\(?:\\.[0-9]+\\)?$" . gauche-mode))
+
+
+
+
+(gauche-initialize)
 
 
 
