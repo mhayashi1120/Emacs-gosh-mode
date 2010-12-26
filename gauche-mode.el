@@ -33,7 +33,9 @@
 (defvar gauche-command-alist nil)
 
 (defun gauche-register-command (command)
-  (let* ((full (executable-find command)))
+  (let* ((full (gauche-check-command command)))
+    (unless full
+      (error "Unable recognize as gosh command"))
     (or (assoc full gauche-command-alist)
         (let* ((ver (let ((ver (gauche-call-command-to-string full full "-V")))
                       (when (string-match "version[ \t]+\\([0-9][0-9.]+\\)" ver)
@@ -54,6 +56,11 @@
 (defun gauche-initialize ()
   (gauche-default-initialize)
   (gauche-initialize-stickey-mode))
+
+(defun gauche-check-command (command)
+  (let ((full (executable-find command)))
+    (when (and full (string-match "/gosh\\(\\.exe\\)?$" full))
+      full)))
 
 (defun gauche-default-initialize (&optional default-command)
   (when default-command
@@ -99,8 +106,7 @@
           (gauche-scheme-find-file-in-path
            file
            ;;TODO current-executable and switch load-path
-	   (gauche-load-path)
-           )))
+	   (gauche-load-path))))
     (when dir
       (concat dir "/" file))))
 
@@ -287,12 +293,9 @@
           (when (looking-at "(with-module[ \t\n]+\\([^ \t\n()]+\\)")
             (throw 'return (match-string-no-properties 1)))
           (gauche-beginning-of-list))
-        (goto-char (point-min))
-        (when (re-search-forward "(select-module[ \t\n]+\\([^ \t\n()]+\\)" nil t)
+        (when (re-search-backward "^[ \t]*(select-module[ \t\n]+\\([^ \t\n()]+\\)" nil t)
           (throw 'return (match-string-no-properties 1)))
-        (when (re-search-forward "(define-module[ \t\n]+\\([^ \t\n()]+\\)" nil t)
-          (throw 'return (match-string-no-properties 1)))
-        nil))))
+        "user"))))
 
 
 
@@ -389,11 +392,14 @@
       (force-mode-line-update))))
 
 (defun gauche-sticky-validate-update ()
-  (let ((valid (gauche-backend-switch-context (current-buffer) default-directory)))
-    (setq gauche-sticky-modeline-validate
-          (if valid
-              '(:propertize "OK" face gauche-modeline-normal-face)
-            '(:propertize "NG" face gauche-modeline-error-face))))
+  (condition-case err
+      (progn
+        (gauche-backend-switch-context (current-buffer) default-directory)
+        (setq gauche-sticky-modeline-validate
+              '(:propertize "OK" face gauche-modeline-normal-face)))
+    (error 
+     (setq gauche-sticky-modeline-validate
+           `(:propertize "NG" face gauche-modeline-error-face))))
   (setq gauche-sticky-validated-time (float-time)))
 
 (defun gauche-sticky-which-module-update ()
@@ -495,7 +501,8 @@
     (define-key map "\C-c\M-?" 'gauche-show-info)
     (define-key map "\C-c\C-r" 'gauche-refactor-rename-symbol)
     (define-key map "\C-c\er" 'gauche-refactor-rename-symbol-afaiui)
-
+    (define-key map "\C-x\C-e" 'gauche-send-last-sexp)
+    
     (setq gauche-mode-map map)))
 
 
@@ -2122,19 +2129,27 @@ d:/home == /cygdrive/d/home
 
 (defun gauche-backend-eval (sexp-string)
   ;;TODO unbaranced parenthese must be error before send.
-  (let* ((proc (gauche-backend-check-process))
-         (hash (concat (md5 sexp-string) " "))
+  ;;FIXME stdout string is interpreted as result object..
+  (let* ((hash (concat (md5 sexp-string) " "))
          (eval-form  (format 
                       "(guard (e (else (print \"%s\" (slot-ref e 'message)))) %s)\n"
                       hash sexp-string))
-         result start end)
+         result)
+    (setq result (gauche-backend-eval-raw eval-form))
+    (if (string-match (concat "^" hash "\\(.*\\)") result)
+        (signal 'gauche-backend-error (list (match-string 1 result)))
+      result)))
+
+(defun gauche-backend-eval-raw (sexp-string)
+  (let* ((proc (gauche-backend-check-process))
+         start end)
     (with-current-buffer (process-buffer proc)
       (gauche-backend-wait-locking)
       (setq start (point-max))
       (setq gauche-backend-lock-process t)
       (unwind-protect
           (progn
-            (process-send-string proc eval-form)
+            (process-send-string proc sexp-string)
             (let ((inhibit-quit t))
               ;; wait output from command
               (while (= start (point-max))
@@ -2147,10 +2162,7 @@ d:/home == /cygdrive/d/home
             (unless end
               (signal 'quit nil)))
         (setq gauche-backend-lock-process nil))
-      (setq result (buffer-substring start end))
-      (if (string-match (concat "^" hash "\\(.*\\)") result)
-          (signal 'gauche-backend-error (list (match-string 1 result)))
-        result))))
+      (buffer-substring start end))))
 
 ;;TODO backend error must be multiple???
 ;; dynamically put error properties
@@ -2174,11 +2186,10 @@ d:/home == /cygdrive/d/home
   (while gauche-backend-lock-process
     (unless gauche-backend-suppress-discard-input
       (discard-input))
-    (sleep-for 0.5)))
+    (sleep-for 0.1)))
 
-;;TODO need two time C-g
 (defun gauche-backend-wait (proc)
-  (sleep-for 0.5)
+  (sleep-for 0.1)
   (unless gauche-backend-suppress-discard-input
     (discard-input))
   (when quit-flag
@@ -2197,12 +2208,12 @@ d:/home == /cygdrive/d/home
     (looking-at gauche-backend-prompt-regexp)))
 
 (defun gauche-backend-check-process ()
+  ;;TODO switch by executable
   (let* ((command gauche-default-command-internal)
          proc)
     (if (and (setq proc (cdr (assoc command gauche-backend-process-alist)))
              (eq (process-status proc) 'run))
         proc
-      ;;TODO switch by executable
       (let* ((buffer (gauche-backend-buffer command)))
         (setq proc (start-process "Gauche backend" buffer command))
         (gauche-set-alist 'gauche-backend-process-alist command proc)
@@ -2224,55 +2235,44 @@ d:/home == /cygdrive/d/home
 
 ;;TODO detect changing GAUCHE_LOAD_PATH??
 (defun gauche-backend-switch-context (buffer directory)
-  (condition-case err
-      (let* ((gauche-backend-suppress-discard-input t)
-             file)
-        (with-current-buffer buffer
-          (if (and buffer-file-name
-                   (not (buffer-modified-p buffer)))
-              (setq file buffer-file-name)
-            (unless gauche-backend-temp-file
-              (setq gauche-backend-temp-file 
-                    (make-temp-file "gauche-mode")))
-            (setq file gauche-backend-temp-file)
-            (let ((coding-system-for-write buffer-file-coding-system))
-              (write-region (point-min) (point-max) file nil 'no-msg))))
-        (gauche-backend-eval (format "(sys-chdir \"%s\")" directory))
-        (gauche-backend-eval (format "(load \"%s\")" file))
-        t)
-    (error nil)))
+  (let* ((gauche-backend-suppress-discard-input t)
+         file)
+    (with-current-buffer buffer
+      (if (and buffer-file-name
+               (not (buffer-modified-p buffer)))
+          (setq file buffer-file-name)
+        (unless gauche-backend-temp-file
+          (setq gauche-backend-temp-file 
+                (make-temp-file "gauche-mode")))
+        (setq file gauche-backend-temp-file)
+        (let ((coding-system-for-write buffer-file-coding-system))
+          (write-region (point-min) (point-max) file nil 'no-msg))))
+    (gauche-backend-eval (format "(sys-chdir \"%s\")" directory))
+    (gauche-backend-eval (format "(load \"%s\")" file))
+    t))
+
+(defun gauche-backend-switch-module (module)
+  ;; See info 4.11.7
+  (when (member module '("scheme" "null"))
+    (error "Cannot switch %s" module))
+  (gauche-backend-eval-raw (format "(select-module %s)\n" module)))
 
 
 
-(defadvice scheme-send-last-sexp
-  (around gauche-send-last-sexp-like-elisp () activate)
+(defun gauche-send-last-sexp ()
+  "Send the previous sexp to the inferior Scheme process."
   (interactive)
-  (let ((proc (scheme-get-process))
-	buffer results start end)
-    (if (null proc)
-	(save-window-excursion
-	  (scheme-proc)
-	  ;; FIXME cannot handle one time. exit...
-	  (message "Starting process... Try again"))
-      (setq buffer (process-buffer proc))
-      (when (buffer-live-p buffer)
-	(with-current-buffer buffer
-	  (setq start (point-max))))
-      (setq ad-return-value ad-do-it)
-      (when (buffer-live-p buffer)
-	(with-current-buffer buffer
-	  (while (= start (point-max))
-	    (sit-for 0.5))
-	  ;; wait return prompt from process.
-	  (while (save-excursion
-		   (goto-char (point-max))
-		   (forward-line 0)
-		   (prog1
-		       (not (looking-at (concat comint-prompt-regexp "\\'")))
-		     (setq end (1- (match-beginning 0)))))
-	    (sit-for 0.5))
-	  (setq results (buffer-substring start end))))
-      (message "%s" results))))
+  (gauche-send-region (save-excursion (backward-sexp) (point)) (point)))
+
+(defun gauche-send-region (start end)
+  (let ((module (gauche-parse-current-module))
+        result form)
+    (gauche-backend-switch-context (current-buffer) 
+                                   (expand-file-name default-directory))
+    (setq form (format "(with-module %s %s)" 
+                       module (buffer-substring start end)))
+    (setq result (gauche-backend-eval form))
+    (message "%s" result)))
 
 (defun gauche-ac-initialize ()
   (add-to-list 'ac-sources 'ac-source-gauche-symbols)
