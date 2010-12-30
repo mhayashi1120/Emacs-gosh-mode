@@ -15,7 +15,7 @@ Distributed under the term of GPLv3.
 .emacs Sample
 -------------
 
-(require 'gauche-config)
+(require 'gosh-config)
 (setq scheme-program-name "gosh -i")
 
 Note

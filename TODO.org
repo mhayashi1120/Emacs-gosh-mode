@@ -1,17 +1,21 @@
-* gather and cache all information
-* gather method document? comment?
-* add ChangeLog 
-* Name change
- gauche-ext?
- gauche-mod?
- gauche-edit?
- gauche+x?
- gauche+ext
+* high priority
+** (use :prefix something)
+** parse extend
+when parsing, parse base modules and resolve reference like alias substitution
+(define twitter-follow twitter-friendship-create/sxml)
+** parse current globals
 
-* Renew
-** can enable change binary
+** create external gosh script
+delegate parsing source code
+
+* low priority
+** gather method document? comment?
+** add ChangeLog 
+
+** Renew
+*** can enable change binary
 /usr/local/bin/gosh
-/usr/local/gauche-current/bin/gosh
+/usr/local/gosh-current/bin/gosh
 
 if executable script
 if in library buffer.
@@ -27,6 +31,16 @@ In other word, execute emacs and install gauche is not supported.
 
 
 
-* eldoc
+** eldoc
 (define hoge fuga)
 means recursive fuga
+** send EnvironmentVariable when evaluate 
+** backend-eval error must be multiple???
+dynamically put the error properties
+
+* refactor
+** map currentenv
+* BUG
+** eldoc display odd
+   i don't know exactly why but didn't run eldoc-print* function 
+ see gosh-backend-switch-context after-change-function

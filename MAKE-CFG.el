@@ -4,9 +4,9 @@
 
 ;;; Code:
 
-(setq load-path (cons "~/.emacs.d/util" load-path))
+;; (setq load-path (cons "~/.emacs.d/util" load-path))
 
-(setq INSTALL-DIR (expand-file-name "../share/site-lisp/gauche-mode" (invocation-directory)))
+(setq INSTALL-DIR (expand-file-name "../share/site-lisp/gosh-mode" (invocation-directory)))
 
 
 

@@ -1,4 +1,4 @@
-;;; gauche-mode-test.el --- Gauche mod Test
+;;; gosh-mode-test.el --- Test for gosh-mode
 
 ;;; Commentary:
 ;; 
@@ -7,14 +7,14 @@
 (require 'el-mock)
 (require 'el-expectations)
 
-(defmacro gauche-mode-test-with (code &rest forms)
+(defmacro gosh-mode-test-with (code &rest forms)
   `(with-temp-buffer
      (insert ,code)
      ,@forms))
 
-(put 'gauche-mode-test-with 'lisp-indent-function 1)
+(put 'gosh-mode-test-with 'lisp-indent-function 1)
 
-(defconst gauche-mode-test-code1
+(defconst gosh-mode-test-code1
   "
 \(define-module my.test.module
   (export 
@@ -33,22 +33,31 @@
   (expectations 
     (desc "stub setup/teardown")
     (expect '(hoge  hoge-rest hoge-opt hoge-key hoge-key-opt)
-      (gauche-mode-test-with  gauche-mode-test-code1
-	(gauche-current-exports)))
+      (gosh-mode-test-with  gosh-mode-test-code1
+	(gosh-parse-current-exports)))
     (expect '((hoge-key-opt (lambda (:optional arg1 (arg2 \#f) :key (key1 \#f) key2)))
 	      (hoge-key (lambda (:key (key1 \#f) key2)))
 	      (hoge-opt (lambda (:optional arg1 (arg2 \#f))))
 	      (hoge-rest (lambda args))
 	      (hoge (lambda (args))))
-      (gauche-mode-test-with  gauche-mode-test-code1
-	(gauche-scheme-current-globals)))
+      (gosh-mode-test-with  gosh-mode-test-code1
+	(gosh-parse-current-globals)))
 
     (expect "(hoge (opts ()))"
-	    (scm-object-to-string '(hoge (opts (quote ())))))
+	    (gosh-eldoc--object->string '(hoge (opts (quote ())))))
+
+    (when (memq system-type '(windowsnt))
+      (expect "c:/cygwin/usr/local/ " (gosh-cygpath->emacs-path "/usr/local"))
+      (expect "usr/local/ " (gosh-cygpath->emacs-path "usr/local"))
+      (expect "d:/home " (gosh-cygpath->emacs-path "/cygdrive/d/home"))
+
+      (expect "/usr" (gosh-emacs-path->cygpath "c:/cygwin/usr"))
+      (expect "/cygdrive/c/usr" (gosh-emacs-path->cygpath "c:/usr"))
+      (expect "usr" (gosh-emacs-path->cygpath "usr")))
   ))
 
 (expectations-execute)
 
-(provide 'gauche-mode-test)
+(provide 'gosh-mode-test)
 
-;;; gauche-mode-test.el ends here
+;;; gosh-mode-test.el ends here

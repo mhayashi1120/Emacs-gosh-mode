@@ -1,6 +1,6 @@
 # -*- mode: makefile; -*-
 #
-# Makefile for gauche-mode
+# Makefile for gosh-mode
 #
 
 TAR	= tar
@@ -8,7 +8,7 @@ RM	= /bin/rm -f
 
 EMACS	= emacs
 
-FLAGS   = -batch -q -no-site-file -l gauche-mode-make.el
+FLAGS   = -batch -q -no-site-file -l gosh-mode-make.el
 
 # For windows emacs
 CHECKFLAGS = $(FLAGS)
@@ -16,9 +16,11 @@ CHECKFLAGS = $(FLAGS)
 VERSION = 0.1.0
 
 RELEASE_FILES = \
-	gauche-mode.el gauche-config.el gauche-const.el gauche-refactor.el \
+	gosh-mode.el gosh-config.el gosh-const.el \
+	gosh-mode-test.el gosh-mode-make.el \
 	refactor.el \
-	Makefile
+	MAKE-CFG.el Makefile \
+	README
 
 ARCHIVE_DIR_PREFIX = ..
 
@@ -27,30 +29,30 @@ GOMI	= *.elc *~
 default: elc
 
 check: clean
-	$(EMACS) $(CHECKFLAGS) -f check-gauche-mode $(CONFIG)
+	$(EMACS) $(CHECKFLAGS) -f check-gosh-mode $(CONFIG)
 
 elc:
-	$(EMACS) $(FLAGS) -f compile-gauche-mode $(CONFIG)
+	$(EMACS) $(FLAGS) -f compile-gosh-mode $(CONFIG)
 
 what-where:
-	$(EMACS) $(FLAGS) -f what-where-gauche-mode $(CONFIG)
+	$(EMACS) $(FLAGS) -f what-where-gosh-mode $(CONFIG)
 
 install: elc
-	$(EMACS) $(FLAGS) -f install-gauche-mode $(CONFIG)
+	$(EMACS) $(FLAGS) -f install-gosh-mode $(CONFIG)
 
 clean:
 	-$(RM) $(GOMI)
 
 release: archive
-	$(RM) -f $(ARCHIVE_DIR_PREFIX)/gauche-mode-$(VERSION).tar.bz2 $(ARCHIVE_DIR_PREFIX)/gauche-mode-$(VERSION).tar.gz
-	mv /tmp/gauche-mode-$(VERSION).tar.bz2 /tmp/gauche-mode-$(VERSION).tar.gz $(ARCHIVE_DIR_PREFIX)/
+	$(RM) -f $(ARCHIVE_DIR_PREFIX)/gosh-mode-$(VERSION).tar.bz2 $(ARCHIVE_DIR_PREFIX)/gosh-mode-$(VERSION).tar.gz
+	mv /tmp/gosh-mode-$(VERSION).tar.bz2 /tmp/gosh-mode-$(VERSION).tar.gz $(ARCHIVE_DIR_PREFIX)/
 
 archive:
-	rm -rf /tmp/gahche-mod-$(VERSION)
-	mkdir /tmp/gahche-mod-$(VERSION)
-	cp -p $(RELEASE_FILES) /tmp/gahche-mod-$(VERSION)
-	chmod 644 /tmp/gahche-mod-$(VERSION)/*
-	cd /tmp ; tar cjf gahche-mod-$(VERSION).tar.bz2 gahche-mod-$(VERSION)
-	cd /tmp ; tar czf gahche-mod-$(VERSION).tar.gz gahche-mod-$(VERSION)
+	rm -rf /tmp/gosh-mode-$(VERSION)
+	mkdir /tmp/gosh-mode-$(VERSION)
+	cp -p $(RELEASE_FILES) /tmp/gosh-mode-$(VERSION)
+	chmod 644 /tmp/gosh-mode-$(VERSION)/*
+	cd /tmp ; tar cjf gosh-mode-$(VERSION).tar.bz2 gosh-mode-$(VERSION)
+	cd /tmp ; tar czf gosh-mode-$(VERSION).tar.gz gosh-mode-$(VERSION)
 
 

@@ -1,32 +1,42 @@
-;;; gauche-config.el --- Gauche programming tool first load interface.
+;;; gosh-config.el --- Gauche programming tool first load interface.
+
+;; Author: Hayashi Masahiro <mhayashi1120@gmail.com>
+;; Keywords: lisp gauche scheme config
+;; URL: http://github.com/mhayashi1120/Emacs-gauche-ext/raw/master/gosh-config.el
+;; Emacs: GNU Emacs 22 or later
+
+;; This program is free software; you can redistribute it and/or
+;; modify it under the terms of the GNU General Public License as
+;; published by the Free Software Foundation; either version 3, or (at
+;; your option) any later version.
+
+;; This program is distributed in the hope that it will be useful, but
+;; WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+;; General Public License for more details.
+
+;; You should have received a copy of the GNU General Public License
+;; along with GNU Emacs; see the file COPYING.  If not, write to the
+;; Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+;; Boston, MA 02110-1301, USA.
 
 
 ;;; Commentary:
 ;; 
-
-;;TODO
-;; (setq scheme-program-name "gosh -i")
-;; one command add exports
-
 
 ;;; Code:
 
 (eval-when-compile
   (require 'cl))
 
-(autoload 'scheme-mode "cmuscheme" "Major mode for Scheme." t)
-(autoload 'run-scheme "cmuscheme" "Run an inferior Scheme process." t)
+(require 'gosh-mode)
+
+;; no error exists or not
+(require 'auto-complete-config nil t)
 
 (when (or (not (boundp 'scheme-program-name)) 
 	  (and scheme-program-name (not (string-match "gosh" scheme-program-name))))
-  (setq scheme-program-name "gosh -i"))
-
-;;TODO reconsider require or not.
-;; (require 'quack nil t)
-
-(require 'gauche-const)
-(require 'gauche-refactor)
-(require 'gauche-mode)
+  (setq scheme-program-name (format "%s -i" gosh-default-command)))
 
 
 
@@ -96,37 +106,35 @@
 
 
 
-(when (require 'auto-complete-config nil t)
+(add-to-list 'interpreter-mode-alist '("gosh" . gosh-mode))
 
-  (ac-config-default)
+;; font lock user customizable
+(font-lock-add-keywords 
+ 'gosh-mode
+ `(("\\`#.+" 0 font-lock-comment-delimiter-face)
+   (gosh-font-lock-keywords 1 font-lock-keyword-face)
+   (gosh-font-lock-basic-syntax 
+    (1 font-lock-keyword-face)
+    (2 font-lock-constant-face nil t))))
 
-  (ac-define-source gauche-symbols
-    '((candidates . gauche-ac-candidates)
-      (symbol . "f")
-      (prefix . "(\\(\\(?:\\sw\\|\\s_\\)+\\)")
-      (cache)))
-
-  (add-hook 'gauche-mode-hook 'gauche-ac-initialize))
-
-
-
-(add-to-list 'interpreter-mode-alist '("gosh" . gauche-mode))
-
-(font-lock-add-keywords
- 'gauche-mode
- '(("\\`#.+" 0 font-lock-comment-delimiter-face)))
-
-;;TODO this is outof config user .emacs
 (add-to-list 'auto-mode-alist 
-             '("\\.scm\\(?:\\.[0-9]+\\)?$" . gauche-mode))
+             '("\\.scm\\(?:\\.[0-9]+\\)?$" . gosh-mode))
 
+(add-hook 'gosh-mode-hook 
+            (lambda () 
+              (gosh-sticky-mode 1)
+              (turn-on-eldoc-mode)))
+
+(add-hook 'gosh-inferior-mode-hook
+            (lambda () 
+              (turn-on-eldoc-mode)))
 
 
 
-(gauche-initialize)
+(gosh-initialize)
 
 
 
-(provide 'gauche-config)
+(provide 'gosh-config)
 
-;;; gauche-config.el ends here
+;;; gosh-config.el ends here

@@ -1,4 +1,4 @@
-;;; gauche-dev.el --- Development tools for gauche-mode.el
+;;; gosh-dev.el --- Development tools for gosh-mode.el
 
 
 ;;; Commentary:
@@ -6,24 +6,38 @@
 
 ;;; Code:
 
-(defun gauche-dev-parse-texi (texi)
+(defun gosh-dev-parse-texi (texi)
   (with-temp-buffer
     (insert-file-contents texi)
-    (goto-char (point-min))
     (let (ret)
-      (while (re-search-forward "^@\\(?:defunx?\\|defmacx?\\|defspecx?\\) \\(.*\\)" nil t)
-        (let* ((def (gauche-dev-split-define (match-string 1)))
+      (goto-char (point-min))
+      (while (re-search-forward "^@\\(defunx?\\|defmacx?\\|defspecx?\\) \\(.*\\)" nil t)
+        (let* ((type (match-string 1))
+               (def (gosh-dev-split-define (match-string 2)))
                (name (intern (car def)))
-               (args (gauche-dev-intern-string-args (cdr def))))
+               (args (gosh-dev-intern-string-args (cdr def))))
           (cond
            ((eq name '{))
            (t
             (setq ret (cons (cons name 
-                                  (list (list 'lambda (gauche-dev-create-parsing-args args))))
+                                  (list (list (if (string-match "defmacx?\\|defspecx?" type) 'syntax 'lambda)
+                                              (gosh-dev-create-parsing-args args))))
+                            ret))))))
+      (goto-char (point-min))
+      (while (re-search-forward "^@\\(?:deffnx?\\) {\\([^}]+\\)} \\(.*\\)" nil t)
+        (let* ((indicate (match-string 1))
+               (def (gosh-dev-split-define (match-string 2)))
+               (name (intern (car def)))
+               (args (gosh-dev-intern-string-args (cdr def))))
+          (cond
+           ((eq name '{))
+           (t
+            (setq ret (cons (cons name 
+                                  (list (list 'lambda (gosh-dev-create-parsing-args args))))
                             ret))))))
       (nreverse ret))))
 
-(defun gauche-dev-split-define (string)
+(defun gosh-dev-split-define (string)
   (let (arg args)
     (with-temp-buffer
       (insert string)
@@ -31,15 +45,15 @@
       (condition-case err
           (while t
             (setq a (read (current-buffer)))
-            (setq args (cons (gauche-dev-sexp-to-string a) args)))
+            (setq args (cons (gosh-dev-sexp-to-string a) args)))
         (error nil))
       (nreverse args))))
 
-(defun gauche-dev-sexp-to-string (sexp)
+(defun gosh-dev-sexp-to-string (sexp)
   (let ((tmp (prin1-to-string sexp)))
-    (gauche-dev-replace-string tmp "\\?" "?")))
+    (gosh-dev-replace-string tmp "\\?" "?")))
 
-(defun gauche-dev-create-parsing-args (args)
+(defun gosh-dev-create-parsing-args (args)
   (let (new-args)
     (while args
       (cond
@@ -54,17 +68,17 @@
       (setq args (cdr args)))
     (nreverse new-args)))
 
-(defun gauche-dev-intern-string-args (args)
+(defun gosh-dev-intern-string-args (args)
   (mapcar 
    (lambda (arg)
-     (setq arg (gauche-dev-replace-string arg "@dots{}" "..."))
-     (setq arg (gauche-dev-replace-string arg "@var{optional}" ":optional"))
-     (setq arg (gauche-dev-replace-string arg "@code{=>}" "'=>'"))
-     (setq arg (gauche-dev-replace-macro arg))
+     (setq arg (gosh-dev-replace-string arg "@dots{}" "..."))
+     (setq arg (gosh-dev-replace-string arg "@var{optional}" ":optional"))
+     (setq arg (gosh-dev-replace-string arg "@code{=>}" "'=>'"))
+     (setq arg (gosh-dev-replace-macro arg))
      (intern arg))
    args))
 
-(defun gauche-dev-replace-macro (string)
+(defun gosh-dev-replace-macro (string)
   (let ((str string))
     (while (string-match "@var{\\([^}]*\\)}" str)
       (setq str
@@ -73,7 +87,7 @@
                     (substring str (match-end 0)))))
     str))
 
-(defun gauche-dev-replace-string (string from to)
+(defun gosh-dev-replace-string (string from to)
   (let ((str string)
         (case-fold-search))
     (while (string-match (regexp-quote from) str)
@@ -83,17 +97,17 @@
                     (substring str (match-end 0)))))
     str))
 
-(defun gauche-dev-parse-and-insert (file)
-  (let ((exports (gauche-dev-parse-texi file)))
-    (insert "(defconst *gauche-documented-exports*\n")
+(defun gosh-dev-parse-and-insert (file)
+  (let ((exports (gosh-dev-parse-texi file)))
+    (insert "(defconst *gosh-documented-exports*\n")
     (insert "'(\n")
      (mapc
       (lambda (exp)
         (insert (prin1-to-string exp) "\n"))
-      (append gauche-dev-other-defined exports))
+      (append gosh-dev-other-defined exports))
      (insert "))\n")))
 
-(defconst gauche-dev-other-defined
+(defconst gosh-dev-other-defined
   '(
     (E2BIG integer)
     (EACCES integer)
@@ -276,8 +290,8 @@
 
 
 
-;; (gauche-dev-parse-and-insert "~/src/System/gauche/Gauche-0.9.1/doc/gauche-refe.texi")
+;; (gosh-dev-parse-and-insert "~/src/System/gauche/Gosh-0.9.1/doc/gosh-refe.texi")
 
-(provide 'gauche-dev)
+(provide 'gosh-dev)
 
-;;; gauche-dev.el ends here
+;;; gosh-dev.el ends here

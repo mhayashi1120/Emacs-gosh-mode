@@ -1,4 +1,4 @@
-;;; gauche-mode-make.el --- gauche-mode make lisp
+;;; gosh-mode-make.el --- gosh-mode make lisp
 
 
 ;;; History:
@@ -13,10 +13,9 @@
 
 (setq ALL-MODULES 
       (list
-       "gauche-mode.el"
-       "gauche-config.el"
-       "gauche-const.el"
-       "gauche-refactor.el"
+       "gosh-mode.el"
+       "gosh-config.el"
+       "gosh-const.el"
        "refactor.el"
        ))
 
@@ -30,46 +29,46 @@
 ;; 			     "mw32script.el"
 ;; 			     )))))
 
-(defun make-gauche-mode ()
-  (gauche-mode-make-initialize))
+(defun make-gosh-mode ()
+  (gosh-mode-make-initialize))
 
-(defun compile-gauche-mode ()
-  (gauche-mode-make-initialize)
-  (gauche-mode-make-compile))
+(defun compile-gosh-mode ()
+  (gosh-mode-make-initialize)
+  (gosh-mode-make-compile))
 
-(defun check-gauche-mode ()
-  (gauche-mode-make-initialize)
-  (gauche-mode-make-lint)
-  (gauche-mode-make-compile)
+(defun check-gosh-mode ()
+  (gosh-mode-make-initialize)
+  (gosh-mode-make-lint)
+  (gosh-mode-make-compile)
   ;; see comment in `fsvn-test-excursion' at fsvn-test.el
   (condition-case err
       (progn
-	(gauche-mode-make-test)
+	(gosh-mode-make-test)
 	(kill-emacs))
     (error
      (princ err)
      (kill-emacs 1))))
 
-(defun install-gauche-mode ()
-  (gauche-mode-make-initialize)
-  (gauche-mode-make-install))
+(defun install-gosh-mode ()
+  (gosh-mode-make-initialize)
+  (gosh-mode-make-install))
 
-(defun what-where-gauche-mode ()
-  (gauche-mode-make-initialize)
-  (gauche-mode-make-install t))
+(defun what-where-gosh-mode ()
+  (gosh-mode-make-initialize)
+  (gosh-mode-make-install t))
 
-(defun gauche-mode-make-initialize ()
+(defun gosh-mode-make-initialize ()
   (let ((config (or (car command-line-args-left) "MAKE-CFG")))
     (setq load-path (cons "." load-path))
     (load config)))
 
-(defun gauche-mode-make-compile ()
+(defun gosh-mode-make-compile ()
   (mapc
    (lambda (m)
      (byte-compile-file m))
    ALL-MODULES))
 
-(defun gauche-mode-make-lint ()
+(defun gosh-mode-make-lint ()
   (elint-initialize)
   (mapc
    (lambda (module)
@@ -80,7 +79,7 @@
        (message (replace-regexp-in-string "%" "%%" (buffer-string)))))
    ALL-MODULES))
 
-(defun gauche-mode-make-install (&optional just-print)
+(defun gosh-mode-make-install (&optional just-print)
   (unless (or just-print (file-directory-p INSTALL-DIR))
     (make-directory INSTALL-DIR t))
   (let (src dest elc el)
@@ -104,16 +103,16 @@
 	  (list (cons el dest-el) (cons elc dest-elc)))))
      ALL-MODULES)))
 
-(defun gauche-mode-make-test ()
+(defun gosh-mode-make-test ()
   (mapc
    (lambda (m)
      (load-file m))
    ALL-MODULES)
-  (load-file "gauche-mode-test.el")
+  (load-file "gosh-mode-test.el")
   (princ "\n")
   (princ "-------------------------------------------------------------\n")
   (princ "Test completed\n")
   (princ "-------------------------------------------------------------\n")
   (princ "\n"))
 
-;;; gauche-mode-make.el ends here
+;;; gosh-mode-make.el ends here
