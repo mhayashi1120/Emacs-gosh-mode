@@ -718,7 +718,7 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
 	 (throw 'found x)))
      sexp)
     (let ((last (car (last sexp))))
-      (when (string-match "\\.\\.\\.$" (symbol-name last))
+      (when (and (symbolp last) (string-match "\\.\\.\\.$" (symbol-name last)))
         (throw 'found last)))
     nil))
 
@@ -1559,7 +1559,11 @@ This function come from apel"
             (setq sexp (cons nil nil)))
            ((not (symbolp (car sexp)))
             (setq sexp (cons nil (cdr sexp))))))))
-    (setq count (length (cdr sexp)))
+    (condition-case err
+        (setq count (length (cdr sexp)))
+      ;; cons cell make error but ignore.
+      (error (setq count 0
+                   sexp nil)))
     (when (or (and dangling
                    (memq (char-syntax (char-before (point))) '(?\s ?\>)))
               count-up)
