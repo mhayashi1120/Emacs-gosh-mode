@@ -31,6 +31,7 @@
                (args (gosh-dev-intern-string-args (cdr def))))
           (cond
            ((eq name '{))
+           ((string= indicate "EC Qualifier"))
            (t
             (setq ret (cons (cons name 
                                   (list (list 'lambda (gosh-dev-create-parsing-args args))))
@@ -290,7 +291,7 @@
 
 
 
-;; (gosh-dev-parse-and-insert "~/src/System/gauche/Gosh-0.9.1/doc/gosh-refe.texi")
+;; (gosh-dev-parse-and-insert "~/src/System/gauche/Gauche-0.9.1/doc/gauche-refe.texi")
 
 (provide 'gosh-dev)
 

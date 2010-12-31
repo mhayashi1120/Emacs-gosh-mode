@@ -46,7 +46,7 @@
     (expect "(hoge (opts ()))"
 	    (gosh-eldoc--object->string '(hoge (opts (quote ())))))
 
-    (when (memq system-type '(windowsnt))
+    (when (memq system-type '(windows-nt))
       (expect "c:/cygwin/usr/local/ " (gosh-cygpath->emacs-path "/usr/local"))
       (expect "usr/local/ " (gosh-cygpath->emacs-path "usr/local"))
       (expect "d:/home " (gosh-cygpath->emacs-path "/cygdrive/d/home"))

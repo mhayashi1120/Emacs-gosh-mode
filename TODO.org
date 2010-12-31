@@ -38,6 +38,8 @@ means recursive fuga
 ** backend-eval error must be multiple???
 dynamically put the error properties
 
+** cannot evaluate by C-x C-e if file is invaild
+ this is not acceptable(?) conduct
 * refactor
 ** map currentenv
 * BUG

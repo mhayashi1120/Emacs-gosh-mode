@@ -289,7 +289,7 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
           (t
            (push file third)))))
      (gosh-available-modules))
-    (append first second third)))
+    (remove nil (append first second third))))
 
 (defun gosh-exports-functions (file)
   (gosh-with-find-file file
@@ -368,9 +368,18 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
 (defvar gosh-sticky-mode-update-delay 2
   "Delay must be greater than `gosh-eldoc-rotate-seconds'.")
 
+(defvar gosh-sticky-mode-map nil)
+
+(unless gosh-sticky-mode-map
+  (let ((map (make-sparse-keymap)))
+
+    (define-key map "\C-x\C-e" 'gosh-send-last-sexp)
+
+    (setq gosh-sticky-mode-map map)))
+
 (define-minor-mode gosh-sticky-mode 
   ""
-  nil nil nil
+  nil nil gosh-sticky-mode-map
   (when (timerp gosh-sticky-mode-update-timer)
     (cancel-timer gosh-sticky-mode-update-timer))
   (setq gosh-sticky-mode-update-timer
@@ -450,7 +459,6 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
     (define-key map "\C-c?" 'gosh-show-info)
     (define-key map "\M-R" 'gosh-refactor-rename-symbol)
     (define-key map "\C-c\er" 'gosh-refactor-rename-symbol-afaiui)
-    (define-key map "\C-x\C-e" 'gosh-send-last-sexp)
     
     (setq gosh-mode-map map)))
 
@@ -753,18 +761,19 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
                 (when (gosh-context-string-p)
                   (gosh-beginning-of-string))
                 (gosh-parse-current-env)))
-         (spec1 (and fnsym (gosh-env-lookup env fnsym)))
-         (spec2 (and sym (gosh-env-lookup env sym)))
-         (info1 (and spec1 
-                     (gosh-eldoc--find-and-print-string
+         (spec1 (and fnsym (gosh-env-gather env fnsym t)))
+         (spec2 (and sym (gosh-env-gather env sym t)))
+         (string1 (and spec1 
+                     (gosh-eldoc--find-and-print-strings
                       spec1 env
                       (cons fnpos (nthcdr (1- fnpos) (car fnsym0))))))
-         (info2 (and (> fnpos 0)
+         (string2 (and (> fnpos 0)
                      spec2 
-                     (gosh-eldoc--find-and-print-string
-                      spec2 env nil))))
-    (gosh-eldoc--cache-set (point) 0 (remove nil (list info1 info2)))
-    (or info1 info2)))
+                     (gosh-eldoc--find-and-print-strings
+                      spec2 env nil)))
+         (strings (remove nil (append string1 string2))))
+    (gosh-eldoc--cache-set (point) 0 strings)
+    (car strings)))
 
 (defun gosh-eldoc--cache-set (point index info)
   (aset gosh-eldoc--cached-data 0 point)
@@ -796,6 +805,11 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
      (lambda (x)
        (gosh-eldoc--elisp->scheme-string x))
      obj))))
+
+(defun gosh-eldoc--find-and-print-strings (specs env highlight)
+  (mapcar (lambda (spec)
+            (gosh-eldoc--find-and-print-string spec env highlight))
+          specs))
 
 (defun gosh-eldoc--find-and-print-string (spec env highlight)
   (cond
@@ -836,13 +850,13 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
          (let ((spec (gosh-env-lookup env type)))
            ;; ignore `max-lisp-eval-depth' error
            (or (gosh-eldoc--find-and-print-string spec env highlight)
-               type)))
+               (format "some parameter or alias typed `%s'" type))))
         (t
          (gosh-eldoc--sexp->string type)))
        (if (and (not (nth 3 spec)) (nth 4 spec)) " - " "")
        (or (nth 4 spec) ""))))
    ((and (consp spec) (null (cdr spec)))
-    "Some `parameter' or `alias'")))
+    "some parameter or alias")))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -987,16 +1001,20 @@ This function come from apel"
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Parse buffer
 
-(defun gosh-context-string-p ()
-  (let ((orig (point)))
-    (save-excursion
-      (goto-char (point-min))
-      (let ((parses (parse-partial-sexp (point) orig)))
-        (nth 3 parses)))))
+(defun gosh-context-string-p (&optional point)
+  (save-excursion
+    (let ((parses (parse-partial-sexp (point-min) (or point (point)))))
+      (nth 3 parses))))
 
-;;TODO
-(defun gosh-context-comment-p ()
-  (eq (get-text-property (max (1- (point)) (point-min)) 'face) font-lock-comment-face))
+(defun gosh-context-comment-p (&optional point)
+  (save-excursion
+    (let ((parses (parse-partial-sexp (point-min) (or point (point)))))
+      (nth 4 parses))))
+
+(defun gosh-context-code-p (&optional point)
+  (not
+   (or (gosh-context-comment-p point)
+       (gosh-context-string-p point))))
 
 (defun gosh-beginning-of-sexp ()
   (unless (bobp)
@@ -1203,15 +1221,15 @@ This function come from apel"
       (when (eq ?\( (char-after))
         (save-excursion
           (forward-char 1)
-          (if (and loopp (looking-at "\\(for\\|let\\|with\\)\\>"))
-              (gosh-beginning-of-next-sexp))
-          (if (eq ?w (char-syntax (char-after)))
-              (let* ((sym (gosh-parse-symbol-at-point))
-                     (type (and (not loopp)
-                                (ignore-errors
-                                  (gosh-beginning-of-next-sexp)
-                                  (gosh-parse-sexp-type-at-point env)))))
-                (push (if type (list sym type) (list sym)) vars)))
+          (when (and loopp (looking-at "\\(for\\|let\\|with\\)\\>"))
+            (gosh-beginning-of-next-sexp))
+          (when (eq ?w (char-syntax (char-after)))
+            (let* ((sym (gosh-parse-symbol-at-point))
+                   (type (and (not loopp)
+                              (ignore-errors
+                                (gosh-beginning-of-next-sexp)
+                                (gosh-parse-sexp-type-at-point env)))))
+              (push (if type (list sym type) (list sym)) vars)))
           (when loopp
             (while (and (< (point) end)
                         (ignore-errors
@@ -1347,19 +1365,19 @@ This function come from apel"
       (goto-char (point-min))
       (let ((res '()))
         (while (re-search-forward "(\\(?:use\\|import\\)[ \t\n]" nil t)
-          (ignore-errors
-            (save-excursion
-              (goto-char (match-beginning 0))
-              ;;TODO commented out context
-              (let* ((sexp (gosh-read))
-                     (module (cadr sexp))
-                     (pref (memq :prefix sexp)))
-                (setq res (cons 
-                           (cons module 
-                                 (if (and pref (symbolp (cadr pref)))
-                                     (symbol-name (cadr pref))
-                                   ""))
-                           res))))))
+          (when (gosh-context-comment-p)
+            (ignore-errors
+              (save-excursion
+                (goto-char (match-beginning 0))
+                (let* ((sexp (gosh-read))
+                       (module (cadr sexp))
+                       (pref (memq :prefix sexp)))
+                  (setq res (cons 
+                             (cons module 
+                                   (if (and pref (symbolp (cadr pref)))
+                                       (symbol-name (cadr pref))
+                                     ""))
+                             res)))))))
         (nreverse res)))))
 
 (defun gosh-parse-context-local-vars (&optional env)
@@ -1404,11 +1422,11 @@ This function come from apel"
                                            (forward-sexp 2)))
                                          (point))))
                             (forward-sexp 2)
-                            (if (eq sym 'match)
-                                (forward-sexp 1))
+                            (when (eq sym 'match)
+                              (forward-sexp 1))
                             (backward-sexp 1)
-                            (if (not (eq sym 'match))
-                                (forward-char 1))
+                            (when (not (eq sym 'match))
+                              (forward-char 1))
                             (gosh-parse-extract-match-vars
                              (and (or (eq sym 'match) (< start limit)) start)
                              limit))))
@@ -1475,8 +1493,8 @@ This function come from apel"
                   (forward-sexp
                    (+ 1 (if (numberp scan-internal) scan-internal 2)))
                   (backward-sexp)
-                  (if (< (point) start)
-                      (setq vars (append (gosh-parse-read-trailing-definitions) vars))))))))))
+                  (when (< (point) start)
+                    (setq vars (append (gosh-parse-read-trailing-definitions) vars))))))))))
     (reverse vars)))
 
 (defun gosh-parse-sexp-imports (sexp)
@@ -1499,12 +1517,10 @@ This function come from apel"
         (gosh-module-exports-definitions (cadr sexp)))))
     ((require-extension)
      (gosh-append-map 'gosh-parse-sexp-imports (cdr sexp)))
-    ;;TODO only arg is symbol
     ((autoload)
-     (unless (member (cadr sexp) gosh-processing-modules)
-       (push (cadr sexp) gosh-processing-modules)
-       (mapcar (lambda (x) (cons (if (consp x) (car x) x) '((lambda obj))))
-               (cddr sexp))))))
+     ;;TODO only arg is symbol
+     (mapcar (lambda (x) (cons (if (consp x) (car x) x) '((lambda obj))))
+             (cddr sexp)))))
 
 (defun gosh-parse-sexp-import-modules (sexp)
   (case (and (consp sexp) (car sexp))
@@ -1571,8 +1587,7 @@ This function come from apel"
     (list sexp count)))
 
 (defun gosh-parse-current-import-symbols ()
-  (let ((imports '())
-        (gosh-processing-modules '()))
+  (let ((res '()))
     (save-excursion
       (goto-char (point-min))
       (gosh-skip-shebang)
@@ -1589,15 +1604,15 @@ This function come from apel"
                      ((gosh-module-symbol-p sym)
                       (backward-char)
                       (ignore-errors
-                        (setq imports
+                        (setq res
                               (append (gosh-parse-sexp-imports
                                        (gosh-nth-sexp-at-point 0))
-                                      imports))))))))
+                                      res))))))))
               (goto-char end))
           ;; if an incomplete sexp is found, try to recover at the
           ;; next line beginning with an open paren
           (gosh-goto-next-top-level))))
-    imports))
+    res))
 
 ;; we should be just inside the opening paren of an expression
 (defun gosh-parse-name-of-current-define ()
@@ -1722,9 +1737,8 @@ This function come from apel"
   (let (mod modules)
     (save-excursion
       (goto-char (point-min))
-      ;;TODO in string
       (while (re-search-forward "(extend\\b" nil t)
-	(unless (gosh-context-string-p)
+	(when (gosh-context-code-p)
 	  (ignore-errors
 	    (while (setq mod (read (current-buffer)))
 	      (setq modules (cons mod modules)))))))
@@ -1859,13 +1873,7 @@ TODO key should be module-file?? multiple executable make complex.
 \\(file-name module-symbol time symbols-alist)"
   )
 
-;; TODO need????
-(defvar gosh-processing-modules '())
-
 (defun gosh-module-exports-definitions (mod)
-  ;; TODO consider recursive
-  (unless (member mod gosh-processing-modules)
-    (push mod gosh-processing-modules))
   (cond
    ((and (consp mod) (eq 'srfi (car mod)))
     (gosh-append-map 'gosh-scheme-srfi-exports (cdr mod)))
@@ -2123,28 +2131,41 @@ d:/home == /cygdrive/d/home
               (setq done t))))))
       ))))
 
-(defun gosh-env-lookup (env sym)
-  (let ((spec nil)
+(defun gosh-env-gather (env sym with-detailed)
+  (let ((specs nil)
         (ls env)
         l tmp)
     ;; find most detailed info
     (while ls
       (setq l (pop ls))
       (while (setq tmp (assq sym l))
-        (when tmp
-          (setq l (cdr (memq tmp l))))
-        (when (and (listp tmp) 
-                   (or (> (length tmp) (length spec))
-                       (and (= (length tmp) (length spec))
-                            ;;FIXME TODO....
-                            (consp (cadr tmp)) 
-                            (consp (cadr spec))
-                            (eq 'lambda (caadr tmp))
-                            (eq 'lambda (caadr spec))
-                            ;; compare lambda args
-                            (> (length (gosh-flat (cadadr tmp))) 
-                               (length (gosh-flat (cadadr spec)))))))
-          (setq spec tmp))))
+        (setq l (cdr (memq tmp l)))
+        (when (or (null with-detailed)
+                  (cdr tmp))
+          (setq specs (cons tmp specs)))))
+    (unless specs
+      (when (consp specs)
+        (setq specs (list (car specs)))))
+    specs))
+
+(defun gosh-env-lookup (env sym)
+  (let ((specs (gosh-env-gather env sym nil))
+        spec tmp)
+    ;; find most detailed info
+    (while specs
+      (setq tmp (pop specs))
+      (when (and (consp tmp)
+                 (or (> (length tmp) (length spec))
+                     (and (= (length tmp) (length spec))
+                          ;;FIXME TODO....
+                          (consp (cadr tmp)) 
+                          (consp (cadr spec))
+                          (eq 'lambda (caadr tmp))
+                          (eq 'lambda (caadr spec))
+                          ;; compare lambda args
+                          (> (length (gosh-flat (cadadr tmp))) 
+                             (length (gosh-flat (cadadr spec)))))))
+        (setq spec tmp)))
     spec))
 
 ;; checking return values:
@@ -2663,7 +2684,10 @@ d:/home == /cygdrive/d/home
 (defvar gosh-backend-temp-file nil)
 (make-variable-buffer-local 'gosh-backend-temp-file)
 
-;;TODO detect changing GAUCHE_LOAD_PATH??
+;; TODO detect changing GAUCHE_LOAD_PATH, GAUCHE_DYNLOAD_PATH??
+;;    but no way to remove from *load-path*
+;; TODO detect changing environment-variable 
+;;    but no way to change environment-variable 
 (defun gosh-backend-switch-context ()
   (let* ((gosh-backend-suppress-discard-input t)
          (buffer (current-buffer))
@@ -2671,7 +2695,9 @@ d:/home == /cygdrive/d/home
     (with-current-buffer buffer
       (setq directory (expand-file-name default-directory))
       (if (and buffer-file-name
-               (not (buffer-modified-p buffer)))
+               (not (buffer-modified-p buffer))
+               ;; in archive file
+               (file-exists-p buffer-file-name))
           (setq file buffer-file-name)
         (unless gosh-backend-temp-file
           (setq gosh-backend-temp-file 
