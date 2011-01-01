@@ -198,7 +198,7 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
   ;;TODO current-executable and switch load-path
   (let* ((file (concat (subst-char-in-string ?. ?/ (symbol-name mod)) ".scm"))
          (dir
-          (gosh-scheme-find-file-in-path
+          (gosh-scheme-any-file-in-path
            file
 	   (gosh-load-path))))
     (when dir
@@ -565,13 +565,16 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
 
     (define-key map "\M-\C-i" 'gosh-smart-complete)
     (define-key map "\C-c?" 'gosh-show-info)
+    (define-key map "\C-i" 'gosh-inferior-smart-complete)
 
     (setq gosh-inferior-mode-map map)))
 
 (defvar gosh-inferior-mode-hook nil)
 
 (define-derived-mode gosh-inferior-mode inferior-scheme-mode "Inferier Gosh"
-  "Do nothing. Extended `inferior-scheme-mode'.  Prepare for `auto-complete'"
+  "Extended `inferior-scheme-mode'.  Prepare for `auto-complete'"
+  (when (featurep 'auto-complete)
+    (add-to-list 'ac-sources 'ac-source-gosh-inferior-symbols))
   (run-mode-hooks 'gosh-inferior-mode-hook))
 
 (define-minor-mode gosh-inferior-minor-mode 
@@ -579,6 +582,51 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
   nil nil gosh-inferior-mode-map
   (gosh-ac-initialize)
   (gosh-eldoc-config))
+
+(defvar gosh-inferior-string-stack nil)
+(defvar gosh-inferior-complete-candidates nil)
+
+(defconst gosh-inferior-module-imports-command
+  (concat "(apply append (map (lambda (mod) "
+          " (hash-table-map (module-table mod)"
+          " (lambda (sym gloc) (symbol->string sym))))"
+          " (module-imports (current-module))))\n"))
+
+(defun gosh-inferior-smart-complete ()
+  (interactive)
+  (let ((cands (gosh-inferior-candidates))
+        (sym (gosh-cmoplete-symbol-name-at-point)))
+    (gosh-scheme-do-completion sym cands)))
+
+(defun gosh-inferior-process-filter (proc event)
+  (condition-case err
+      (progn
+        (setq gosh-inferior-string-stack 
+              (concat gosh-inferior-string-stack event))
+        (when (string-match "\ngosh *> *$" gosh-inferior-string-stack)
+          (setq gosh-inferior-complete-candidates (read gosh-inferior-string-stack))))
+    (error 
+     ;; step through if error.
+     (setq gosh-inferior-complete-candidates t))))
+
+(defun gosh-inferior-candidates ()
+  (when scheme-buffer
+    (let* ((proc (get-buffer-process scheme-buffer))
+           (filter (process-filter proc)))
+      (set-process-filter proc 'gosh-inferior-process-filter)
+      (unwind-protect
+          (progn
+            (setq gosh-inferior-complete-candidates nil
+                  gosh-inferior-string-stack nil)
+            (process-send-string proc gosh-inferior-module-imports-command)
+            (let ((inhibit-quit t))
+              (while (not gosh-inferior-complete-candidates)
+                (discard-input)
+                (sleep-for 0.1)
+                (when quit-flag
+                  (setq inhitib-quit nil)))))
+        (set-process-filter proc filter))
+      gosh-inferior-complete-candidates)))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -588,10 +636,10 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
 
 (defvar gosh-eldoc--rotate-timer nil)
 
-(defcustom gosh-eldoc-rotate-seconds 1
+(defcustom gosh-eldoc-rotate-seconds 1.5
   "*Number of seconds rotating eldoc message."
   :group 'gosh-mode
-  :type 'integer
+  :type 'number
   :set (lambda (s v) 
          (when gosh-eldoc--rotate-timer
            (cancel-timer gosh-eldoc--rotate-timer)
@@ -761,8 +809,8 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
                 (when (gosh-context-string-p)
                   (gosh-beginning-of-string))
                 (gosh-parse-current-env)))
-         (spec1 (and fnsym (gosh-env-gather env fnsym t)))
-         (spec2 (and sym (gosh-env-gather env sym t)))
+         (spec1 (and fnsym (gosh-env-matches env fnsym t)))
+         (spec2 (and sym (gosh-env-matches env sym t)))
          (string1 (and spec1 
                      (gosh-eldoc--find-and-print-strings
                       spec1 env
@@ -856,7 +904,7 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
        (if (and (not (nth 3 spec)) (nth 4 spec)) " - " "")
        (or (nth 4 spec) ""))))
    ((and (consp spec) (null (cdr spec)))
-    "some parameter or alias")))
+    "some parameter or alias or dynamic loaded procedure.")))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -944,7 +992,7 @@ This function come from apel"
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; file utilities
 
-(defun gosh-scheme-find-file-in-path (file path)
+(defun gosh-scheme-any-file-in-path (file path)
   (car (remove-if-not
         (lambda (dir) (file-exists-p (concat dir "/" file)))
         path)))
@@ -2131,25 +2179,27 @@ d:/home == /cygdrive/d/home
               (setq done t))))))
       ))))
 
-(defun gosh-env-gather (env sym with-detailed)
+(defun gosh-env-matches (env sym with-detailed)
   (let ((specs nil)
         (ls env)
-        l tmp)
-    ;; find most detailed info
+        cands l tmp)
     (while ls
       (setq l (pop ls))
       (while (setq tmp (assq sym l))
         (setq l (cdr (memq tmp l)))
+        (setq cands (cons tmp cands))
         (when (or (null with-detailed)
                   (cdr tmp))
           (setq specs (cons tmp specs)))))
+    ;; when specs are not found if with-detailed or not,
+    ;; return first candidate.
     (unless specs
-      (when (consp specs)
-        (setq specs (list (car specs)))))
+      (when (consp cands)
+        (setq specs (list (car cands)))))
     specs))
 
 (defun gosh-env-lookup (env sym)
-  (let ((specs (gosh-env-gather env sym nil))
+  (let ((specs (gosh-env-matches env sym nil))
         spec tmp)
     ;; find most detailed info
     (while specs
@@ -2238,6 +2288,11 @@ d:/home == /cygdrive/d/home
       ((flags) 'integer)
       (t x))))
 
+(defun gosh-cmoplete-symbol-name-at-point ()
+  (let ((end (point))
+        (start (save-excursion (skip-syntax-backward "w_") (point))))
+    (buffer-substring-no-properties start end)))
+
 (defun gosh-complete-file-name (trans sym)
   (let* ((file (file-name-nondirectory sym))
          (dir (file-name-directory sym))
@@ -2273,9 +2328,7 @@ d:/home == /cygdrive/d/home
 
 (defun gosh-smart-complete (&optional arg)
   (interactive "P")
-  (let* ((end (point))
-         (start (save-excursion (skip-syntax-backward "w_") (point)))
-         (sym (buffer-substring-no-properties start end))
+  (let* ((sym (gosh-cmoplete-symbol-name-at-point))
          (in-str-p (gosh-context-string-p))
          (x (save-excursion
               (if in-str-p (gosh-beginning-of-string))
@@ -2454,6 +2507,12 @@ d:/home == /cygdrive/d/home
         (prefix . "(\\(?:use\\|import\\)[ \t\n]+\\(\\(?:\\sw\\|\\s_\\)+\\)")
         (requires . 1)
         (cache)))
+
+    (ac-define-source gosh-inferior-symbols
+      '((candidates . gosh-ac-inferior-candidates)
+        (symbol . "s")
+        (requires . 2)
+        (cache)))
     
     (add-to-list 'ac-modes 'gosh-mode)
     (add-to-list 'ac-modes 'gosh-inferior-mode)
@@ -2473,6 +2532,9 @@ d:/home == /cygdrive/d/home
            ,@form))
        env))
     ,env))
+
+(defun gosh-ac-inferior-candidates ()
+  gosh-inferior-complete-candidates)
 
 ;; keywords match to current context
 (defun gosh-ac-keywords-candidates ()
@@ -2687,7 +2749,7 @@ d:/home == /cygdrive/d/home
 ;; TODO detect changing GAUCHE_LOAD_PATH, GAUCHE_DYNLOAD_PATH??
 ;;    but no way to remove from *load-path*
 ;; TODO detect changing environment-variable 
-;;    but no way to change environment-variable 
+;;    sys-putenv
 (defun gosh-backend-switch-context ()
   (let* ((gosh-backend-suppress-discard-input t)
          (buffer (current-buffer))
