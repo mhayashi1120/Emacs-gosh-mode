@@ -590,7 +590,7 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
   (concat "(apply append (map (lambda (mod) "
           " (hash-table-map (module-table mod)"
           " (lambda (sym gloc) (symbol->string sym))))"
-          " (module-imports (current-module))))\n"))
+          " (cons (current-module) (module-imports (current-module)))))\n"))
 
 (defun gosh-inferior-smart-complete ()
   (interactive)
@@ -604,7 +604,11 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
         (setq gosh-inferior-string-stack 
               (concat gosh-inferior-string-stack event))
         (when (string-match "\ngosh *> *$" gosh-inferior-string-stack)
-          (setq gosh-inferior-complete-candidates (read gosh-inferior-string-stack))))
+          ;; read scheme '() to nil but to finish up the filter change to `t'
+          (setq gosh-inferior-complete-candidates
+                (or
+                 (read gosh-inferior-string-stack)
+                 t))))
     (error 
      ;; step through if error.
      (setq gosh-inferior-complete-candidates t))))
@@ -626,7 +630,8 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
                 (when quit-flag
                   (setq inhitib-quit nil)))))
         (set-process-filter proc filter))
-      gosh-inferior-complete-candidates)))
+      (and (listp gosh-inferior-complete-candidates)
+           gosh-inferior-complete-candidates))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -2534,7 +2539,8 @@ d:/home == /cygdrive/d/home
     ,env))
 
 (defun gosh-ac-inferior-candidates ()
-  gosh-inferior-complete-candidates)
+  (and (listp gosh-inferior-complete-candidates)
+       gosh-inferior-complete-candidates))
 
 ;; keywords match to current context
 (defun gosh-ac-keywords-candidates ()
