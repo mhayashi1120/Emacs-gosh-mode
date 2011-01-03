@@ -2163,8 +2163,8 @@ d:/home == /cygdrive/d/home
                   (let ((inhibit-quit t))
                     (read-event))))
             (cond
-             ((or (event-matches-key-specifier-p orig-event 'tab)
-                  (event-matches-key-specifier-p orig-event 9))
+             ((or (eq orig-event 'tab)
+                  (eq orig-event 9))
               (save-selected-window
                 (select-window (get-buffer-window "*Completions*"))
                 (if (pos-visible-in-window-p (point-max))
@@ -2172,8 +2172,8 @@ d:/home == /cygdrive/d/home
                   (scroll-up))))
              (t
               (set-window-configuration win-config)
-              (if (or (event-matches-key-specifier-p orig-event 'space)
-                      (event-matches-key-specifier-p orig-event 32))
+              (if (or (eq orig-event 'space)
+                      (eq orig-event 32))
                   (bury-buffer (get-buffer "*Completions*"))
                 (setq unread-command-events (list orig-event)))
               (setq done t))))))))))
