@@ -15,10 +15,13 @@ Distributed under the term of GPLv3.
 .emacs Sample
 -------------
 
+;; Generally only following line is required.
 (require 'gosh-config)
-(setq scheme-program-name "gosh -i")
+
+;; if gosh command is not in PATH
+(gosh-register-command "/path/to/gosh")
 
 Note
 ----
-scheme-complete.el is fixed some problem that happen in gauche.
-That have capable compatibility, so replace the existing one.
+gosh-mode forked from scheme-complete.el
+Many code is duplicated but specialize to Gauche.

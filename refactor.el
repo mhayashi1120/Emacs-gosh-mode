@@ -2,7 +2,7 @@
 
 ;; Author: Hayashi Masahiro <mhayashi1120@gmail.com>
 ;; Keywords: lisp refactor
-;; URL: http://github.com/mhayashi1120/Emacs-gauche-ext/raw/master/refactor.el
+;; URL: http://github.com/mhayashi1120/Emacs-gosh-mode/raw/master/refactor.el
 ;; URL: http://www.emacswiki.org/emacs/download/refactor.el
 ;; Emacs: GNU Emacs 22 or later
 

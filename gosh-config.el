@@ -2,7 +2,7 @@
 
 ;; Author: Hayashi Masahiro <mhayashi1120@gmail.com>
 ;; Keywords: lisp gauche scheme config
-;; URL: http://github.com/mhayashi1120/Emacs-gauche-ext/raw/master/gosh-config.el
+;; URL: https://github.com/mhayashi1120/Emacs-gosh-mode/raw/master/gosh-config.el
 ;; Emacs: GNU Emacs 22 or later
 
 ;; This program is free software; you can redistribute it and/or
