@@ -40,6 +40,9 @@ dynamically put the error properties
 
 ** cannot evaluate by C-x C-e if file is invaild
  this is not acceptable(?) conduct
+** fix smart-complete behavior
+ex C-g or scroll window etc...
+
 * refactor
 ** map currentenv
 * BUG

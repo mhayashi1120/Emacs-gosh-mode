@@ -87,6 +87,12 @@
 COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
   )
 
+(defconst gosh-module-imports-command-string
+  (concat "(apply append (map (lambda (mod) "
+          " (hash-table-map (module-table mod)"
+          " (lambda (sym gloc) (symbol->string sym))))"
+          " (cons (current-module) (module-imports (current-module)))))\n"))
+
 ;; bound only `let' form
 (defvar gosh-delegate-command)
 (defun gosh-delegate-command-get (index)
@@ -166,6 +172,7 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
 ;; Execute when loading.
 (defun gosh-initialize ()
   (gosh-default-initialize)
+  (gosh-ac-initialize)
   (gosh-info-lookup-initialize))
 
 (defun gosh--call-command->string (gosh command &rest args)
@@ -374,6 +381,7 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
   (let ((map (make-sparse-keymap)))
 
     (define-key map "\C-x\C-e" 'gosh-send-last-sexp)
+    (define-key map "\M-:" 'gosh-eval-expression)
 
     (setq gosh-sticky-mode-map map)))
 
@@ -480,7 +488,7 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
   (add-hook 'after-save-hook 'gosh-sticky-after-save nil t)
   (setq gosh-buffer-change-time (float-time))
   (gosh-eldoc-config)
-  (gosh-ac-initialize)
+  (gosh-ac-mode-initialize)
   (use-local-map gosh-mode-map)
   (run-mode-hooks 'gosh-mode-hook))
 
@@ -573,6 +581,7 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
 
 (define-derived-mode gosh-inferior-mode inferior-scheme-mode "Inferier Gosh"
   "Extended `inferior-scheme-mode'.  Prepare for `auto-complete'"
+  (gosh-ac-mode-initialize)
   (when (featurep 'auto-complete)
     (add-to-list 'ac-sources 'ac-source-gosh-inferior-symbols))
   (run-mode-hooks 'gosh-inferior-mode-hook))
@@ -580,58 +589,56 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
 (define-minor-mode gosh-inferior-minor-mode 
   ""
   nil nil gosh-inferior-mode-map
-  (gosh-ac-initialize)
   (gosh-eldoc-config))
 
 (defvar gosh-inferior-string-stack nil)
-(defvar gosh-inferior-complete-candidates nil)
-
-(defconst gosh-inferior-module-imports-command
-  (concat "(apply append (map (lambda (mod) "
-          " (hash-table-map (module-table mod)"
-          " (lambda (sym gloc) (symbol->string sym))))"
-          " (cons (current-module) (module-imports (current-module)))))\n"))
 
 (defun gosh-inferior-smart-complete ()
   (interactive)
-  (let ((cands (gosh-inferior-candidates))
+  (let ((cands (gosh-inferior-symbol-candidates))
         (sym (gosh-cmoplete-symbol-name-at-point)))
     (gosh-scheme-do-completion sym cands)))
 
-(defun gosh-inferior-process-filter (proc event)
+(defun gosh-inferior-symbol-candidates ()
+  (when scheme-buffer
+    (gosh-module-import-candidates (get-buffer-process scheme-buffer))))
+
+
+
+(defvar gosh-module-import-filter-candidates nil)
+
+(defun gosh-module-import-candidates (proc)
+  (let* ((filter (process-filter proc)))
+    (set-process-filter proc 'gosh-module-imports-process-filter)
+    (unwind-protect
+        (progn
+          (setq gosh-module-import-filter-candidates nil
+                gosh-inferior-string-stack nil)
+          (process-send-string proc gosh-module-imports-command-string)
+          (let ((inhibit-quit t))
+            (while (not gosh-module-import-filter-candidates)
+              (discard-input)
+              (sleep-for 0.1)
+              (when quit-flag
+                (setq inhitib-quit nil)))))
+      (set-process-filter proc filter))
+    (and (listp gosh-module-import-filter-candidates)
+         gosh-module-import-filter-candidates)))
+
+(defun gosh-module-imports-process-filter (proc event)
   (condition-case err
       (progn
         (setq gosh-inferior-string-stack 
               (concat gosh-inferior-string-stack event))
         (when (string-match "\ngosh *> *$" gosh-inferior-string-stack)
           ;; read scheme '() to nil but to finish up the filter change to `t'
-          (setq gosh-inferior-complete-candidates
+          (setq gosh-module-import-filter-candidates
                 (or
                  (read gosh-inferior-string-stack)
                  t))))
     (error 
      ;; step through if error.
-     (setq gosh-inferior-complete-candidates t))))
-
-(defun gosh-inferior-candidates ()
-  (when scheme-buffer
-    (let* ((proc (get-buffer-process scheme-buffer))
-           (filter (process-filter proc)))
-      (set-process-filter proc 'gosh-inferior-process-filter)
-      (unwind-protect
-          (progn
-            (setq gosh-inferior-complete-candidates nil
-                  gosh-inferior-string-stack nil)
-            (process-send-string proc gosh-inferior-module-imports-command)
-            (let ((inhibit-quit t))
-              (while (not gosh-inferior-complete-candidates)
-                (discard-input)
-                (sleep-for 0.1)
-                (when quit-flag
-                  (setq inhitib-quit nil)))))
-        (set-process-filter proc filter))
-      (and (listp gosh-inferior-complete-candidates)
-           gosh-inferior-complete-candidates))))
+     (setq gosh-module-import-filter-candidates t))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -2112,17 +2119,6 @@ d:/home == /cygdrive/d/home
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; completion
 
-(eval-when (compile load eval)
-  (unless (fboundp 'event-matches-key-specifier-p)
-    (defalias 'event-matches-key-specifier-p 'eq)))
-
-(unless (fboundp 'read-event)
-  (defun read-event ()
-    (aref (read-key-sequence nil) 0)))
-
-(unless (fboundp 'event-basic-type)
-  (defalias 'event-basic-type 'event-key))
-
 (defun gosh-scheme-do-completion (str coll &optional strs pred)
   (let* ((coll (mapcar (lambda (x)
                          (cond
@@ -2164,12 +2160,11 @@ d:/home == /cygdrive/d/home
             'string-lessp)))
         (while (not done)
           (let* ((orig-event
-                  (with-current-buffer (get-buffer "*Completions*")
-                    (read-event)))
-                 (event (event-basic-type orig-event)))
+                  (let ((inhibit-quit t))
+                    (read-event))))
             (cond
-             ((or (event-matches-key-specifier-p event 'tab)
-                  (event-matches-key-specifier-p event 9))
+             ((or (event-matches-key-specifier-p orig-event 'tab)
+                  (event-matches-key-specifier-p orig-event 9))
               (save-selected-window
                 (select-window (get-buffer-window "*Completions*"))
                 (if (pos-visible-in-window-p (point-max))
@@ -2177,12 +2172,11 @@ d:/home == /cygdrive/d/home
                   (scroll-up))))
              (t
               (set-window-configuration win-config)
-              (if (or (event-matches-key-specifier-p event 'space)
-                      (event-matches-key-specifier-p event 32))
+              (if (or (event-matches-key-specifier-p orig-event 'space)
+                      (event-matches-key-specifier-p orig-event 32))
                   (bury-buffer (get-buffer "*Completions*"))
                 (setq unread-command-events (list orig-event)))
-              (setq done t))))))
-      ))))
+              (setq done t))))))))))
 
 (defun gosh-env-matches (env sym with-detailed)
   (let ((specs nil)
@@ -2482,9 +2476,10 @@ d:/home == /cygdrive/d/home
 ;; auto-complete
 ;;
 
+;; Generic initialize function for auto-complete
 (defun gosh-ac-initialize ()
   ;; only activate if usually using auto-complete
-  (when (featurep 'auto-complete-config)
+  (when (featurep 'auto-complete)
     (ac-define-source gosh-functions
       '((candidates . gosh-ac-function-candidates)
         (symbol . "f")
@@ -2509,7 +2504,7 @@ d:/home == /cygdrive/d/home
     (ac-define-source gosh-modules
       '((candidates . gosh-ac-module-candidates)
         (symbol . "m")
-        (prefix . "(\\(?:use\\|import\\)[ \t\n]+\\(\\(?:\\sw\\|\\s_\\)+\\)")
+        (prefix . "(\\(?:use\\|import\\|select-module\\|with-module\\)[ \t\n]+\\(\\(?:\\sw\\|\\s_\\)+\\)")
         (requires . 1)
         (cache)))
 
@@ -2520,8 +2515,10 @@ d:/home == /cygdrive/d/home
         (cache)))
     
     (add-to-list 'ac-modes 'gosh-mode)
-    (add-to-list 'ac-modes 'gosh-inferior-mode)
+    (add-to-list 'ac-modes 'gosh-inferior-mode)))
 
+(defun gosh-ac-mode-initialize ()
+  (when (featurep 'auto-complete)
     (add-to-list 'ac-sources 'ac-source-gosh-functions)
     (add-to-list 'ac-sources 'ac-source-gosh-symbols)
     (add-to-list 'ac-sources 'ac-source-gosh-keywords)
@@ -2539,8 +2536,7 @@ d:/home == /cygdrive/d/home
     ,env))
 
 (defun gosh-ac-inferior-candidates ()
-  (and (listp gosh-inferior-complete-candidates)
-       gosh-inferior-complete-candidates))
+  (gosh-inferior-symbol-candidates))
 
 ;; keywords match to current context
 (defun gosh-ac-keywords-candidates ()
@@ -2793,11 +2789,25 @@ d:/home == /cygdrive/d/home
   (gosh-send-region (save-excursion (backward-sexp) (point)) (point)))
 
 (defun gosh-send-region (start end)
+  (gosh-eval-expression (buffer-substring start end)))
+
+(defvar gosh-read-expression-history nil)
+
+(defun gosh-eval-expression (eval-expression-arg)
+  "Evaluate EVAL-EXPRESSION-ARG and print value in the echo area."
+  (interactive
+   (list (let ((minibuffer-completing-symbol t))
+	   (read-from-minibuffer "Gosh Eval: "
+				 nil read-expression-map nil
+				 'gosh-read-expression-history))))
   (let ((module (gosh-parse-context-module))
         result form)
-    (gosh-backend-switch-context)
+    (condition-case err
+        (gosh-backend-switch-context)
+      ;; abandon low level error
+      (error (error "Error while loading file")))
     (setq form (format "(with-module %s %s)" 
-                       module (buffer-substring start end)))
+                       module eval-expression-arg))
     (setq result (gosh-backend-eval form))
     (message "%s" result)))
 
@@ -2978,10 +2988,6 @@ d:/home == /cygdrive/d/home
       gosh-info-appendixes-ja
     gosh-info-appendixes-en))
 
-(defun gosh-info-lookup-initialize ()
-  (gosh-info-lookup-add-help 'gosh-mode)
-  (gosh-info-lookup-add-help 'gosh-inferior-mode))
-
 (defmacro gosh-info-lookup-add-help (mode)
   `(info-lookup-add-help
     ;; For
@@ -2994,6 +3000,10 @@ d:/home == /cygdrive/d/home
     :doc-spec ',gosh-info-appendixes
     :parse-rule  nil
     :other-modes nil))
+
+(defun gosh-info-lookup-initialize ()
+  (gosh-info-lookup-add-help 'gosh-mode)
+  (gosh-info-lookup-add-help 'gosh-inferior-mode))
 
 
 
