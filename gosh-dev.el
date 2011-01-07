@@ -6,6 +6,7 @@
 
 ;;; Code:
 
+;;TODO remove duplicated values *gosh-scheme-srfi-info*
 (defun gosh-dev-parse-texi (texi)
   (with-temp-buffer
     (insert-file-contents texi)
@@ -75,13 +76,20 @@
      (setq arg (gosh-dev-replace-string arg "@dots{}" "..."))
      (setq arg (gosh-dev-replace-string arg "@var{optional}" ":optional"))
      (setq arg (gosh-dev-replace-string arg "@code{=>}" "'=>'"))
-     (setq arg (gosh-dev-replace-macro arg))
+     (setq arg (gosh-dev-replace-all-macro arg))
      (intern arg))
    args))
 
-(defun gosh-dev-replace-macro (string)
+(defun gosh-dev-replace-all-macro (string)
   (let ((str string))
-    (while (string-match "@var{\\([^}]*\\)}" str)
+    (setq str (gosh-dev-replace-macro str "var"))
+    (setq str (gosh-dev-replace-macro str "code"))
+    str))
+
+(defun gosh-dev-replace-macro (string macro)
+  (let ((regexp (format "@%s{\\([^}]*\\)}" macro))
+        (str string))
+    (while (string-match regexp str)
       (setq str
             (concat (substring str 0 (match-beginning 0)) 
                     (match-string 1 str)
