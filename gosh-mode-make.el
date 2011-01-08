@@ -13,8 +13,8 @@
 
 (setq ALL-MODULES 
       (list
-       "gosh-mode.el"
        "gosh-config.el"
+       "gosh-mode.el"
        "gosh-const.el"
        "refactor.el"
        ))
@@ -65,6 +65,7 @@
 (defun gosh-mode-make-compile ()
   (mapc
    (lambda (m)
+     (load-file m)
      (byte-compile-file m))
    ALL-MODULES))
 

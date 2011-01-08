@@ -52,7 +52,7 @@
 (defvar current-language-environment)
 (defvar auto-mode-interpreter-regexp)
 
-(defvar gosh-mode-version "0.1.0")
+(defvar gosh-mode-version "0.1.1")
 
 ;;TODO move
 (defvar gosh-debug nil)

@@ -13,7 +13,7 @@ FLAGS   = -batch -q -no-site-file -l gosh-mode-make.el
 # For windows emacs
 CHECKFLAGS = $(FLAGS)
 
-VERSION = 0.1.0
+VERSION = 0.1.1
 
 RELEASE_FILES = \
 	gosh-mode.el gosh-config.el gosh-const.el \
