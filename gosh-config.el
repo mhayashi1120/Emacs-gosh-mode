@@ -40,6 +40,8 @@
 
 
 
+;; Most recent version is following
+;; http://practical-scheme.net/wiliki/wiliki.cgi?Gauche%3AEditingWithEmacs
 (put 'and-let* 'scheme-indent-function 1)
 (put 'begin0 'scheme-indent-function 0)
 (put 'call-with-client-socket 'scheme-indent-function 1)
