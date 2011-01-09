@@ -3979,6 +3979,35 @@
     (cgi-temporary-files (lambda nil))
     ))
 
+
+
+(defconst gosh-info-appendixes-ja
+  '(
+    ("(gauche-refj.info)Index - 手続きと構文索引" nil 
+     "^[ \t]+-- [^:]+:[ \t]*" nil)
+    ("(gauche-refj.info)Index - モジュール索引"   nil
+     "^[ \t]+-- [^:]+:[ \t]*" nil)
+    ("(gauche-refj.info)Index - クラス索引"      nil
+     "^[ \t]+-- [^:]+:[ \t]*" nil)
+    ("(gauche-refj.info)Index - 変数索引"        nil
+     "^[ \t]+-- [^:]+:[ \t]*" nil)))
+
+(defconst gosh-info-appendixes-en
+  '(("(gauche-refe.info)Function and Syntax Index" nil 
+     "^[ \t]+-- [^:]+:[ \t]*" nil)
+    ("(gauche-refe.info)Module Index"   nil
+     "^[ \t]+-- [^:]+:[ \t]*" nil)
+    ("(gauche-refe.info)Class Index"      nil
+     "^[ \t]+-- [^:]+:[ \t]*" nil)
+    ("(gauche-refe.info)Variable Index"        nil
+     "^[ \t]+-- [^:]+:[ \t]*" nil)))
+
+(defvar gosh-info-appendixes
+  (if (and current-language-environment
+           (string= current-language-environment "Japanese"))
+      gosh-info-appendixes-ja
+    gosh-info-appendixes-en))
+
 
 (provide 'gosh-const)
 

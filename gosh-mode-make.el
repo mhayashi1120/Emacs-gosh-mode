@@ -65,7 +65,6 @@
 (defun gosh-mode-make-compile ()
   (mapc
    (lambda (m)
-     (load-file m)
      (byte-compile-file m))
    ALL-MODULES))
 

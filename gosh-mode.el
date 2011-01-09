@@ -30,12 +30,13 @@
 ;;; Code:
 
 (eval-when-compile
-  (require 'cl))
+  (require 'cl)
+  (require 'gosh-const))
 
+(require 'gosh-const)
 (require 'eldoc nil t)
 (require 'scheme)
 (require 'cmuscheme)
-(require 'gosh-const)
 (require 'refactor)
 (require 'info-look)
 
@@ -52,10 +53,11 @@
 (defvar current-language-environment)
 (defvar auto-mode-interpreter-regexp)
 
-(defvar gosh-mode-version "0.1.1")
+(defvar gosh-mode-version "0.1.2")
 
 ;;TODO move
 (defvar gosh-debug nil)
+
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -3117,33 +3119,6 @@ And print value in the echo area."
   )
 
 
-
-(defconst gosh-info-appendixes-ja
-  '(
-    ("(gauche-refj.info)Index - 手続きと構文索引" nil 
-     "^[ \t]+-- [^:]+:[ \t]*" nil)
-    ("(gauche-refj.info)Index - モジュール索引"   nil
-     "^[ \t]+-- [^:]+:[ \t]*" nil)
-    ("(gauche-refj.info)Index - クラス索引"      nil
-     "^[ \t]+-- [^:]+:[ \t]*" nil)
-    ("(gauche-refj.info)Index - 変数索引"        nil
-     "^[ \t]+-- [^:]+:[ \t]*" nil)))
-
-(defconst gosh-info-appendixes-en
-  '(("(gauche-refe.info)Function and Syntax Index" nil 
-     "^[ \t]+-- [^:]+:[ \t]*" nil)
-    ("(gauche-refe.info)Module Index"   nil
-     "^[ \t]+-- [^:]+:[ \t]*" nil)
-    ("(gauche-refe.info)Class Index"      nil
-     "^[ \t]+-- [^:]+:[ \t]*" nil)
-    ("(gauche-refe.info)Variable Index"        nil
-     "^[ \t]+-- [^:]+:[ \t]*" nil)))
-
-(defvar gosh-info-appendixes
-  (if (and current-language-environment
-           (string= current-language-environment "Japanese"))
-      gosh-info-appendixes-ja
-    gosh-info-appendixes-en))
 
 (defmacro gosh-info-lookup-add-help (mode)
   `(info-lookup-add-help
