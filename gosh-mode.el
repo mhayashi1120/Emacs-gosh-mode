@@ -1527,7 +1527,7 @@ This function come from apel"
           (unless (bobp)
             (backward-char)))
         (let ((matcher (lambda ()
-                         (when (looking-at "(\\(?:with\\|define\\(?:-in\\)?\\)-module[ \t\n]+\\([^ \t\n()]+\\)")
+                         (when (looking-at "(\\(?:with\\|define\\)-module[ \t\n]+\\([^ \t\n()]+\\)")
                            (throw 'return (match-string-no-properties 1)))))
               (toplevel (gosh-parse-context-toplevel-p)))
           (unless toplevel
