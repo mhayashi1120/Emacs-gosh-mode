@@ -456,10 +456,7 @@ Evaluate s-expression, syntax check, test-module, etc."
              (eq major-mode 'gosh-mode)
              (not (minibufferp (current-buffer))))
     (let ((module (gosh-sticky-which-module-update)))
-      (when (or (null gosh-buffer-change-time)
-                (null gosh-sticky-validated-time)
-                (> gosh-buffer-change-time
-                   gosh-sticky-validated-time))
+      (when (gosh-sticky-buffer-was-changed-p)
         (gosh-sticky-validate-update module)
         ;;FIXME
         ;; todo slow on windows.
@@ -469,19 +466,28 @@ Evaluate s-expression, syntax check, test-module, etc."
           )))
     (force-mode-line-update)))
 
+(defun gosh-sticky-buffer-was-changed-p ()
+  (or (null gosh-buffer-change-time)
+      (null gosh-sticky-validated-time)
+      (> gosh-buffer-change-time
+         gosh-sticky-validated-time)))
+
 (defun gosh-sticky-validate-update (module)
-  (condition-case err
-      (progn
-        (gosh-sticky-switch-context module)
-        (setq gosh-sticky-modeline-validate
-              '(:propertize "Valid" face gosh-modeline-normal-face)))
-    (error 
-     (setq gosh-sticky-modeline-validate
-           `(:propertize "Invalid" 
-                         face gosh-modeline-error-face
-                         help-echo ,(concat "Gosh error: " (prin1-to-string (cadr err)))
-                         mouse-face mode-line-highlight))))
-  (setq gosh-sticky-validated-time (float-time)))
+  (let (ret)
+    (condition-case err
+        (progn
+          (gosh-sticky-switch-context module)
+          (setq gosh-sticky-modeline-validate
+                '(:propertize "Valid" face gosh-modeline-normal-face))
+          (setq ret t))
+      (error 
+       (setq gosh-sticky-modeline-validate
+             `(:propertize "Invalid" 
+                           face gosh-modeline-error-face
+                           help-echo ,(concat "Gosh error: " (prin1-to-string (cadr err)))
+                           mouse-face mode-line-highlight))))
+    (setq gosh-sticky-validated-time (float-time))
+    ret))
 
 (defun gosh-sticky-which-module-update ()
   (setq gosh-sticky-which-module-current 
@@ -1845,7 +1851,6 @@ This function come from apel"
                (type (gosh-parse-applying-of-current-define)))
            (list (if type (list name type) (list name)))))
         ((define define-constant)
-         ;;TODO define-in-module define-values
          (let ((name (gosh-parse-name-of-current-define))
                (type (gosh-parse-type-of-current-define)))
            (list (if type (list name type) (list name)))))
@@ -1885,7 +1890,6 @@ This function come from apel"
       (goto-char (point-min))
       (gosh-parse-current-globals t))))
 
-;;TODO consider dynamic-load
 (defun gosh-parse-file-exports (file)
   (let (syms modules)
     (gosh-with-find-file file
@@ -2801,7 +2805,6 @@ d:/home == /cygdrive/d/home
             sexp-string)))
          result)
     (setq result (gosh-backend-low-level-eval eval-form proc))
-    ;;TODO print output when error.
     (if (string-match (concat "^" hash "\\(.*\\)") result)
         (signal 'gosh-backend-error (list (match-string 1 result)))
       result)))
@@ -2971,14 +2974,21 @@ And print value in the echo area."
 				 'gosh-read-expression-history))))
   (let ((module (gosh-parse-context-module))
         form)
-    (condition-case err
-        (gosh-sticky-switch-context module)
-      ;; abandon low level error
-      (error (error "Error while loading file")))
+    (when (gosh-sticky-buffer-was-changed-p)
+      (unless (gosh-sticky-validate-update module)
+        ;; abandon low level error
+        (error (error "Error while loading file"))))
     (setq form (format "(with-module %s %s)" 
                        module eval-expression-arg))
-    (let ((result (gosh-backend-eval form))
-          (output (gosh-backend-eval-get-output)))
+    (let (result output)
+      (condition-case err
+          (progn
+            (setq result (gosh-backend-eval form))
+            (setq output (gosh-backend-eval-get-output)))
+        (gosh-backend-error
+         (setq output (gosh-backend-eval-get-output))
+         (message "%s" output)
+         (signal 'gosh-backend-error (cdr err))))
       (message "%s%s" output result))))
 
 
