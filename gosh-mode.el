@@ -462,9 +462,11 @@ Evaluate s-expression, syntax check, test-module, etc."
                    gosh-sticky-validated-time))
         (gosh-sticky-validate-update module)
         ;;FIXME
-        ;; too slow on windows.
+        ;; todo slow on windows.
+        ;; todo slow if buffer is huge
         (unless (memq system-type '(windows-nt))
-          (gosh-sticky-test-update module))))
+          ;; (gosh-sticky-test-update module)
+          )))
     (force-mode-line-update)))
 
 (defun gosh-sticky-validate-update (module)
@@ -503,6 +505,7 @@ Evaluate s-expression, syntax check, test-module, etc."
 (defun gosh-sticky-test-module (module)
   (let ((file (gosh-sticky-backend-loading-file)))
     (with-temp-buffer
+      ;;TODO non blocking execute
       (unless (= (call-process gosh-default-command-internal nil (current-buffer) nil
                     "-b" "-u" "gauche.test" 
                     "-l" file
@@ -2780,6 +2783,7 @@ d:/home == /cygdrive/d/home
 (make-variable-buffer-local 'gosh-backend-lock-process)
 
 (defun gosh-backend-kill ()
+  ;;TODO
   (kill-process (gosh-backend-check-process)))
 
 (defun gosh-backend-eval (sexp-string)
@@ -2818,10 +2822,10 @@ d:/home == /cygdrive/d/home
          start end)
     (with-current-buffer (process-buffer proc)
       (gosh-backend-wait-locking)
-      (setq start (point-max))
       (setq gosh-backend-lock-process t)
       (unwind-protect
           (progn
+            (setq start (point-max))
             (process-send-string proc sexp-string)
             (let ((inhibit-quit t))
               ;; wait output from command
@@ -2890,10 +2894,12 @@ d:/home == /cygdrive/d/home
       (when proc
         (delete-process proc))
       (let* ((buffer (gosh-backend-process-buffer command)))
-        (setq proc (start-process "Gosh backend" buffer command "-i"))
-        (gosh-set-alist 'gosh-backend-process-alist command proc)
-        (process-put proc 'backend-output-file (make-temp-file "gosh-mode-output-"))
-        (sleep-for 1) ;; wait for first prompt
+        (with-current-buffer buffer
+          (setq proc (start-process "Gosh backend" buffer command "-i"))
+          (gosh-set-alist 'gosh-backend-process-alist command proc)
+          (process-put proc 'backend-output-file (make-temp-file "gosh-mode-output-"))
+          (while (not (gosh-backend-prompt-match))
+            (sleep-for 0.1))) ;; wait for first prompt
         proc))))
 
 (defun gosh-backend-process-buffer (command)
@@ -2918,10 +2924,12 @@ d:/home == /cygdrive/d/home
          (gosh-backend-suppress-discard-input t)
          directory)
     (setq directory (expand-file-name default-directory))
+    (unless (file-directory-p directory)
+      (error "Directory is not exist"))
     ;;FIXME see `gosh-sticky-test-module2'
     ;; (gosh-backend-eval (format gosh-unload-module-command-format module))
-    (gosh-backend-eval (format "(sys-chdir \"%s\")" directory))
-    (gosh-backend-eval (format "(load \"%s\")" file))
+    (gosh-backend-low-level-eval (format "(sys-chdir \"%s\")\n" directory))
+    (gosh-backend-low-level-eval (format "(load \"%s\")\n" file))
     t))
 
 (defun gosh-sticky-backend-loading-file ()
