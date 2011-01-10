@@ -227,7 +227,9 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
     (when (and full (string-match "/gosh\\(\\.exe\\)?$" full))
       full)))
 
+;;TODO delete duplicates (preserve seq)
 (defun gosh-available-modules ()
+  "All module symbols in *load-path*"
   (let ((paths (gosh-load-path)))
     (mapcar
      (lambda (f) 
@@ -1525,7 +1527,7 @@ This function come from apel"
           (unless (bobp)
             (backward-char)))
         (let ((matcher (lambda ()
-                         (when (looking-at "(\\(?:with\\|define\\)-module[ \t\n]+\\([^ \t\n()]+\\)")
+                         (when (looking-at "(\\(?:with\\|define\\(?:-in\\)?\\)-module[ \t\n]+\\([^ \t\n()]+\\)")
                            (throw 'return (match-string-no-properties 1)))))
               (toplevel (gosh-parse-context-toplevel-p)))
           (unless toplevel
@@ -2634,7 +2636,7 @@ d:/home == /cygdrive/d/home
         (requires . 1)
         (cache)))
 
-    (let ((syntaxes '("use" "import" "select-module" "with-module" "extend")))
+    (let ((syntaxes '("use" "import" "select-module" "with-module" "extend" "define-in-module")))
       (ac-define-source gosh-modules
         `((candidates . gosh-ac-module-candidates)
           (symbol . "m")
@@ -2795,6 +2797,7 @@ d:/home == /cygdrive/d/home
             sexp-string)))
          result)
     (setq result (gosh-backend-low-level-eval eval-form proc))
+    ;;TODO print output when error.
     (if (string-match (concat "^" hash "\\(.*\\)") result)
         (signal 'gosh-backend-error (list (match-string 1 result)))
       result)))

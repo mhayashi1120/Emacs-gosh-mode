@@ -40,6 +40,9 @@ what-where:
 install: elc
 	$(EMACS) $(FLAGS) -f install-gosh-mode $(CONFIG)
 
+uninstall:
+	$(EMACS) $(FLAGS) -f uninstall-gosh-mode $(CONFIG)
+
 clean:
 	-$(RM) $(GOMI)
 

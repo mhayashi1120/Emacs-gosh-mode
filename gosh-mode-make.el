@@ -53,6 +53,10 @@
   (gosh-mode-make-initialize)
   (gosh-mode-make-install))
 
+(defun uninstall-gosh-mode ()
+  (gosh-mode-make-initialize)
+  (gosh-mode-make-uninstall))
+
 (defun what-where-gosh-mode ()
   (gosh-mode-make-initialize)
   (gosh-mode-make-install t))
@@ -78,6 +82,28 @@
      (with-current-buffer "*Elint*"
        (message (replace-regexp-in-string "%" "%%" (buffer-string)))))
    ALL-MODULES))
+
+(defun gosh-mode-make-uninstall (&optional just-print)
+  (unless (file-directory-p INSTALL-DIR)
+    (error "gosh-mode is not installed"))
+  (gosh-mode-delete-directory INSTALL-DIR))
+
+
+(defun gosh-mode-delete-directory (directory)
+  (mapc
+   (lambda (file)
+     (cond
+      ((member (file-name-nondirectory file) '("." "..")))
+      ((file-symlink-p file)
+       (error "Not supported"))
+      ((file-directory-p file)
+       (gosh-mode-delete-directory file))
+      (t
+       (princ (format "Deleting %s\n" file))
+       (delete-file file))))
+   (directory-files directory t "^\\([^.]\\|\\.\\([^.]\\|\\..\\)\\).*"))
+  (princ (format "Deleting %s\n" directory))
+  (delete-directory directory))
 
 (defun gosh-mode-make-install (&optional just-print)
   (unless (or just-print (file-directory-p INSTALL-DIR))
