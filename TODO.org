@@ -5,9 +5,14 @@ delegate parsing scheme source code
 ** *gosh-documented-exports*
 relate to module name
 
-** see completion-at-point
+** bug
 
-change behavior like elisp
+;;TODO top level loop function in script 
+;; example:
+;; #!/usr/bin/env gosh
+;; (while (read-line))
+;;
+
 
 
 * low priority
@@ -71,6 +76,10 @@ generic each methods arguments
 
 ** in the trunk directory
 browsing trunk repository
+
+** see completion-at-point
+
+change behavior like elisp
 
 
 * refactor

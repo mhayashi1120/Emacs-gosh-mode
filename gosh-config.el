@@ -102,6 +102,7 @@
 (put 'with-signal-handlers 'scheme-indent-function 1)
 (put 'with-string-io 'scheme-indent-function 1)
 (put 'with-time-counter 'scheme-indent-function 1)
+(put 'without-echoing  'scheme-indent-function 1)
 
 
 
