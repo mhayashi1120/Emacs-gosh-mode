@@ -655,8 +655,9 @@ Evaluate s-expression, syntax check, test-module, etc."
 (defvar gosh-mode-map nil)
 
 (unless gosh-mode-map
-  (let ((map (copy-keymap scheme-mode-map)))
-    
+  (let ((map (make-sparse-keymap)))
+    (set-keymap-parent map scheme-mode-map)
+
     (define-key map "\M-\C-i" 'gosh-smart-complete)
     (define-key map "\C-c\C-j" 'gosh-jump-thingatpt)
     (define-key map "\C-c?" 'gosh-show-info)
@@ -669,13 +670,14 @@ Evaluate s-expression, syntax check, test-module, etc."
 
 (define-derived-mode gosh-mode scheme-mode "Gosh"
   "Major mode for Gauche programming."
-  (if (boundp 'syntax-propertize-function)
-      (set (make-local-variable 'syntax-propertize-function)
-         'gosh-syntax-table-apply-region)
-    (set (make-local-variable 'font-lock-syntactic-keywords)
-         (append
-          font-lock-syntactic-keywords
-          gosh-font-lock-syntactic-keywords)))
+  ;;TODO check documents
+  ;; (when (boundp 'syntax-propertize-function)
+  ;;   (set (make-local-variable 'syntax-propertize-function)
+  ;;        'gosh-syntax-table-apply-region))
+  (set (make-local-variable 'font-lock-syntactic-keywords)
+       (append
+        font-lock-syntactic-keywords
+        gosh-font-lock-syntactic-keywords))
   (set (make-local-variable 'after-change-functions)
        'gosh-after-change-function)
   (add-to-list (make-local-variable 'mode-line-process)
@@ -695,7 +697,7 @@ Evaluate s-expression, syntax check, test-module, etc."
 (defun gosh-font-lock-keywords (bound)
   ;; ignore if quack is activated
   (and (not (featurep 'quack))
-       (re-search-forward (concat "(\\(" gosh-defined-procedure-keyword-regexp "\\)\\_>") bound t)))
+       (re-search-forward gosh-defined-procedure-keyword-regexp bound t)))
 
 (defun gosh-font-lock-basic-syntax (bound)
   ;; ignore if quack is activated
@@ -1468,6 +1470,7 @@ This function come from apel"
     (bobp)))
 
 (defun gosh-parse-last-expression-define-p ()
+  "Return t if last expression is top-level define-*"
   (and (gosh-parse-context-toplevel-p)
        (save-excursion
          (beginning-of-defun)
@@ -3101,9 +3104,7 @@ d:/home == /cygdrive/d/home
   "Send the previous sexp to the sticky backend process."
   (interactive)
   (if (gosh-parse-last-expression-define-p)
-      (save-excursion
-        (beginning-of-defun)
-        (gosh-eval-defun))
+      (gosh-eval--toplevel-expression)
     (gosh-eval--send-region (save-excursion (backward-sexp) (point)) (point))))
 
 (defvar gosh-read-expression-history nil)
@@ -3113,9 +3114,13 @@ d:/home == /cygdrive/d/home
   (interactive)
   (save-excursion
     (end-of-defun)
-    (let* ((end (point))
-           (module (gosh-parse-context-module))
-           start sexp)
+    (gosh-eval--toplevel-expression)))
+
+(defun gosh-eval--toplevel-expression ()
+  (let* ((end (point))
+         (module (gosh-parse-context-module))
+         start sexp)
+    (save-excursion
       (beginning-of-defun)
       (setq start (point))
       (setq sexp

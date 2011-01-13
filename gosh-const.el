@@ -37,6 +37,10 @@
     "require"
 
     ;; keywords special indent function by `scheme-indent-function' property
+    "^"
+    "^a" "^b" "^c" "^d" "^e" "^f" "^g" "^h" "^i"
+    "^j" "^k" "^l" "^m" "^n" "^o" "^p" "^q" "^r"
+    "^s" "^t" "^u" "^v" "^w" "^x" "^y" "^z" 
     "and-let*" "begin0" "call-with-client-socket"
     "call-with-input-conversion" "call-with-input-file"
     "call-with-input-process" "call-with-input-string"
@@ -60,7 +64,9 @@
     ))
 
 (defconst gosh-defined-procedure-keyword-regexp
-  (regexp-opt gosh-const-procedure-keyword-list))
+  (concat "(\\("
+          (regexp-opt gosh-const-procedure-keyword-list)
+          "\\)\\_>"))
 
 (defconst gosh-basic-syntax-keyword-list
   '(
