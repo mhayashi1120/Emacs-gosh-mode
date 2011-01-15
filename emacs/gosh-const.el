@@ -25,6 +25,10 @@
 
 ;;; Code:
 
+(defvar current-language-environment)
+
+
+
 (defconst gosh-const-procedure-keyword-list
   '( 
     ;; define methods

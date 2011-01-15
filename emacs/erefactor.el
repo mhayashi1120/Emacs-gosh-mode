@@ -45,7 +45,7 @@
 ;; C-c C-v L : elint current buffer by multiple emacs binaries.
 ;;             See `erefactor-lint-emacsen'
 ;; C-c C-v r : Rename symbol in current buffer. 
-;;             Resolve `let' binding as log as i can.
+;;             Resolve `let' binding as long as i can.
 
 ;;; TODO:
 ;; * Flymake? Server process?
@@ -99,12 +99,6 @@
            (add-to-list 'ret file))))
      obarray)
     ret))
-
-(defun erefactor--rename-symbol-read-args ()
-  (erefactor-rename-symbol-read-args 'erefactor--read-symbol-history))
-
-(defun erefactor--change-prefix-read-args ()
-  (erefactor-change-prefix-read-args 'erefactor--read-prefix-history))
 
 (defun erefactor--find-local-binding (name)
   (save-excursion
@@ -185,7 +179,8 @@
        (string= (symbol-name (cadar catch-arg)) name)))
 
 (defun erefactor-rename-symbol-in-package (old-name new-name)
-  (interactive (erefactor--rename-symbol-read-args))
+  (interactive 
+   (erefactor-rename-symbol-read-args 'erefactor--read-symbol-history))
   (let* ((symbol (intern-soft old-name))
          (prefix (erefactor-matched-prefix symbol))
          guessed-files)
@@ -201,7 +196,8 @@
 
 (defun erefactor-rename-symbol-in-buffer (old-name new-name)
   "Rename symbol at point."
-  (interactive (erefactor--rename-symbol-read-args))
+  (interactive 
+   (erefactor-rename-symbol-read-args 'erefactor--read-symbol-history))
   (let (region after)
     (setq region (erefactor--find-local-binding old-name))
     (unless region
@@ -210,7 +206,8 @@
 
 (defun erefactor-change-prefix-in-buffer (old-prefix new-prefix)
   "Rename symbol at point."
-  (interactive (erefactor--change-prefix-read-args))
+  (interactive 
+   (erefactor-change-prefix-read-args 'erefactor--read-prefix-history))
   (erefactor-change-symbol-prefix old-prefix new-prefix 
                                  nil 'erefactor-after-rename-symbol))
 
@@ -534,8 +531,6 @@ TODO
   (let* ((path (erefactor-ref file erefactor-lint-path-alist))
          (version (erefactor-emacs-version command t))
          (sexp `(progn 
-                  ,(when (<= version 21)
-                     '(require 'cl))
                   (setq load-path (append load-path ',path)) 
                   (find-file ,file)
                   ;;FIXME probablly ok...

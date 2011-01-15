@@ -29,6 +29,16 @@
 
 ;;; Code:
 
+
+(defgroup gosh-mode nil
+  "Gauche script editing mode."
+  :group 'lisp
+  :prefix "gosh-")
+
+(defvar gosh-mode-version "0.1.2")
+
+
+
 (eval-when-compile
   (require 'cl)
   (require 'gosh-const))
@@ -51,10 +61,8 @@
 (defvar unread-command-events)
 (defvar emacs-version)
 (defvar exec-path)
-(defvar current-language-environment)
 (defvar auto-mode-interpreter-regexp)
-
-(defvar gosh-mode-version "0.1.2")
+(defvar read-expression-map)
 
 ;;TODO move
 (defvar gosh-debug nil)
@@ -63,11 +71,6 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Basic settings
-
-(defgroup gosh-mode nil
-  "Gauche script editing mode."
-  :group 'lisp
-  :prefix "gosh-")
 
 (defcustom gosh-default-command "gosh"
   "Gauche program name."
