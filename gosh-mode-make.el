@@ -16,18 +16,18 @@
        "gosh-config.el"
        "gosh-mode.el"
        "gosh-const.el"
-       "refactor.el"
+       "erefactor.el"
        ))
 
 ;; (when (memq system-type '(windows-nt))
 ;;   (setq ALL-MODULES
-;; 	(append ALL-MODULES (list "fsvn-win.el")))
+;;      (append ALL-MODULES (list "fsvn-win.el")))
 ;;   (unless (featurep 'meadow)
 ;;     (setq ALL-MODULES
-;; 	(append ALL-MODULES (list 
-;; 			     "mw32cmp.el"
-;; 			     "mw32script.el"
-;; 			     )))))
+;;      (append ALL-MODULES (list 
+;;                           "mw32cmp.el"
+;;                           "mw32script.el"
+;;                           )))))
 
 (defun make-gosh-mode ()
   (gosh-mode-make-initialize))
@@ -43,8 +43,8 @@
   ;; see comment in `fsvn-test-excursion' at fsvn-test.el
   (condition-case err
       (progn
-	(gosh-mode-make-test)
-	(kill-emacs))
+        (gosh-mode-make-test)
+        (kill-emacs))
     (error
      (princ err)
      (kill-emacs 1))))
@@ -118,15 +118,15 @@
        (princ (format "%s -> %s\n" el dest-el))
        (princ (format "%s -> %s\n" elc dest-elc))
        (unless just-print
-	 (mapc
-	  (lambda (src-dest)
-	    (let ((src (car src-dest))
-		  (dest (cdr src-dest)))
-	      (unless (file-exists-p src)
-		(error "%s not exists." src))
-	      (copy-file src dest t)
-	      (set-file-modes dest ?\644)))
-	  (list (cons el dest-el) (cons elc dest-elc)))))
+         (mapc
+          (lambda (src-dest)
+            (let ((src (car src-dest))
+                  (dest (cdr src-dest)))
+              (unless (file-exists-p src)
+                (error "%s not exists." src))
+              (copy-file src dest t)
+              (set-file-modes dest ?\644)))
+          (list (cons el dest-el) (cons elc dest-elc)))))
      ALL-MODULES)))
 
 (defun gosh-mode-make-test ()

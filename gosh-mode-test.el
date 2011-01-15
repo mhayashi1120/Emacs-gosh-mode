@@ -34,17 +34,17 @@
     (desc "stub setup/teardown")
     (expect '(hoge  hoge-rest hoge-opt hoge-key hoge-key-opt)
       (gosh-mode-test-with  gosh-mode-test-code1
-	(gosh-parse-current-exports)))
+        (gosh-parse-current-exports)))
     (expect '((hoge-key-opt (lambda (:optional arg1 (arg2 \#f) :key (key1 \#f) key2)))
-	      (hoge-key (lambda (:key (key1 \#f) key2)))
-	      (hoge-opt (lambda (:optional arg1 (arg2 \#f))))
-	      (hoge-rest (lambda args))
-	      (hoge (lambda (args))))
+              (hoge-key (lambda (:key (key1 \#f) key2)))
+              (hoge-opt (lambda (:optional arg1 (arg2 \#f))))
+              (hoge-rest (lambda args))
+              (hoge (lambda (args))))
       (gosh-mode-test-with  gosh-mode-test-code1
-	(gosh-parse-current-globals)))
+        (gosh-parse-current-globals)))
 
     (expect "(hoge (opts ()))"
-	    (gosh-eldoc--object->string '(hoge (opts (quote ())))))
+            (gosh-eldoc--object->string '(hoge (opts (quote ())))))
 
     (when (memq system-type '(windows-nt))
       (expect "c:/cygwin/usr/local/ " (gosh-cygpath->emacs-path "/usr/local"))

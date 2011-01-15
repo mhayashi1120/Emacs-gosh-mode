@@ -32,7 +32,7 @@
 (require 'auto-complete-config nil t)
 
 (when (or (not (boundp 'scheme-program-name)) 
-	  (and scheme-program-name (not (string-match "gosh" scheme-program-name))))
+          (and scheme-program-name (not (string-match "gosh" scheme-program-name))))
   (setq scheme-program-name (format "%s -i" gosh-default-command)))
 
 
@@ -122,6 +122,7 @@
 
 (add-hook 'gosh-mode-hook 
             (lambda () 
+              (setq indent-tabs-mode nil)
               (gosh-sticky-mode 1)
               (turn-on-eldoc-mode)))
 

@@ -64,9 +64,10 @@
     ))
 
 (defconst gosh-defined-procedure-keyword-regexp
-  (concat "(\\("
-          (regexp-opt gosh-const-procedure-keyword-list)
-          "\\)\\_>"))
+  (eval-when-compile
+    (concat "(\\("
+            (regexp-opt gosh-const-procedure-keyword-list)
+            "\\)\\_>")))
 
 (defconst gosh-basic-syntax-keyword-list
   '(
@@ -74,9 +75,10 @@
     ))
 
 (defconst gosh-basic-syntax-keyword-regexp
-  (concat "(" 
-          (regexp-opt gosh-basic-syntax-keyword-list t)
-          "[ \t]+\\(\\(?:\\sw\\|\\.\\)+\\)?"))
+  (eval-when-compile
+    (concat "(" 
+            (regexp-opt gosh-basic-syntax-keyword-list t)
+            "[ \t]+\\(\\(?:\\sw\\|\\.\\)+\\)?")))
 
 (defconst gosh-regexp-literal-regexp 
   "\\(#\\)\\(/\\)\\(\\(?:\\\\/\\|[^/]\\)+\\)\\(/\\)")
