@@ -838,21 +838,23 @@ TODO but not supported with-module context."
 (defun gosh-snatch-process-candidates (proc command)
   "Execute COMMAND in PROC"
   (let* ((filter (process-filter proc)))
-    (set-process-filter proc 'gosh-snatch-process-filter)
-    (unwind-protect
-        (progn
-          (setq gosh-snatch-filter-candidates nil
-                gosh-snatch-filter-string-stack nil)
-          (process-send-string proc command)
-          (let ((inhibit-quit t))
-            (while (not gosh-snatch-filter-candidates)
-              (discard-input)
-              (sleep-for 0.1)
-              (when quit-flag
-                (setq inhibit-quit nil)))))
-      (set-process-filter proc filter))
-    (and (listp gosh-snatch-filter-candidates)
-         gosh-snatch-filter-candidates)))
+    ;;TODO temporarily... 
+    ;;   auto-complete timer process snatch from gosh-snatch-process-filter
+    (unless (eq filter 'gosh-snatch-process-filter)
+      (set-process-filter proc 'gosh-snatch-process-filter)
+      (unwind-protect
+          (progn
+            (setq gosh-snatch-filter-candidates nil
+                  gosh-snatch-filter-string-stack nil)
+            (process-send-string proc command)
+            (let ((inhibit-quit t))
+              (while (not gosh-snatch-filter-candidates)
+                (sleep-for 0.1)
+                (when quit-flag
+                  (setq inhibit-quit nil)))))
+        (set-process-filter proc filter))
+      (and (listp gosh-snatch-filter-candidates)
+           gosh-snatch-filter-candidates))))
 
 ;; FIXME Unable read scheme symbol `t'.
 (defun gosh-snatch-process-filter (proc event)
@@ -1153,9 +1155,9 @@ TODO but not supported with-module context."
 
 (defmacro gosh-aif (test-form then-form &rest else-forms)
   "Anaphoric if. Temporary variable `it' is the result of test-form."
+  (declare (indent 2))
   `(let ((it ,test-form))
      (if it ,then-form ,@else-forms)))
-(put 'gosh-aif 'lisp-indent-function 2)
 
 
 
@@ -1258,6 +1260,7 @@ This function come from apel"
       res)))
 
 (defmacro gosh-with-find-file (path-expr &rest body)
+  (declare (indent 1))
   (let ((path (gensym "path"))
         (buf (gensym "buf"))
         (res (gensym "res")))
@@ -1270,7 +1273,6 @@ This function come from apel"
              (unless ,buf 
                (kill-buffer (current-buffer))))
            ,res)))))
-(put 'gosh-with-find-file 'lisp-indent-function 1)
 
 (defun gosh-file->lines (file)
   (and (file-readable-p file)
@@ -2770,8 +2772,8 @@ d:/home == /cygdrive/d/home
     (add-to-list 'ac-sources 'ac-source-gosh-keywords)
     (add-to-list 'ac-sources 'ac-source-gosh-modules)))
 
-(put 'gosh-map-env-symbols 'lisp-indent-function 2)
 (defmacro gosh-map-env-symbols (env var &rest form)
+  (declare (indent 2))
   `(mapc
     (lambda (env)
       (mapc
