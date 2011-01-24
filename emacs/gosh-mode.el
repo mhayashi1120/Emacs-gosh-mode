@@ -314,9 +314,10 @@ TODO prefixed symbol"
       (message "Not found definition %s" sym))))
 
 (defun gosh-jump-to-definition (definition)
-  (let ((first (point)))
+  (let ((name (symbol-name definition))
+        (first (point)))
     (goto-char (point-min))
-    (if (re-search-forward (format "^[ \t]*(def.*\\_<%s\\_>" definition) nil t)
+    (if (re-search-forward (format "^[ \t]*(def.*\\_<%s\\_>" (regexp-quote name)) nil t)
         (forward-line 0)
       (goto-char first)
       nil)))
@@ -1665,7 +1666,7 @@ This function come from apel"
       (goto-char (point-min))
       (let ((res '()))
         (while (re-search-forward "(\\(?:use\\|import\\)[ \t\n]" nil t)
-          (when (gosh-context-comment-p)
+          (when (gosh-context-code-p)
             (ignore-errors
               (save-excursion
                 (goto-char (match-beginning 0))
@@ -3328,18 +3329,18 @@ And print value in the echo area."
 
 
 
-(defmacro gosh-info-lookup-add-help (mode)
-  `(info-lookup-add-help
-    ;; For
-    ;;  info-complete-symbol (to complete a symbol using the info)
-    ;;  info-lookup-symbol   (to look up a symbol in the info)
-    :topic 'symbol
-    :mode  ,mode
-    :regexp "[^()'\" \t\n]+"
-    :ignore-case nil
-    :doc-spec ',gosh-info-appendixes
-    :parse-rule  nil
-    :other-modes nil))
+(defun gosh-info-lookup-add-help (mode)
+  (info-lookup-add-help
+   ;; For
+   ;;  info-complete-symbol (to complete a symbol using the info)
+   ;;  info-lookup-symbol   (to look up a symbol in the info)
+   :topic 'symbol
+   :mode  mode
+   :regexp "[^()'\" \t\n]+"
+   :ignore-case nil
+   :doc-spec gosh-info-appendixes
+   :parse-rule  nil
+   :other-modes nil))
 
 (defun gosh-info-lookup-initialize ()
   (gosh-info-lookup-add-help 'gosh-mode)

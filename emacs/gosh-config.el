@@ -54,9 +54,6 @@
 (put 'call-with-values 'scheme-indent-function 1)
 (put 'dolist 'scheme-indent-function 1)
 (put 'dotimes 'scheme-indent-function 1)
-(put 'guard 'scheme-indent-function 1)
-(put 'if 'scheme-indent-function 1)
-(put 'if-let1 'scheme-indent-function 2)
 (put 'if-match 'scheme-indent-function 2)
 (put 'let*-values 'scheme-indent-function 1)
 (put 'let-args 'scheme-indent-function 2)
@@ -69,12 +66,10 @@
 (put 'let1 'scheme-indent-function 2)
 (put 'letrec-syntax 'scheme-indent-function 1)
 (put 'make 'scheme-indent-function 1)
-(put 'match 'scheme-indent-function 1)
 (put 'multiple-value-bind 'scheme-indent-function 2)
 (put 'parameterize 'scheme-indent-function 1)
 (put 'parse-options 'scheme-indent-function 1)
 (put 'receive 'scheme-indent-function 2)
-(put 'rlet1 'scheme-indent-function 2)
 (put 'rxmatch-case 'scheme-indent-function 1)
 (put 'rxmatch-cond 'scheme-indent-function 0)
 (put 'rxmatch-if 'scheme-indent-function 2)
@@ -92,7 +87,6 @@
 (put 'with-input-from-process 'scheme-indent-function 1)
 (put 'with-input-from-string 'scheme-indent-function 1)
 (put 'with-iterator 'scheme-indent-function 1)
-(put 'with-locking-mutex 'scheme-indent-function 1)
 (put 'with-module 'scheme-indent-function 1)
 (put 'with-output-conversion 'scheme-indent-function 1)
 (put 'with-output-to-port 'scheme-indent-function 1)
@@ -102,6 +96,15 @@
 (put 'with-signal-handlers 'scheme-indent-function 1)
 (put 'with-string-io 'scheme-indent-function 1)
 (put 'with-time-counter 'scheme-indent-function 1)
+
+;;
+;; Currently not listed.
+;;
+
+(put 'guard 'scheme-indent-function 1)
+(put 'if 'scheme-indent-function 1)
+(put 'if-let1 'scheme-indent-function 2)
+(put 'with-locking-mutex 'scheme-indent-function 1)
 (put 'without-echoing  'scheme-indent-function 1)
 
 

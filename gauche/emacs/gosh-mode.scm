@@ -234,6 +234,7 @@
 	[((or 'define 'define-constant) name 
 	  ((or 'lambda '^) args . _))
 	 ;; ex: (define sym (lambda ())) 
+     ;;    unable handle (define sym (if anycond (lambda ()) (lambda ())) )
 	 (parse-closure name args)]
 	[((or 'define 'define-constant) name 
 	  (or (? (.$ not pair?) value)
