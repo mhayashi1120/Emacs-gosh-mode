@@ -137,6 +137,15 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
    " (close-output-port port)))"
    ))
 
+(defconst gosh-backend-eval-guard-format
+  (concat
+   "(guard (e "
+   " (else (print \"%s\" "
+   " (or "
+   " (and (slot-exists? e 'message) (slot-ref e 'message))"
+   " \"ERROR\""
+   " )))) %s)\n"))
+
 ;; bound only `let' form
 (defvar gosh-delegate-command)
 (defun gosh-delegate-command-get (index)
@@ -463,6 +472,9 @@ TODO prefixed symbol"
   "Gosh sticky process mode.  
 Evaluate s-expression, syntax check, test-module, etc."
   nil nil gosh-sticky-mode-map
+  (if gosh-sticky-mode
+      (add-hook 'after-save-hook 'gosh-sticky-after-save nil t)
+    (remove-hook 'after-save-hook 'gosh-sticky-after-save t))
   (when (timerp gosh-sticky-mode-update-timer)
     (cancel-timer gosh-sticky-mode-update-timer))
   (setq gosh-sticky-mode-update-timer
@@ -582,7 +594,7 @@ Evaluate s-expression, syntax check, test-module, etc."
      ((string-match ":line \\([0-9]+\\):\\(.*\\)" message)
       (let ((line (string-to-number (match-string 1 message)))
             (text (match-string 2 message)))
-        (goto-line line)
+        (gosh-goto-line line)
         (when (= (point) (point-max))
           (forward-line -1))
         ;;TODO completely using flymake
@@ -687,7 +699,6 @@ Evaluate s-expression, syntax check, test-module, etc."
   (add-to-list (make-local-variable 'mode-line-process)
                'gosh-mode-line-process
                'append)
-  (add-hook 'after-save-hook 'gosh-sticky-after-save nil t)
   (setq gosh-buffer-change-time (float-time))
   (gosh-eldoc-config)
   (gosh-ac-mode-initialize)
@@ -1160,6 +1171,40 @@ TODO but not supported with-module context."
   `(let ((it ,test-form))
      (if it ,then-form ,@else-forms)))
 
+(defun gosh-goto-line (line)
+  (save-restriction
+    (widen)
+    (goto-char (point-min))
+    (forward-line line)))
+
+(defvar gosh-obarray (make-vector (length obarray) nil))
+
+(defun gosh-intern (name)
+  (intern name gosh-obarray))
+
+(defun gosh-intern-soft (name)
+  (intern-soft name gosh-obarray))
+
+(defun gosh-symbol-eq (symbol1 symbol2)
+  (let ((name1 (symbol-name symbol1))
+        (name2 (symbol-name symbol2)))
+    (eq (gosh-intern name1) (gosh-intern name2))))
+
+(defun gosh-intern-safe (obj)
+  (cond
+   ((stringp obj)
+    (gosh-intern obj))
+   ((symbolp obj)
+    (gosh-intern (symbol-name obj)))
+   ((numberp obj)
+    (gosh-intern (number-to-string obj)))
+   (t
+    (error "Assert"))))
+
+(defun gosh-symbol-memq (symbol list)
+  (memq (gosh-intern-safe symbol) 
+        (mapcar 'gosh-intern-safe list)))
+
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1290,6 +1335,28 @@ This function come from apel"
 (defun gosh-file-mtime (file)
   (nth 5 (file-attributes file)))
 
+;;
+;; ui
+;;
+
+(defun gosh-momentary-message (m)
+  "Show temporary message to current point.
+referenced mew-complete.el"
+  (let ((wait-msec (max (* (length m) 0.05) 0.5))
+        (savemodified (buffer-modified-p))
+        savepoint savemax)
+    (save-excursion
+      (setq savepoint (point))
+      (insert (concat "  " m))
+      (set-buffer-modified-p savemodified)
+      (setq savemax (point)))
+    (let ((inhibit-quit t))
+      (sit-for wait-msec)
+      (delete-region savepoint savemax)
+      (set-buffer-modified-p savemodified)
+      (when quit-flag
+        (setq quit-flag nil)
+        (setq unread-command-events (list 7))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Parse buffer
@@ -1406,15 +1473,18 @@ This function come from apel"
     (gosh-hack-string-replace->readable-regexp string))))
 
 (defun gosh-hack-string-replace->readable-regexp (string)
-  (let ((str string)
-        before after reg ret)
-    (while (string-match gosh-regexp-literal-regexp str)
-      (setq reg (match-string 3 str))
-      (setq before (substring str 0 (match-beginning 3)))
-      (setq after (substring str (match-end 3)))
-      (setq ret (concat ret before (gosh-hack-string-regexp->readable-string reg)))
-      (setq str after))
-    (concat ret str)))
+  (condition-case nil
+      (let ((str string)
+            before after reg ret)
+        (while (string-match gosh-regexp-literal-regexp str)
+          (setq reg (match-string 3 str))
+          (setq before (substring str 0 (match-beginning 3)))
+          (setq after (substring str (match-end 3)))
+          (setq ret (concat ret before (gosh-hack-string-regexp->readable-string reg)))
+          (setq str after))
+        (concat ret str))
+    (error
+     "SOME-REGEXP")))
 
 (defun gosh-hack-string-regexp->readable-string (regex)
   (let* ((reg regex)
@@ -2385,12 +2455,14 @@ d:/home == /cygdrive/d/home
                          completion2
                        completion1)))
     (cond
-     ((eq completion t))
+     ((eq completion t)
+      (gosh-momentary-message "[Sole completion]"))
      ((not completion)
-      (message "Can't find completion for \"%s\"" str)
-      (ding))
+      (ding)
+      (gosh-momentary-message "[No completion]"))
      ((not (string= str completion))
-      (let ((prefix-p (gosh-string-starts-with completion completion1)))
+      (let ((all (all-completions str (append strs coll) pred))
+            (prefix-p (gosh-string-starts-with completion completion1)))
         (unless prefix-p
           (save-excursion
             (backward-char (length str))
@@ -2398,8 +2470,11 @@ d:/home == /cygdrive/d/home
         (insert (substring completion (length str)))
         (unless prefix-p
           (insert "\"")
-          (backward-char))))
-     (t
+          (backward-char))
+        (if (= (length all) 1)
+            (gosh-momentary-message "[Sole completion]")
+          (gosh-momentary-message "[Hit again]"))))
+      (t
       (let ((win-config (current-window-configuration))
             (done nil))
         (message "Hit space to flush")
@@ -2900,13 +2975,11 @@ d:/home == /cygdrive/d/home
          (proc (gosh-backend-check-process))
          (output-file (process-get proc 'backend-output-file))
          (eval-form 
-          (format 
-           "(guard (e (else (print \"%s\" (slot-ref e 'message)))) %s)\n"
-           hash
-           (format
-            gosh-eval-expression-command-format 
-            output-file
-            sexp-string)))
+          (format gosh-backend-eval-guard-format hash
+                  (format
+                   gosh-eval-expression-command-format 
+                   output-file
+                   sexp-string)))
          result)
     (setq result (gosh-backend-low-level-eval eval-form proc))
     (if (string-match (concat "^" hash "\\(.*\\)") result)

@@ -133,6 +133,9 @@
             (lambda () 
               (turn-on-eldoc-mode)))
 
+(when (featurep 'auto-highlight-symbol)
+  (add-to-list 'ahs-modes 'gosh-mode))
+
 
 
 (gosh-initialize)
