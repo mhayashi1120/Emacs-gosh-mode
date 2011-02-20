@@ -2473,7 +2473,7 @@ d:/home == /cygdrive/d/home
           (backward-char))
         (if (= (length all) 1)
             (gosh-momentary-message "[Sole completion]")
-          (gosh-momentary-message "[Hit again]"))))
+          (gosh-momentary-message "[Type again to show completions]"))))
       (t
       (let ((win-config (current-window-configuration))
             (done nil))
