@@ -126,10 +126,7 @@
 (add-hook 'gosh-mode-hook 
             (lambda () 
               (setq indent-tabs-mode nil)
-              ;;FIXME sticky mode is very risky when *.scm file has
-              ;;      following expression at toplevel form.
-              ;;      (shell-command "rm -rf")
-              ;; (gosh-sticky-mode 1)
+              (gosh-sticky-mode-on)
               (turn-on-eldoc-mode)))
 
 (add-hook 'gosh-inferior-mode-hook
