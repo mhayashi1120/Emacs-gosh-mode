@@ -43,6 +43,12 @@
 ;; gosh-eval-buffer to C-c C-b
 ;; gosh-eval-region to C-c TODO
 
+;; * unload user module except followings
+;;   main, *program-name*, *argv*
+
+;; * regulate gosh-sticky-* gosh-eval-*
+
+
 ;;; Code:
 
 
@@ -2999,7 +3005,7 @@ d:/home == /cygdrive/d/home
              (not (looking-at "\\sw\\|\\s_")))
         ;; car of form doesn't seem to be a symbol
         (progn
-          (if (not (> (save-excursion (forward-line 1) (point))
+          (if (not (> (line-beginning-position 2)
                       calculate-lisp-indent-last-sexp))
               (progn (goto-char calculate-lisp-indent-last-sexp)
                      (beginning-of-line)
@@ -3015,17 +3021,42 @@ d:/home == /cygdrive/d/home
                                          (progn (forward-sexp 1) (point))))
              (function-sym (intern-soft function))
              (method (and (not (assq function-sym (gosh-parse-context-local-vars)))
-                          (get function-sym 'scheme-indent-function))))
-        (cond ((or (eq method 'defun)
-                   (and (null method)
-                        (> (length function) 3)
-                        (string-match "\\`def" function)))
-               (lisp-indent-defform state indent-point))
-              ((integerp method)
-               (lisp-indent-specform method state
-                                     indent-point normal-indent))
-              (method
-               (funcall method state indent-point normal-indent)))))))
+                          (get function-sym 'scheme-indent-function)))
+             pair)
+        (cond 
+         ((or (eq method 'defun)
+              (and (null method)
+                   (> (length function) 3)
+                   (string-match "\\`def" function)))
+          (lisp-indent-defform state indent-point))
+         ((integerp method)
+          (lisp-indent-specform method state
+                                indent-point normal-indent))
+         ;; ((setq pair (gosh-assoc-to-regexp function))
+         ;;  (lisp-indent-specform (cdr pair) state indent-point normal-indent))
+         (method
+          (funcall method state indent-point normal-indent)))))))
+
+(defvar gosh-smart-indent-alist
+  '(
+    ))
+
+;;TODO
+(defun gosh-assoc-to-regexp (symbol)
+  (let (maxlen max)
+    (mapc
+     (lambda (x) 
+       (when (and (consp x)
+                  (car x)
+                  (numberp (cdr x)))
+         (when (string-match (car x) symbol)
+           (let ((len (- (match-end 0) (match-beginning 0))))
+             ;;TODO match same length
+             (when (or (null maxlen) (> len maxlen))
+               (setq maxlen len)
+               (setq max x))))))
+     gosh-smart-indent-alist)
+    max))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -3041,7 +3072,7 @@ d:/home == /cygdrive/d/home
   ;;TODO unbaranced parenthese must be error before send.
   (let* ((hash (concat (md5 sexp-string) " ")) ;; hash string is separator.
          (proc (gosh-backend-check-process))
-         (output-file (process-get proc 'backend-output-file))
+         (output-file (process-get proc 'gosh-backend-output-file))
          (eval-form 
           (format gosh-backend-eval-guard-format hash
                   (format
@@ -3057,7 +3088,7 @@ d:/home == /cygdrive/d/home
 (defun gosh-backend-eval-get-output ()
   ;; call after executing `gosh-backend-eval'
   (let* ((proc (gosh-backend-check-process))
-         (file (process-get proc 'backend-output-file)))
+         (file (process-get proc 'gosh-backend-output-file)))
     ;; ignore huge file. not concern about error.
     (with-temp-buffer
       (let* ((cs (process-coding-system proc))
@@ -3153,17 +3184,19 @@ d:/home == /cygdrive/d/home
   ;;TODO switch by executable
   (let* ((command gosh-default-command-internal)
          (proc (gosh-backend-active-process command)))
-    (or proc
-        (let* ((buffer (gosh-backend-process-buffer command)))
-          (with-current-buffer buffer
-            (setq proc (start-process "Gosh backend" buffer command "-i"))
-            (set-process-filter proc 'gosh-backend-process-filter)
-            (gosh-set-alist 'gosh-backend-process-alist command proc)
-            (process-put proc 'backend-output-file (make-temp-file "gosh-mode-output-"))
-            ;; wait for first prompt
-            (while (not (gosh-backend-prompt-match))
-              (sleep-for 0.1)))
-          proc))))
+    (unless proc
+      (let* ((buffer (gosh-backend-process-buffer command)))
+        (with-current-buffer buffer
+          (setq proc (start-process "Gosh backend" buffer command "-i"))
+          (set-process-filter proc 'gosh-backend-process-filter)
+          (gosh-set-alist 'gosh-backend-process-alist command proc)
+          ;; wait for first prompt
+          (while (not (gosh-backend-prompt-match))
+            (sleep-for 0.1)))))
+    (let ((file (process-get proc 'gosh-backend-output-file)))
+      (unless (and file (file-exists-p file))
+        (process-put proc 'gosh-backend-output-file (make-temp-file "gosh-mode-output-"))))
+    proc))
 
 (defun gosh-backend-process-buffer (command)
   (let ((buffer (get-buffer-create (format gosh-backend-process-buffer-format command))))
@@ -3241,6 +3274,7 @@ d:/home == /cygdrive/d/home
 (defun gosh-send-last-sexp ()
   "Send the previous sexp to the sticky backend process."
   (interactive)
+  (gosh-eval--check-backend)
   (if (gosh-parse-last-expression-define-p)
       (gosh-eval--toplevel-expression)
     (gosh-eval--send-region (save-excursion (backward-sexp) (point)) (point))))
@@ -3250,9 +3284,61 @@ d:/home == /cygdrive/d/home
 (defun gosh-eval-defun ()
   "Evaluate current top level definition"
   (interactive)
+  (gosh-eval--check-backend)
   (save-excursion
     (end-of-defun)
     (gosh-eval--toplevel-expression)))
+
+(defun gosh-eval-expression (eval-expression-arg)
+  "Evaluate EVAL-EXPRESSION-ARG in sticky backend process.
+And print value in the echo area.
+
+"
+  (interactive
+   (list (let ((minibuffer-completing-symbol t))
+           (read-from-minibuffer "Gosh Eval: "
+                                 nil read-expression-map nil
+                                 'gosh-read-expression-history))))
+  (gosh-eval--check-backend)
+  (gosh-eval-expression-1 eval-expression-arg))
+
+(defun gosh-eval-buffer ()
+  "Evaluate current buffer."
+  (interactive)
+  (gosh-eval--check-backend)
+  (let ((file (gosh-sticky-backend-loading-file)))
+    (gosh-eval-expression-1 (format "(load \"%s\")" file) t)))
+
+(defun gosh-eval-region (start end)
+  "Evaluate current region at current context."
+  (interactive "r")
+  (gosh-eval--check-backend)
+  (let ((file (make-temp-file "gosh-mode-")))
+    (unwind-protect
+        (progn
+          (let ((coding-system-for-write buffer-file-coding-system))
+            (write-region start end file nil 'no-msg))
+          (gosh-eval-expression-1 (format "(load \"%s\")" file) t))
+      (delete-file file))))
+
+(defun gosh-eval-expression-1 (eval-expression-arg &optional suppress-message)
+  (let ((module (gosh-parse-context-module))
+        form)
+    (setq form (format "(with-module %s %s)" 
+                       module eval-expression-arg))
+    (let (result output)
+      (condition-case err
+          (progn
+            (setq result (gosh-backend-eval form))
+            (setq output (gosh-backend-eval-get-output)))
+        (gosh-backend-error
+         (setq output (gosh-backend-eval-get-output))
+         ;;emulate emacs error..
+         (message "%s" output)
+         (signal 'gosh-backend-error (cdr err))))
+      (if suppress-message
+          (message "%s" output)
+        (message "%s%s" output result)))))
 
 (defun gosh-eval--toplevel-expression ()
   (let* ((end (point))
@@ -3271,62 +3357,6 @@ d:/home == /cygdrive/d/home
           (error "%s" result))
         (message "%s" result)))))
 
-(defun gosh-eval-expression (eval-expression-arg)
-  "Evaluate EVAL-EXPRESSION-ARG in sticky backend process.
-And print value in the echo area."
-  (interactive
-   (list (let ((minibuffer-completing-symbol t))
-           (read-from-minibuffer "Gosh Eval: "
-                                 nil read-expression-map nil
-                                 'gosh-read-expression-history))))
-  (let ((module (gosh-parse-context-module))
-        form)
-    (gosh-eval--check-backend)
-    (setq form (format "(with-module %s %s)" 
-                       module eval-expression-arg))
-    (let (result output)
-      (condition-case err
-          (progn
-            (setq result (gosh-backend-eval form))
-            (setq output (gosh-backend-eval-get-output)))
-        (gosh-backend-error
-         (setq output (gosh-backend-eval-get-output))
-         ;;emulate emacs error..
-         (message "%s" output)
-         (signal 'gosh-backend-error (cdr err))))
-      (message "%s%s" output result))))
-
-;;TODO strange moving..
-(defun gosh-eval-buffer ()
-  "Evaluate current buffer."
-  (interactive)
-  (save-excursion
-    (goto-char (point-min))
-    (while (not (eobp))
-      (gosh-goto-next-top-level)
-      (forward-sexp)
-      (gosh-send-last-sexp)))
-  nil)
-
-;;TODO toplevel only?
-(defun gosh-eval-region (start end)
-  (interactive "r")
-  (save-excursion
-    (goto-char start)
-    (if (not (gosh-parse-context-toplevel-p))
-        (gosh-eval--send-region start end)
-      (while (< (point) end)
-        (gosh-goto-next-top-level)
-        (forward-sexp)
-        (gosh-send-last-sexp)))))
-
-;;TODO
-(defun gosh-test-module ()
-  (interactive)
-  (let ((mod (gosh-parse-context-module)))
-    ;;TODO
-    (gosh-sticky-validate-async mod)))
-
 (defun gosh-eval--send-region (start end)
   (save-excursion
     ;; evaluate at end module context
@@ -3334,12 +3364,21 @@ And print value in the echo area."
     (gosh-eval-expression (buffer-substring start end))))
 
 (defun gosh-eval--check-backend ()
+  (unless gosh-sticky-mode 
+    (error "Command disabled when `gosh-sticky-mode' is disabled"))
   (if (gosh-backend-active-process)
       ;; backend already activated
       (gosh-sticky-backend-chdir)
     ;; backend deactivated then activate and load current file.
     ;; this case block several seconds in `gosh-backend-eval'
     (gosh-sticky-backend-switch-context)))
+
+;;TODO
+(defun gosh-test-module ()
+  (interactive)
+  (let ((mod (gosh-parse-context-module)))
+    ;;TODO
+    (gosh-sticky-validate-async mod)))
 
 
 
