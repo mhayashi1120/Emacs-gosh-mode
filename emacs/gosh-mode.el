@@ -30,13 +30,11 @@
 
 ;;; TODO:
 
-;; * gosh-eldoc-idle-delay
 ;; * dynamic indent?
 ;;   define indent rule by regexp?
 ;;   to indent macro form
 ;;   macro indent rule differ each buffer...
 ;; * cmuscheme C-c C-t to trace. what is this?
-;; * test-module bound to any key.
 
 ;; scheme-send-last-sexp to any keybind
 
@@ -48,6 +46,7 @@
 
 ;; * regulate gosh-sticky-* gosh-eval-*
 
+;; * Load automatically if module file is on the *load-path*?
 
 ;;; Code:
 
@@ -57,7 +56,7 @@
   :group 'lisp
   :prefix "gosh-")
 
-(defvar gosh-mode-version "0.1.2")
+(defvar gosh-mode-version "0.1.3")
 
 
 
@@ -950,8 +949,14 @@ TODO but not supported with-module context."
 
 (defvar gosh-eldoc--rotate-timer nil)
 
+(defcustom gosh-eldoc-idle-delay nil
+  "Same as `eldoc-idle-delay', but only affect `gosh-mode'.
+Set this variable before open by `gosh-mode'."
+  :type 'number
+  :group 'gosh-mode)
+
 (defcustom gosh-eldoc-rotate-seconds 1.5
-  "*Number of seconds rotating eldoc message."
+  "Number of seconds rotating eldoc message."
   :group 'gosh-mode
   :type 'number
   :set (lambda (s v) 
@@ -964,6 +969,8 @@ TODO but not supported with-module context."
 
 (defun gosh-eldoc-config ()
   (when (require 'eldoc nil t)
+    (when (numberp gosh-eldoc-idle-delay)
+      (set (make-local-variable 'eldoc-idle-delay) gosh-eldoc-idle-delay))
     (set (make-local-variable 'eldoc-documentation-function)
          'gosh-eldoc-print-current-symbol-info)
     (gosh-eldoc-initialize-rotate-timer)))
@@ -2376,7 +2383,7 @@ TODO key should be module-file?? multiple executable make complex.
 ;; For cygwin path 
 
 (defcustom gosh-cygwin-cygdrive "/cygdrive/"
-  "*Path alias of Windows drive prefixed path in Cygwin.
+  "Path alias of Windows drive prefixed path in Cygwin.
 
 c:/Windows == /cygdrive/c/Windows
 d:/home == /cygdrive/d/home
@@ -2387,7 +2394,7 @@ d:/home == /cygdrive/d/home
   :initialize (lambda (s v) (set s v)))
 
 (defcustom gosh-cygwin-directory "c:/cygwin/"
-  "*Cygwin installed directory."
+  "Cygwin installed directory."
   :group 'gosh-mode
   :type 'directory
   :set (lambda (s v) (set s (file-name-as-directory (expand-file-name v))))
@@ -2877,43 +2884,46 @@ d:/home == /cygdrive/d/home
 (defun gosh-ac-initialize ()
   ;; only activate if usually using auto-complete
   (when (featurep 'auto-complete)
-    (ac-define-source gosh-functions
-      '((candidates . gosh-ac-function-candidates)
-        (symbol . "f")
-        (prefix . "(\\(\\(?:\\sw\\|\\s_\\)+\\)")
-        (requires . 2)
-        (cache)))
+    ;; When compiling by `make',
+    ;; auto-complete package is not known where to exist.
+    (dont-compile
+      (ac-define-source gosh-functions
+        '((candidates . gosh-ac-function-candidates)
+          (symbol . "f")
+          (prefix . "(\\(\\(?:\\sw\\|\\s_\\)+\\)")
+          (requires . 2)
+          (cache)))
 
-    (ac-define-source gosh-symbols
-      '((candidates . gosh-ac-symbol-candidates)
-        (symbol . "s")
-        (prefix . "[ \t\n]\\(\\(?:\\sw\\|\\s_\\)+\\)")
-        (requires . 2)
-        (cache)))
+      (ac-define-source gosh-symbols
+        '((candidates . gosh-ac-symbol-candidates)
+          (symbol . "s")
+          (prefix . "[ \t\n]\\(\\(?:\\sw\\|\\s_\\)+\\)")
+          (requires . 2)
+          (cache)))
 
-    (ac-define-source gosh-keywords
-      '((candidates . gosh-ac-keywords-candidates)
-        (symbol . "k")
-        (prefix . "[ \t\n]\\(:\\(?:\\sw\\|\\s_\\)+\\)")
-        (requires . 1)
-        (cache)))
-
-    (let ((syntaxes '("use" "import" "select-module" "with-module" "extend" "define-in-module")))
-      (ac-define-source gosh-modules
-        `((candidates . gosh-ac-module-candidates)
-          (symbol . "m")
-          (prefix . ,(concat "(" (regexp-opt syntaxes) "[ \t\n]+\\(\\(?:\\sw\\|\\s_\\)+\\)"))
+      (ac-define-source gosh-keywords
+        '((candidates . gosh-ac-keywords-candidates)
+          (symbol . "k")
+          (prefix . "[ \t\n]\\(:\\(?:\\sw\\|\\s_\\)+\\)")
           (requires . 1)
-          (cache))))
+          (cache)))
 
-    (ac-define-source gosh-inferior-symbols
-      '((candidates . gosh-ac-inferior-candidates)
-        (symbol . "s")
-        (requires . 2)
-        (cache)))
+      (let ((syntaxes '("use" "import" "select-module" "with-module" "extend" "define-in-module")))
+        (ac-define-source gosh-modules
+          `((candidates . gosh-ac-module-candidates)
+            (symbol . "m")
+            (prefix . ,(concat "(" (regexp-opt syntaxes) "[ \t\n]+\\(\\(?:\\sw\\|\\s_\\)+\\)"))
+            (requires . 1)
+            (cache))))
+
+      (ac-define-source gosh-inferior-symbols
+        '((candidates . gosh-ac-inferior-candidates)
+          (symbol . "s")
+          (requires . 2)
+          (cache)))
     
-    (add-to-list 'ac-modes 'gosh-mode)
-    (add-to-list 'ac-modes 'gosh-inferior-mode)))
+      (add-to-list 'ac-modes 'gosh-mode)
+      (add-to-list 'ac-modes 'gosh-inferior-mode))))
 
 (defun gosh-ac-mode-initialize ()
   (when (featurep 'auto-complete)
@@ -3181,6 +3191,8 @@ d:/home == /cygdrive/d/home
      (t nil))))
 
 (defun gosh-backend-check-process ()
+  (unless gosh-default-command-internal
+    (error "TODO"))
   ;;TODO switch by executable
   (let* ((command gosh-default-command-internal)
          (proc (gosh-backend-active-process command)))

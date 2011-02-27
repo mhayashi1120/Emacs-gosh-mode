@@ -124,14 +124,14 @@
              '("\\.scm\\(?:\\.[0-9]+\\)?$" . gosh-mode))
 
 (add-hook 'gosh-mode-hook 
-            (lambda () 
-              (setq indent-tabs-mode nil)
-              (gosh-sticky-mode-on)
-              (turn-on-eldoc-mode)))
+          (lambda () 
+            (setq indent-tabs-mode nil)
+            (gosh-sticky-mode-on)
+            (turn-on-eldoc-mode)))
 
 (add-hook 'gosh-inferior-mode-hook
-            (lambda () 
-              (turn-on-eldoc-mode)))
+          (lambda () 
+            (turn-on-eldoc-mode)))
 
 (when (featurep 'auto-highlight-symbol)
   (add-to-list 'ahs-modes 'gosh-mode))
