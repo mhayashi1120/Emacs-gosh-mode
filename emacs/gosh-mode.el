@@ -4,7 +4,7 @@
 ;; Keywords: lisp gauche scheme edit
 ;; URL: https://github.com/mhayashi1120/Emacs-gosh-mode/raw/master/gosh-mode.el
 ;; Emacs: GNU Emacs 22 or later
-;; Version: 0.1.2
+;; Version: 0.1.3
 
 ;; This program is free software; you can redistribute it and/or
 ;; modify it under the terms of the GNU General Public License as
@@ -44,7 +44,7 @@
 ;; gosh-eval-region to C-c TODO
 
 ;; * unload user module except followings
-;;   main, *program-name*, *argv*
+;;   *program-name*, *argv*
 
 ;; * regulate gosh-sticky-* gosh-eval-*
 
