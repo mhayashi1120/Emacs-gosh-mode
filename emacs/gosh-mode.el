@@ -47,6 +47,7 @@
 ;; * regulate gosh-sticky-* gosh-eval-*
 
 ;; * Load automatically if module file is on the *load-path*?
+;;   Bad idea. 
 
 ;;; Code:
 
@@ -3284,25 +3285,27 @@ d:/home == /cygdrive/d/home
 ;;
 
 (defun gosh-send-last-sexp ()
-  "Send the previous sexp to the sticky backend process."
+  "Send the previous sexp to the sticky backend process.
+That sexp evaluated at current module"
   (interactive)
   (gosh-eval--check-backend)
   (if (gosh-parse-last-expression-define-p)
-      (gosh-eval--toplevel-expression)
+      (gosh-eval--last-toplevel-expression)
     (gosh-eval--send-region (save-excursion (backward-sexp) (point)) (point))))
 
 (defvar gosh-read-expression-history nil)
 
 (defun gosh-eval-defun ()
-  "Evaluate current top level definition"
+  "Evaluate current top level definition.
+That sexp evaluated at current module"
   (interactive)
   (gosh-eval--check-backend)
   (save-excursion
     (end-of-defun)
-    (gosh-eval--toplevel-expression)))
+    (gosh-eval--last-toplevel-expression)))
 
 (defun gosh-eval-expression (eval-expression-arg)
-  "Evaluate EVAL-EXPRESSION-ARG in sticky backend process.
+  "Evaluate EVAL-EXPRESSION-ARG at current module.
 And print value in the echo area.
 
 "
@@ -3319,7 +3322,7 @@ And print value in the echo area.
   (interactive)
   (gosh-eval--check-backend)
   (let ((file (gosh-sticky-backend-loading-file)))
-    (gosh-eval-expression-1 (format "(load \"%s\")" file) t)))
+    (gosh-backend-eval (format "(load \"%s\")\n" file))))
 
 (defun gosh-eval-region (start end)
   "Evaluate current region at current context."
@@ -3330,7 +3333,7 @@ And print value in the echo area.
         (progn
           (let ((coding-system-for-write buffer-file-coding-system))
             (write-region start end file nil 'no-msg))
-          (gosh-eval-expression-1 (format "(load \"%s\")" file) t))
+          (gosh-backend-eval (format "(load \"%s\")\n" file)))
       (delete-file file))))
 
 (defun gosh-eval-expression-1 (eval-expression-arg &optional suppress-message)
@@ -3352,7 +3355,7 @@ And print value in the echo area.
           (message "%s" output)
         (message "%s%s" output result)))))
 
-(defun gosh-eval--toplevel-expression ()
+(defun gosh-eval--last-toplevel-expression ()
   (let* ((end (point))
          (module (gosh-parse-context-module))
          start sexp)
@@ -3364,9 +3367,9 @@ And print value in the echo area.
                     module
                     (buffer-substring start end)))
       (let ((result (gosh-backend-low-level-eval sexp)))
-        ;; FIXME error message probablly contains newline...
+        ;; FIXME toplevel form error message probablly contains newline...
         (when (string-match "\n" result)
-          (error "%s" result))
+          (signal 'gosh-backend-error "%s" result))
         (message "%s" result)))))
 
 (defun gosh-eval--send-region (start end)
