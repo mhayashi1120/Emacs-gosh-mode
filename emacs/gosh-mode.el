@@ -3369,7 +3369,7 @@ And print value in the echo area.
       (let ((result (gosh-backend-low-level-eval sexp)))
         ;; FIXME toplevel form error message probablly contains newline...
         (when (string-match "\n" result)
-          (signal 'gosh-backend-error "%s" result))
+          (signal 'gosh-backend-error (list (format "%s" result))))
         (message "%s" result)))))
 
 (defun gosh-eval--send-region (start end)
