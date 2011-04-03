@@ -35,6 +35,9 @@
 ;;   to indent macro form
 ;;   macro indent rule differ each buffer...
 ;; * cmuscheme C-c C-t to trace. what is this?
+;; * split backend to?
+;;   each executable script.
+;;   module script. (all module have one backend)
 
 ;; scheme-send-last-sexp to any keybind
 
@@ -57,7 +60,7 @@
   :group 'lisp
   :prefix "gosh-")
 
-(defvar gosh-mode-version "0.1.3")
+(defvar gosh-mode-version "0.1.4")
 
 
 
