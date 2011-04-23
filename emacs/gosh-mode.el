@@ -1,6 +1,6 @@
 ;;; gosh-mode.el --- Programming language gauche editing tools.
 
-;; Author: Hayashi Masahiro <mhayashi1120@gmail.com>
+;; Author: Masahiro Hayashi <mhayashi1120@gmail.com>
 ;; Keywords: lisp gauche scheme edit
 ;; URL: https://github.com/mhayashi1120/Emacs-gosh-mode/raw/master/gosh-mode.el
 ;; Emacs: GNU Emacs 22 or later
@@ -38,6 +38,7 @@
 ;; * split backend to?
 ;;   each executable script.
 ;;   module script. (all module have one backend)
+;; * create parser process that is separated from backend process?
 
 ;; scheme-send-last-sexp to any keybind
 
@@ -330,7 +331,8 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
 (defun gosh-jump-thingatpt ()
   "Jumpt to current symbol definition.
 
-TODO prefixed symbol"
+TODO prefixed symbol
+  push-mark"
   (interactive)
   (let* ((sym (gosh-parse-symbol-at-point))
          (modules 
@@ -508,14 +510,14 @@ TODO prefixed symbol"
 
 (defvar gosh-sticky-mode-map nil)
 
-(unless gosh-sticky-mode-map
-  (let ((map (make-sparse-keymap)))
+(let ((map (or gosh-sticky-mode-map (make-sparse-keymap))))
 
-    (define-key map "\C-x\C-e" 'gosh-send-last-sexp)
-    (define-key map "\M-:" 'gosh-eval-expression)
-    (define-key map "\M-\C-x" 'gosh-eval-defun)
+  (define-key map "\C-c\C-b" 'gosh-eval-buffer)
+  (define-key map "\C-x\C-e" 'gosh-send-last-sexp)
+  (define-key map "\M-:" 'gosh-eval-expression)
+  (define-key map "\M-\C-x" 'gosh-eval-defun)
 
-    (setq gosh-sticky-mode-map map)))
+  (setq gosh-sticky-mode-map map))
 
 (define-minor-mode gosh-sticky-mode 
   "Gosh sticky process mode.  
@@ -3287,6 +3289,17 @@ d:/home == /cygdrive/d/home
 ;; sticky evaluation
 ;;
 
+(defun gosh--temp-message (format-string &rest args)
+  (let (message-log-max)
+    (apply 'message format-string args)))
+
+(defmacro gosh--processing-message (message &rest form)
+  (declare (indent 1))
+  `(progn
+     (gosh--temp-message ,message)
+     ,@form
+     (gosh--temp-message (concat ,message "done"))))
+
 (defun gosh-send-last-sexp ()
   "Send the previous sexp to the sticky backend process.
 That sexp evaluated at current module"
@@ -3324,20 +3337,22 @@ And print value in the echo area.
   "Evaluate current buffer."
   (interactive)
   (gosh-eval--check-backend)
-  (let ((file (gosh-sticky-backend-loading-file)))
-    (gosh-backend-eval (format "(load \"%s\")\n" file))))
+  (gosh--processing-message "Evaluating buffer..."
+    (let ((file (gosh-sticky-backend-loading-file)))
+      (gosh-backend-eval (format "(load \"%s\")\n" file)))))
 
 (defun gosh-eval-region (start end)
   "Evaluate current region at current context."
   (interactive "r")
   (gosh-eval--check-backend)
-  (let ((file (make-temp-file "gosh-mode-")))
-    (unwind-protect
-        (progn
-          (let ((coding-system-for-write buffer-file-coding-system))
-            (write-region start end file nil 'no-msg))
-          (gosh-backend-eval (format "(load \"%s\")\n" file)))
-      (delete-file file))))
+  (gosh--processing-message "Evaluating region..."
+    (let ((file (make-temp-file "gosh-mode-")))
+      (unwind-protect
+          (progn
+            (let ((coding-system-for-write buffer-file-coding-system))
+              (write-region start end file nil 'no-msg))
+            (gosh-backend-eval (format "(load \"%s\")\n" file)))
+        (delete-file file)))))
 
 (defun gosh-eval-expression-1 (eval-expression-arg &optional suppress-message)
   (let ((module (gosh-parse-context-module))

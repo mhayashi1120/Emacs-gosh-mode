@@ -8,8 +8,8 @@
    print-object
    print-signature print-signatures
    read-details
-   )
-  )
+   command-looper
+   ))
 (select-module emacs.gosh-mode)
 
 ;;TODO (eval-when (:compile-toplevel :load-toplevel))
@@ -260,7 +260,7 @@
 	;;TODO
 	[_ #f]))
 
-;; TODO check implements is some degree of correct.
+;; TODO check this implementation is some degree of correct.
 (define (parse-syntax name args rules)
   ;; reverse: apply to cons loop mecanism
   (fold
@@ -361,6 +361,21 @@
 	  (string-append (format "\\~3,'0o" i))
 	  (x->string c))))
   
+
+;; return only one sexp
+
+(define-constant prompt "Parse: ")
+
+(define (command-looper)
+  (let loop ()
+    (display prompt)
+    (flush)
+    (let1 command (read)
+      ;;TODO
+      )
+    (loop))
+  0)
+
 ;;TODO for testing
 
 ;; (define-constant c1 10000)

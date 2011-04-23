@@ -1,6 +1,6 @@
 ;;; gosh-config.el --- Gauche programming tool first load interface.
 
-;; Author: Hayashi Masahiro <mhayashi1120@gmail.com>
+;; Author: Masahiro Hayashi <mhayashi1120@gmail.com>
 ;; Keywords: lisp gauche scheme config
 ;; URL: https://github.com/mhayashi1120/Emacs-gosh-mode/raw/master/gosh-config.el
 ;; Emacs: GNU Emacs 22 or later

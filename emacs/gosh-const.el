@@ -1,6 +1,6 @@
 ;;; gosh-const.el --- Gauche constant settings
 
-;; Author: Hayashi Masahiro <mhayashi1120@gmail.com>
+;; Author: Masahiro Hayashi <mhayashi1120@gmail.com>
 ;; Keywords: lisp gauche scheme
 ;; URL: https://github.com/mhayashi1120/Emacs-gosh-mode/raw/master/gosh-const.el
 ;; Emacs: GNU Emacs 22 or later
