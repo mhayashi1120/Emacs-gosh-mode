@@ -4,7 +4,7 @@
 ;; Keywords: lisp gauche scheme edit
 ;; URL: https://github.com/mhayashi1120/Emacs-gosh-mode/raw/master/gosh-mode.el
 ;; Emacs: GNU Emacs 22 or later
-;; Version: 0.1.3
+;; Version: 0.1.4
 
 ;; This program is free software; you can redistribute it and/or
 ;; modify it under the terms of the GNU General Public License as
@@ -25,7 +25,7 @@
 ;;; Commentary:
 ;; 
 
-;; gosh-mode forked from scheme-complete.el
+;; gosh-mode is forked from scheme-complete.el
 ;; Many code is duplicated but specialize to Gauche.
 
 ;;; TODO:
@@ -45,13 +45,16 @@
 ;; gosh-eval-buffer to C-c C-b
 ;; gosh-eval-region to C-c TODO
 
-;; * unload user module except followings
+;; * unload `user' module except followings
 ;;   *program-name*, *argv*
 
 ;; * regulate gosh-sticky-* gosh-eval-*
 
 ;; * Load automatically if module file is on the *load-path*?
 ;;   Bad idea. 
+
+;; * gosh-show-info
+;;   when :prefix symbol
 
 ;;; Code:
 
@@ -513,6 +516,7 @@ TODO prefixed symbol
 (let ((map (or gosh-sticky-mode-map (make-sparse-keymap))))
 
   (define-key map "\C-c\C-b" 'gosh-eval-buffer)
+  (define-key map "\C-c\C-n" 'gosh-eval-region)
   (define-key map "\C-x\C-e" 'gosh-send-last-sexp)
   (define-key map "\M-:" 'gosh-eval-expression)
   (define-key map "\M-\C-x" 'gosh-eval-defun)
@@ -1129,7 +1133,7 @@ Set this variable before open by `gosh-mode'."
 (defun gosh-eldoc-print-current-symbol-info ()
   (let* ((fnsym0 (gosh-parse-fnsym-current-sexp))
          (fnpos (if (consp fnsym0) (cadr fnsym0) 0))
-         (sym (and (consp fnsym0) (car (nthcdr fnpos (car fnsym0)))))
+         (sym (and (consp fnsym0) (gosh-nth* fnpos (car fnsym0))))
          (fnsym (cond ((atom fnsym0) fnsym0)
                       (t (caar fnsym0))))
          (env (save-excursion
@@ -3012,8 +3016,8 @@ d:/home == /cygdrive/d/home
 (defvar calculate-lisp-indent-last-sexp)
 
 ;; Copied from scheme-indent-function, but ignore
-;; scheme-indent-function property for local variables.
-(defun gosh-smart-indent-function (indent-point state)
+;; scheme-indent-function property when be local variable.
+(defun gosh-smart-indent (indent-point state)
   (let ((normal-indent (current-column)))
     (goto-char (1+ (elt state 1)))
     (parse-partial-sexp (point) calculate-lisp-indent-last-sexp 0 t)
@@ -3048,6 +3052,7 @@ d:/home == /cygdrive/d/home
          ((integerp method)
           (lisp-indent-specform method state
                                 indent-point normal-indent))
+         ;;TODO
          ;; ((setq pair (gosh-assoc-to-regexp function))
          ;;  (lisp-indent-specform (cdr pair) state indent-point normal-indent))
          (method

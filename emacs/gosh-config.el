@@ -104,6 +104,8 @@
 (put 'guard 'scheme-indent-function 1)
 (put 'if 'scheme-indent-function 1)
 (put 'if-let1 'scheme-indent-function 2)
+(put 'let-keywords 'scheme-indent-function 2)
+(put 'rlet1 'scheme-indent-function 2)
 (put 'with-locking-mutex 'scheme-indent-function 1)
 (put 'without-echoing  'scheme-indent-function 1)
 
@@ -122,6 +124,9 @@
 
 (add-to-list 'auto-mode-alist 
              '("\\.scm\\(?:\\.[0-9]+\\)?$" . gosh-mode))
+
+(add-to-list 'auto-mode-alist 
+             '("\\.stub\\(?:\\.[0-9]+\\)?$" . scheme-mode))
 
 (add-hook 'gosh-mode-hook 
           (lambda () 

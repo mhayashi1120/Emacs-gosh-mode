@@ -81,6 +81,7 @@ browsing trunk repository
 
 change behavior like elisp
 
+** gosh-stub-mode
 
 * refactor
 ** map currentenv
