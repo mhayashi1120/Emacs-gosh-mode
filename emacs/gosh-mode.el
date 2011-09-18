@@ -746,7 +746,8 @@ Evaluate s-expression, syntax check, test-module, etc."
     (define-key map "\C-c?" 'gosh-show-info)
     (define-key map "\C-c\M-r" 'gosh-refactor-rename-symbol)
     ;; (define-key map "\C-c\er" 'gosh-refactor-rename-symbol-afaiui)
-    
+    (define-key map "\C-c\C-p" 'gosh-popup-test-result)
+
     (setq gosh-mode-map map)))
 
 (defvar gosh-mode-hook nil)
@@ -3417,6 +3418,18 @@ And print value in the echo area.
   (let ((mod (gosh-parse-context-module)))
     ;;TODO
     (gosh-sticky-validate-async mod)))
+
+;; todo irresponsible function...
+(defun gosh-popup-test-result ()
+  (interactive)
+  (cond
+   ((null gosh-sticky-test-result)
+    (message "No error."))
+   (t
+    (let ((msg (cadr (memq 'help-echo gosh-sticky-test-result))))
+      (if msg
+          (message "%s" msg)
+        (message "No error."))))))
 
 
 
