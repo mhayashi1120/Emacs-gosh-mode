@@ -56,6 +56,8 @@
 ;; * gosh-show-info
 ;;   when :prefix symbol
 
+;; * risky-local-variable
+
 ;;; Code:
 
 
@@ -408,6 +410,59 @@ TODO prefixed symbol
   (let (message-log-max)
     (info-lookup-symbol symbol-name)))
 
+;; from quack
+
+(defun gosh--insert-closing (prefix default-close other-open other-close)
+  (insert default-close)
+  (unless prefix
+    (let ((open-pt (condition-case nil
+                       (scan-sexps (point) -1)
+                     (error (beep) nil))))
+      (when open-pt
+        (let ((open-char (aref (buffer-substring-no-properties
+                                open-pt (1+ open-pt))
+                               0)))
+          (when (= open-char other-open)
+            (delete-backward-char 1)
+            (insert other-close))))))
+  (when blink-paren-function
+    (funcall blink-paren-function)))
+
+(defun gosh-insert-closing-paren (&optional fallback)
+  "Close opening parenthese or bracket.
+Arg FALLBACK non-nil means forcely insert parenthese."
+  (interactive "P")
+  (gosh--insert-closing fallback ?\) ?\[ ?\]))
+
+(defun gosh-insert-closing-bracket (&optional fallback)
+  "Close opening parenthese or bracket.
+Arg FALLBACK non-nil means forcely insert bracket."
+  (interactive "P")
+  (gosh--insert-closing fallback ?\] ?\( ?\)))
+
+(defun gosh--insert-opening (default-open)
+  (insert default-open)
+  (when blink-paren-function
+    (save-excursion
+      (backward-char 1)
+      (and (let ((close-pt (condition-case nil
+                               (scan-sexps (point) 1)
+                             (error nil))))
+             (when close-pt
+               (goto-char close-pt)))
+           ;; notify if scan-sexps succeed and unmatched parenthese
+           (funcall blink-paren-function)))))
+
+(defun gosh-insert-opening-paren ()
+  "Insert opening paren and notify if there is unmatched bracket."
+  (interactive)
+  (gosh--insert-opening ?\())
+
+(defun gosh-insert-opening-bracket ()
+  "Insert opening bracket and notify if there is unmatched parenthese."
+  (interactive)
+  (gosh--insert-opening ?\[))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Sticky to emacs
@@ -747,6 +802,12 @@ Evaluate s-expression, syntax check, test-module, etc."
     (define-key map "\C-c\M-r" 'gosh-refactor-rename-symbol)
     ;; (define-key map "\C-c\er" 'gosh-refactor-rename-symbol-afaiui)
     (define-key map "\C-c\C-p" 'gosh-popup-test-result)
+    
+    (define-key map ")" 'gosh-insert-closing-paren)
+    (define-key map "]" 'gosh-insert-closing-bracket)
+    (define-key map "(" 'gosh-insert-opening-paren)
+    (define-key map "[" 'gosh-insert-opening-bracket)
+
 
     (setq gosh-mode-map map)))
 
@@ -3016,6 +3077,7 @@ d:/home == /cygdrive/d/home
 
 (defvar calculate-lisp-indent-last-sexp)
 
+;; TODO (setq lisp-indent-function 'gosh-smart-indent)
 ;; Copied from scheme-indent-function, but ignore
 ;; scheme-indent-function property when be local variable.
 (defun gosh-smart-indent (indent-point state)
@@ -3043,8 +3105,10 @@ d:/home == /cygdrive/d/home
              (function-sym (intern-soft function))
              (method (and (not (assq function-sym (gosh-parse-context-local-vars)))
                           (get function-sym 'scheme-indent-function)))
-             pair)
+             indent)
         (cond 
+         ((setq indent (gosh--smart-indent-assoc-symbol function-sym function))
+          (lisp-indent-specform indent state indent-point normal-indent))
          ((or (eq method 'defun)
               (and (null method)
                    (> (length function) 3)
@@ -3053,32 +3117,66 @@ d:/home == /cygdrive/d/home
          ((integerp method)
           (lisp-indent-specform method state
                                 indent-point normal-indent))
-         ;;TODO
-         ;; ((setq pair (gosh-assoc-to-regexp function))
-         ;;  (lisp-indent-specform (cdr pair) state indent-point normal-indent))
          (method
           (funcall method state indent-point normal-indent)))))))
 
-(defvar gosh-smart-indent-alist
-  '(
-    ))
-
 ;;TODO
-(defun gosh-assoc-to-regexp (symbol)
-  (let (maxlen max)
-    (mapc
-     (lambda (x) 
-       (when (and (consp x)
-                  (car x)
+(defvar gosh--smart-indent-alist
+  '(
+    (util.match 
+     (match . 1)
+     (match-let . 2)
+     (match-let* . 1)
+     (match-letrec . 1)
+     (match-let1 . 2)
+     )
+    (www.cgi.test
+     (call-with-cgi-script . 2))
+    (file.util
+     (with-lock-file . 1)
+     )))
+
+(defun gosh--smart-indent-assoc-symbol (symbol name &optional in-module alist)
+  (let ((prefixes (or in-module (gosh-parse-buffer-import-modules-with-prefix)))
+        (alist (or alist gosh--smart-indent-alist)))
+    (catch 'found
+      (mapc
+       (lambda (x) 
+         (when (consp x)
+           (cond
+            ((and (stringp (car x))
                   (numberp (cdr x)))
-         (when (string-match (car x) symbol)
-           (let ((len (- (match-end 0) (match-beginning 0))))
-             ;;TODO match same length
-             (when (or (null maxlen) (> len maxlen))
-               (setq maxlen len)
-               (setq max x))))))
-     gosh-smart-indent-alist)
-    max))
+             ;; car is regexp
+             (when (string-match (car x) name)
+               (throw 'found (cdr x))))
+            ((and (symbolp (car x))
+                  (numberp (cdr x)))
+             ;; car is symbol name
+             (when (eq symbol (car x))
+               (throw 'found (cdr x))))
+            ((and (symbolp (car x))
+                  (listp (cdr x)))
+             ;; car is a module name
+             ;; cdr is definitions.
+             (mapc
+              (lambda (prefix)
+                (when (consp prefix)
+                  (let ((res
+                         (cond
+                          ((not (eq (car prefix) (car x))) nil)
+                          ((string= (cdr prefix) "")
+                           (gosh--smart-indent-assoc-symbol symbol name t (cdr x)))
+                          ((eq (string-match (regexp-quote (cdr prefix)) name) 0)
+                           (let* ((name2 (substring name (match-end 0)))
+                                  (symbol2 (intern-soft name2)))
+                             (gosh--smart-indent-assoc-symbol 
+                              symbol2 name2 t (cdr x))))
+                          (t nil))))
+                    (when res 
+                      (throw 'found res)))))
+              prefixes)))))
+       alist)
+      nil)))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

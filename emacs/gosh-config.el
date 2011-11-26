@@ -130,6 +130,8 @@
 
 (add-hook 'gosh-mode-hook 
           (lambda () 
+            (make-local-variable 'lisp-indent-function)
+            (setq lisp-indent-function 'gosh-smart-indent)
             (setq indent-tabs-mode nil)
             (gosh-sticky-mode-on)
             (turn-on-eldoc-mode)))
