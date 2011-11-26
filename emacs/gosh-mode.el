@@ -342,21 +342,30 @@ TODO prefixed symbol
   (let* ((sym (gosh-parse-symbol-at-point))
          (modules 
           (append
-           (ignore-errors (gosh-parse-current-base-modules))
-           (ignore-errors (gosh-parse-buffer-import-modules)))))
+           (mapcar 
+            (lambda (x) (cons x ""))
+            (ignore-errors (gosh-parse-current-base-modules)))
+           (ignore-errors 
+             (gosh-parse-buffer-import-modules-with-prefix)))))
     (catch 'found
       (when (assq sym (gosh-parse-current-globals t))
         (gosh-jump-to-definition sym)
         (throw 'found t))
+      ;; search imported modules
       (mapc
-       (lambda (f)
-         (when (memq sym (gosh-exports-functions f))
-           (let ((buffer (get-file-buffer f)))
-             (set-buffer (or buffer (find-file-noselect f)))
-             (when (gosh-jump-to-definition sym)
-               (switch-to-buffer (current-buffer))
-               (throw 'found t)))))
-       (gosh-guessed-modules modules (symbol-name sym)))
+       (lambda (m)
+         (let ((mf (or (and (stringp m) m) (car m)))
+               (sym2 (or (and (listp m) 
+                              (intern-soft (substring (symbol-name sym) (length (cdr m)))))
+                         sym)))
+           (when (memq sym2 (gosh-exports-functions mf))
+             (let ((buffer (get-file-buffer mf)))
+               (set-buffer (or buffer (find-file-noselect mf)))
+               (when (gosh-jump-to-definition sym2)
+                 (switch-to-buffer (current-buffer))
+                 (throw 'found t))))))
+       (gosh-guessed-module-files modules (symbol-name sym)))
+      ;; jump to module (cursor point as a module name)
       (let ((file (gosh--module->file sym)))
         (when file
           (switch-to-buffer (find-file-noselect file))
@@ -372,31 +381,37 @@ TODO prefixed symbol
       (goto-char first)
       nil)))
 
-(defun gosh-guessed-modules (imported symbol)
-  (let ((sym (or (and (stringp symbol) symbol)
-                 (symbol-name symbol)))
-        prefix words 
-        first second third)
-    (unless (string-match "^\\([^-]+\\)" sym)
-      (error "Unable find"))
-    (setq prefix (match-string 1 sym))
-    (setq words (split-string sym "\\b" t))
+(defun gosh-guessed-module-files (imported symbol)
+  (let ((symnm (or (and (stringp symbol) symbol)
+                   (symbol-name symbol)))
+        (imports imported)
+        1st 2nd 3rd)
+    (let ((prefix (if (string-match "^\\([^-]+\\)" symnm) 
+                      (match-string 1 symnm)
+                    symnm))
+          (words (split-string symnm "\\b" t)))
+      (mapc
+       (lambda (mname)
+         (let* ((name (intern mname))
+                (names (split-string mname "[.]"))
+                (file (gosh--module->file name))
+                (import-as (assq name imports)))
+           (cond
+            ((and import-as
+                  (not (string= (cdr import-as) "")))
+             (when (gosh-string-starts-with (cdr import-as) symnm)
+               (push (cons file (cdr import-as)) 1st))
+             (setq imports (remq import-as imports)))
+            ((member prefix names)
+             (push file 2nd))
+            ((intersection words names :test 'string=)
+             (push file 2nd)))))
+       (gosh-available-modules)))
     (mapc
-     (lambda (mname)
-       (let* ((sym (intern mname))
-              (names (split-string mname "[.]"))
-              (file (gosh--module->file sym)))
-         (cond
-          ((memq sym imported)
-           (push file first))
-          ((member prefix names)
-           (push file second))
-          ((intersection words names :test 'string=)
-           (push file second))
-          (t
-           (push file third)))))
-     (gosh-available-modules))
-    (remove nil (append first second third))))
+     (lambda (m)
+       (push (gosh--module->file (car m)) 3rd))
+     imports)
+    (remq nil (append 1st 2nd 3rd))))
 
 (defun gosh-exports-functions (file)
   (gosh-with-find-file file
@@ -1204,14 +1219,14 @@ Set this variable before open by `gosh-mode'."
          (spec1 (and fnsym (gosh-env-matches env fnsym t)))
          (spec2 (and sym (gosh-env-matches env sym t)))
          (string1 (and spec1 
-                     (gosh-eldoc--find-and-print-strings
-                      spec1 env
-                      (cons fnpos (nthcdr (1- fnpos) (car fnsym0))))))
+                       (gosh-eldoc--find-and-print-strings
+                        spec1 env
+                        (cons fnpos (nthcdr (1- fnpos) (car fnsym0))))))
          (string2 (and (> fnpos 0)
-                     spec2 
-                     (gosh-eldoc--find-and-print-strings
-                      spec2 env nil)))
-         (strings (remove nil (append string1 string2))))
+                       spec2 
+                       (gosh-eldoc--find-and-print-strings
+                        spec2 env nil)))
+         (strings (remq nil (append string1 string2))))
     (gosh-eldoc--cache-set (point) 0 strings)
     (car strings)))
 
@@ -2054,12 +2069,12 @@ referenced mew-complete.el"
      (list (cadr sexp)))
     ((require-extension)
      (when (eq (cadr sexp) 'srfi)
-       (remove 
+       (remq
         nil
         (mapcar (lambda (n) 
                   (when (numberp n)
                     (intern (concat "srfi-" (number-to-string n)))))
-               (cddr sexp)))))
+                (cddr sexp)))))
     ((import)
      (cdr sexp))))
 
@@ -2477,7 +2492,9 @@ d:/home == /cygdrive/d/home
         (installed gosh-cygwin-directory)
         (case-fold-search t))
     (cond
-     ((string-match (format "^\\(?:%s\\)\\([a-zA-Z]\\)/\\(.*\\)" (regexp-quote cygdrive)) path)
+     ((string-match 
+       (format "^\\(?:%s\\)\\([a-zA-Z]\\)/\\(.*\\)" 
+               (regexp-quote cygdrive)) path)
       (format "%s:/%s" (match-string 1 path) (match-string 2 path)))
      ((string-match "^/" path)
       (expand-file-name (substring path 1) installed))
@@ -2627,7 +2644,7 @@ d:/home == /cygdrive/d/home
         (if (= (length all) 1)
             (gosh-momentary-message "[Sole completion]")
           (gosh-momentary-message "[Type again to show completions]"))))
-      (t
+     (t
       (let ((win-config (current-window-configuration))
             (done nil))
         (message "Hit space to flush")
@@ -2993,7 +3010,7 @@ d:/home == /cygdrive/d/home
           (symbol . "s")
           (requires . 2)
           (cache)))
-    
+      
       (add-to-list 'ac-modes 'gosh-mode)
       (add-to-list 'ac-modes 'gosh-inferior-mode))))
 
@@ -3159,15 +3176,15 @@ d:/home == /cygdrive/d/home
              ;; car is a module name
              ;; cdr is definitions.
              (mapc
-              (lambda (prefix)
-                (when (consp prefix)
+              (lambda (import)
+                (when (consp import)
                   (let ((res
                          (cond
-                          ((not (eq (car prefix) (car x))) nil)
-                          ((string= (cdr prefix) "")
+                          ((not (eq (car import) (car x))) nil)
+                          ((string= (cdr import) "")
                            (gosh--smart-indent-assoc-symbol symbol name t (cdr x)))
-                          ((eq (string-match (regexp-quote (cdr prefix)) name) 0)
-                           (let* ((name2 (substring name (match-end 0)))
+                          ((gosh-string-starts-with (cdr import) name)
+                           (let* ((name2 (substring name (length (cdr import))))
                                   (symbol2 (intern-soft name2)))
                              (gosh--smart-indent-assoc-symbol 
                               symbol2 name2 t (cdr x))))
