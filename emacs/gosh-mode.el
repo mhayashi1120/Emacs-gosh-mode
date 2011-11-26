@@ -427,13 +427,13 @@ TODO prefixed symbol
 
 ;; from quack
 
-(defun gosh--insert-closing (prefix default-close other-open other-close)
+(defun gosh--insert-closing (prefix default-close other-close)
   (insert default-close)
   (unless prefix
-    (let ((open-pt (condition-case nil
-                       (scan-sexps (point) -1)
-                     (error (beep) nil))))
-      (when open-pt
+    (let ((other-open (gosh--paren-against-char other-close))
+          (open-pt (gosh--scan-sexps (point) -1)))
+      (if (not open-pt)
+          (beep)
         (let ((open-char (aref (buffer-substring-no-properties
                                 open-pt (1+ open-pt))
                                0)))
@@ -447,26 +447,75 @@ TODO prefixed symbol
   "Close opening parenthese or bracket.
 Arg FALLBACK non-nil means forcely insert parenthese."
   (interactive "P")
-  (gosh--insert-closing fallback ?\) ?\[ ?\]))
+  (gosh--insert-closing fallback ?\) ?\]))
 
 (defun gosh-insert-closing-bracket (&optional fallback)
   "Close opening parenthese or bracket.
 Arg FALLBACK non-nil means forcely insert bracket."
   (interactive "P")
-  (gosh--insert-closing fallback ?\] ?\( ?\)))
+  (gosh--insert-closing fallback ?\] ?\)))
 
 (defun gosh--insert-opening (default-open)
   (insert default-open)
-  (when blink-paren-function
-    (save-excursion
-      (backward-char 1)
-      (and (let ((close-pt (condition-case nil
-                               (scan-sexps (point) 1)
-                             (error nil))))
-             (when close-pt
-               (goto-char close-pt)))
-           ;; notify if scan-sexps succeed and unmatched parenthese
-           (funcall blink-paren-function)))))
+  ;; status after insert open char.
+  (let ((state (save-excursion
+                 (let ((first (point))
+                       (next nil))
+                   (cond
+                    ((not (re-search-backward "^(" nil t))
+                     'unexpected)
+                    ((setq next (gosh--scan-sexps (point) 1))
+                     (goto-char next)
+                     (cond
+                      ((> first next)
+                       'unexpected)
+                      ((looking-at "[ \t\n]*\\'")
+                       'balanced)
+                      ((not (looking-at "[ \t\n]*("))
+                       'unbalanced)
+                      ((gosh--scan-sexps next 1)
+                       'balanced)
+                      (t
+                       'unbalanced)))
+                    (t
+                     'opening))))))
+    (cond
+     ((eq state 'balanced)
+      ;; insert and backward with checking paren
+      (backward-char)
+      (gosh--replace-opening)
+      ;; forward to first statement
+      (skip-chars-forward "([ \t\n"))
+     ((eq state 'opening))
+     ((eq state 'unbalanced)
+      ;; insert and backward with checking paren
+      (backward-char)
+      (gosh--replace-opening)))
+    (when blink-paren-function
+      (save-excursion
+        (backward-char 1)
+        (and (let ((close-pt (gosh--scan-sexps (point) 1)))
+               (when close-pt
+                 (goto-char close-pt)))
+             ;; notify if scan-sexps succeed and unmatched parenthese
+             (funcall blink-paren-function))))))
+
+(defun gosh--paren-against-char (char)
+  (case char
+    (?\( ?\))
+    (?\[ ?\])
+    (?\) ?\()
+    (?\] ?\[)))
+
+(defun gosh--replace-opening ()
+  (let ((open (char-after))
+        (next (gosh--scan-sexps (point) 1)))
+    (when (and next (memq open '(?\( ?\[)))
+      (let* ((close (char-before next))
+             (against (gosh--paren-against-char close)))
+        (unless (eq against open)
+          (delete-char 1)
+          (insert against))))))
 
 (defun gosh-insert-opening-paren ()
   "Insert opening paren and notify if there is unmatched bracket."
@@ -477,6 +526,11 @@ Arg FALLBACK non-nil means forcely insert bracket."
   "Insert opening bracket and notify if there is unmatched parenthese."
   (interactive)
   (gosh--insert-opening ?\[))
+
+(defun gosh--scan-sexps (point count)
+  (condition-case nil
+      (scan-sexps point count)
+    (scan-error nil)))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
