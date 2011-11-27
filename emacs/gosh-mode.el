@@ -37,7 +37,7 @@
 ;; * cmuscheme C-c C-t to trace. what is this?
 ;; * split backend to?
 ;;   each executable script.
-;;   module script. (all module have one backend)
+;;   module script. (all module have one backend(?))
 ;; * create parser process that is separated from backend process?
 
 ;; scheme-send-last-sexp to any keybind
@@ -51,7 +51,7 @@
 ;; * regulate gosh-sticky-* gosh-eval-*
 
 ;; * Load automatically if module file is on the *load-path*?
-;;   Bad idea. 
+;;   => Bad idea. Increase security risk
 
 ;; * gosh-show-info
 ;;   when :prefix symbol
@@ -427,6 +427,13 @@ TODO prefixed symbol
 
 ;; from quack
 
+(defun gosh--paren-against-char (char)
+  (case char
+    (?\( ?\))
+    (?\[ ?\])
+    (?\) ?\()
+    (?\] ?\[)))
+
 (defun gosh--insert-closing (prefix default-close other-close)
   (insert default-close)
   (unless prefix
@@ -455,7 +462,7 @@ Arg FALLBACK non-nil means forcely insert bracket."
   (interactive "P")
   (gosh--insert-closing fallback ?\] ?\)))
 
-(defun gosh--insert-opening (default-open)
+(defun gosh--insert-opening (force default-open)
   (insert default-open)
   ;; status after insert open char.
   (let ((state (save-excursion
@@ -479,18 +486,19 @@ Arg FALLBACK non-nil means forcely insert bracket."
                        'unbalanced)))
                     (t
                      'opening))))))
-    (cond
-     ((eq state 'balanced)
-      ;; insert and backward with checking paren
-      (backward-char)
-      (gosh--replace-opening)
-      ;; forward to first statement
-      (skip-chars-forward "([ \t\n"))
-     ((eq state 'opening))
-     ((eq state 'unbalanced)
-      ;; insert and backward with checking paren
-      (backward-char)
-      (gosh--replace-opening)))
+    (unless force
+      (cond
+       ((eq state 'balanced)
+        ;; insert and backward with checking paren
+        (backward-char)
+        (gosh--replace-opening)
+        ;; forward to first statement
+        (skip-chars-forward "([ \t\n"))
+       ((eq state 'opening))
+       ((eq state 'unbalanced)
+        ;; insert and backward with checking paren
+        (backward-char)
+        (gosh--replace-opening))))
     (when blink-paren-function
       (save-excursion
         (backward-char 1)
@@ -500,13 +508,6 @@ Arg FALLBACK non-nil means forcely insert bracket."
              ;; notify if scan-sexps succeed and unmatched parenthese
              (funcall blink-paren-function))))))
 
-(defun gosh--paren-against-char (char)
-  (case char
-    (?\( ?\))
-    (?\[ ?\])
-    (?\) ?\()
-    (?\] ?\[)))
-
 (defun gosh--replace-opening ()
   (let ((open (char-after))
         (next (gosh--scan-sexps (point) 1)))
@@ -515,17 +516,18 @@ Arg FALLBACK non-nil means forcely insert bracket."
              (against (gosh--paren-against-char close)))
         (unless (eq against open)
           (delete-char 1)
-          (insert against))))))
+          (insert against)
+          (backward-char))))))
 
-(defun gosh-insert-opening-paren ()
+(defun gosh-insert-opening-paren (&optional force)
   "Insert opening paren and notify if there is unmatched bracket."
-  (interactive)
-  (gosh--insert-opening ?\())
+  (interactive "P")
+  (gosh--insert-opening force ?\())
 
-(defun gosh-insert-opening-bracket ()
+(defun gosh-insert-opening-bracket (&optional force)
   "Insert opening bracket and notify if there is unmatched parenthese."
-  (interactive)
-  (gosh--insert-opening ?\[))
+  (interactive "P")
+  (gosh--insert-opening force ?\[))
 
 (defun gosh--scan-sexps (point count)
   (condition-case nil
@@ -877,7 +879,6 @@ Evaluate s-expression, syntax check, test-module, etc."
     (define-key map "(" 'gosh-insert-opening-paren)
     (define-key map "[" 'gosh-insert-opening-bracket)
 
-
     (setq gosh-mode-map map)))
 
 (defvar gosh-mode-hook nil)
@@ -962,9 +963,11 @@ Evaluate s-expression, syntax check, test-module, etc."
          ;; handle backslash inside the string
          ((= (char-after curpos) ?/)
           ;; (1) = punctuation, (2) = word
-          (if (= (char-before curpos) ?\\)
-              (gosh-syntax-table-put-property curpos (+ curpos 2) '(2))
-            (gosh-syntax-table-put-property curpos (1+ curpos) '(7))))
+          (cond
+           ((= (char-before curpos) ?\\)
+            (gosh-syntax-table-put-property curpos (+ curpos 2) '(2)))
+           (t
+            (gosh-syntax-table-put-property curpos (1+ curpos) '(7)))))
 
          ;; everything else
          (t
@@ -3205,7 +3208,15 @@ d:/home == /cygdrive/d/home
      (call-with-cgi-script . 2))
     (file.util
      (with-lock-file . 1)
-     )))
+     )
+    (srfi-11
+     (let-values . 1)
+     (let*-values . 1))
+    (gauche.net
+     (call-with-client-socket . 1))
+    (gauche.charconv'
+     (call-with-input-conversion . 1))
+    ))
 
 (defun gosh--smart-indent-assoc-symbol (symbol name &optional in-module alist)
   (let ((prefixes (or in-module (gosh-parse-buffer-import-modules-with-prefix)))
@@ -3213,39 +3224,46 @@ d:/home == /cygdrive/d/home
     (catch 'found
       (mapc
        (lambda (x) 
-         (when (consp x)
-           (cond
-            ((and (stringp (car x))
-                  (numberp (cdr x)))
-             ;; car is regexp
-             (when (string-match (car x) name)
-               (throw 'found (cdr x))))
-            ((and (symbolp (car x))
-                  (numberp (cdr x)))
-             ;; car is symbol name
-             (when (eq symbol (car x))
-               (throw 'found (cdr x))))
-            ((and (symbolp (car x))
-                  (listp (cdr x)))
-             ;; car is a module name
-             ;; cdr is definitions.
-             (mapc
-              (lambda (import)
-                (when (consp import)
-                  (let ((res
-                         (cond
-                          ((not (eq (car import) (car x))) nil)
-                          ((string= (cdr import) "")
-                           (gosh--smart-indent-assoc-symbol symbol name t (cdr x)))
-                          ((gosh-string-starts-with (cdr import) name)
-                           (let* ((name2 (substring name (length (cdr import))))
-                                  (symbol2 (intern-soft name2)))
-                             (gosh--smart-indent-assoc-symbol 
-                              symbol2 name2 t (cdr x))))
-                          (t nil))))
-                    (when res 
-                      (throw 'found res)))))
-              prefixes)))))
+         (when (and (consp x)
+                    (symbolp (car x))
+                    (numberp (cdr x)))
+           ;; car is symbol name
+           (when (eq symbol (car x))
+             (throw 'found (cdr x)))))
+       alist)
+      (mapc
+       (lambda (x) 
+         (when (and (consp x)
+                    (stringp (car x))
+                    (numberp (cdr x)))
+           ;; car is regexp
+           (when (string-match (car x) name)
+             (throw 'found (cdr x)))))
+       alist)
+      (mapc
+       (lambda (x)
+         (when (and (consp x)
+                    (symbolp (car x))
+                    (listp (cdr x)))
+           ;; car is a module name
+           ;; cdr is definitions.
+           (mapc
+            (lambda (import)
+              (when (consp import)
+                (let ((res
+                       (cond
+                        ((not (eq (car import) (car x))) nil)
+                        ((string= (cdr import) "")
+                         (gosh--smart-indent-assoc-symbol symbol name t (cdr x)))
+                        ((gosh-string-starts-with (cdr import) name)
+                         (let* ((name2 (substring name (length (cdr import))))
+                                (symbol2 (intern-soft name2)))
+                           (gosh--smart-indent-assoc-symbol 
+                            symbol2 name2 t (cdr x))))
+                        (t nil))))
+                  (when res 
+                    (throw 'found res)))))
+            prefixes)))
        alist)
       nil)))
 
@@ -3373,7 +3391,7 @@ d:/home == /cygdrive/d/home
 
 (defun gosh-backend-check-process ()
   (unless gosh-default-command-internal
-    (error "TODO"))
+    (error "Assert"))
   ;;TODO switch by executable
   (let* ((command gosh-default-command-internal)
          (proc (gosh-backend-active-process command)))
