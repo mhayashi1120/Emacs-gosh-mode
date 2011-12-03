@@ -86,7 +86,7 @@
             "[ \t]+\\(\\(?:\\sw\\|\\.\\)+\\)?")))
 
 (defconst gosh-regexp-literal-regexp 
-  "\\(#\\)\\(/\\)\\(\\(?:\\\\/\\|[^/]\\)+\\)\\(/\\)")
+  "\\(#\\)\\(/\\)\\(\\(?:\\\\.\\|[^/]\\)*\\)\\(/\\)")
 
 (defconst *gosh-scheme-r5rs-info*
   '((define (syntax (identifier value) undefined) "define a new variable")

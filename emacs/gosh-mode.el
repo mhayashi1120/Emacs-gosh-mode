@@ -131,7 +131,8 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
    "(apply append "
    "(hash-table-map (module-table (current-module)) "
    " (lambda (sym gloc) (string-copy (symbol->string sym)))) "
-   "(map (lambda (mod) (map (lambda (sym) (string-copy (symbol->string sym))) (module-exports mod))) "
+   "(map (lambda (mod) (map (lambda (sym) "
+   " (string-copy (symbol->string sym))) (module-exports mod))) "
    " (module-imports (current-module))))\n"))
 
 (defvar gosh-autoload-modules
@@ -189,7 +190,8 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
 ;; bound only `let' form
 (defvar gosh-delegate-command)
 (defun gosh-delegate-command-get (index)
-  ;; When debugging gosh-mode, execute function (ex: `eval-expression') make unbound variable error.
+  ;; When debugging gosh-mode, execute function (ex: `eval-expression') 
+  ;; make unbound variable error.
   (let ((command (if (and gosh-debug 
                           (not (boundp 'gosh-delegate-command)))
                      (gosh-current-executable)
@@ -434,35 +436,39 @@ TODO prefixed symbol
     (?\) ?\()
     (?\] ?\[)))
 
-(defun gosh--insert-closing (prefix default-close other-close)
+(defun gosh-closing--insert (force default-close other-close)
   (insert default-close)
-  (unless prefix
+  (unless force
     (let ((other-open (gosh--paren-against-char other-close))
           (open-pt (gosh--scan-sexps (point) -1)))
-      (if (not open-pt)
-          (beep)
+      (cond
+       ((not (gosh-context-code-p)))
+       ((not open-pt)
+        (beep))
+       (t
         (let ((open-char (aref (buffer-substring-no-properties
                                 open-pt (1+ open-pt))
                                0)))
           (when (= open-char other-open)
             (delete-backward-char 1)
-            (insert other-close))))))
+            (insert other-close)))))))
   (when blink-paren-function
     (funcall blink-paren-function)))
 
-(defun gosh-insert-closing-paren (&optional fallback)
+(defun gosh-closing-insert-paren (&optional force)
   "Close opening parenthese or bracket.
-Arg FALLBACK non-nil means forcely insert parenthese."
+Arg FORCE non-nil means forcely insert parenthese."
   (interactive "P")
-  (gosh--insert-closing fallback ?\) ?\]))
+  (gosh-closing--insert force ?\) ?\]))
 
-(defun gosh-insert-closing-bracket (&optional fallback)
+(defun gosh-closing-insert-bracket (&optional force)
   "Close opening parenthese or bracket.
-Arg FALLBACK non-nil means forcely insert bracket."
+Arg FORCE non-nil means forcely insert bracket."
   (interactive "P")
-  (gosh--insert-closing fallback ?\] ?\)))
+  (gosh-closing--insert force ?\] ?\)))
 
-(defun gosh--insert-opening (force default-open)
+;;TODO re-consider autopair.el
+(defun gosh-opening--insert (force default-open)
   (insert default-open)
   ;; status after insert open char.
   (let ((state (save-excursion
@@ -476,8 +482,9 @@ Arg FALLBACK non-nil means forcely insert bracket."
                      (cond
                       ((> first next)
                        'unexpected)
-                      ((looking-at "[ \t\n]*\\'")
+                      ((not (re-search-forward "^(" nil t))
                        'balanced)
+                      ;;TODO when next is comment
                       ((not (looking-at "[ \t\n]*("))
                        'unbalanced)
                       ((gosh--scan-sexps next 1)
@@ -486,19 +493,43 @@ Arg FALLBACK non-nil means forcely insert bracket."
                        'unbalanced)))
                     (t
                      'opening))))))
+    ;;TODO re consider it
+    (when force
+      (cond
+       ((eq state 'balanced)
+        (save-excursion
+          (backward-char)
+          (let* ((end (gosh--scan-sexps (point) 1))
+                 (close (char-before end))
+                 (against (gosh--paren-against-char default-open)))
+            (unless (eq against close)
+              (goto-char end)
+              (delete-char -1)
+              (insert against)
+              ;; notify user change closing.
+              (sit-for 0.2)))))))
     (unless force
       (cond
+       ((not (gosh-context-code-p)))
        ((eq state 'balanced)
         ;; insert and backward with checking paren
         (backward-char)
-        (gosh--replace-opening)
+        (gosh-opening--switch-paren)
         ;; forward to first statement
         (skip-chars-forward "([ \t\n"))
-       ((eq state 'opening))
+       ((eq state 'opening)
+        (when (save-excursion
+                (backward-char)
+                (let ((context (gosh-opening--parse-current-context)))
+                  (when (and context (gosh-opening--with-brancket-p context))
+                    (delete-char 1)
+                    (insert "[")
+                    t)))
+          (forward-char)))
        ((eq state 'unbalanced)
         ;; insert and backward with checking paren
         (backward-char)
-        (gosh--replace-opening))))
+        (gosh-opening--switch-paren))))
     (when blink-paren-function
       (save-excursion
         (backward-char 1)
@@ -508,7 +539,8 @@ Arg FALLBACK non-nil means forcely insert bracket."
              ;; notify if scan-sexps succeed and unmatched parenthese
              (funcall blink-paren-function))))))
 
-(defun gosh--replace-opening ()
+(defun gosh-opening--switch-paren ()
+  ;;TODO in regexp or string context
   (let ((open (char-after))
         (next (gosh--scan-sexps (point) 1)))
     (when (and next (memq open '(?\( ?\[)))
@@ -519,20 +551,75 @@ Arg FALLBACK non-nil means forcely insert bracket."
           (insert against)
           (backward-char))))))
 
-(defun gosh-insert-opening-paren (&optional force)
+(defun gosh-opening-insert-paren (&optional force)
   "Insert opening paren and notify if there is unmatched bracket."
   (interactive "P")
-  (gosh--insert-opening force ?\())
+  (gosh-opening--insert force ?\())
 
-(defun gosh-insert-opening-bracket (&optional force)
+(defun gosh-opening-insert-bracket (&optional force)
   "Insert opening bracket and notify if there is unmatched parenthese."
   (interactive "P")
-  (gosh--insert-opening force ?\[))
+  (gosh-opening--insert force ?\[))
 
-(defun gosh--scan-sexps (point count)
-  (condition-case nil
-      (scan-sexps point count)
-    (scan-error nil)))
+;; TODO move to gosh-config
+(defvar gosh-opening--auto-bracket-alist 
+  '(
+    (fluid-let (*))
+    (do (*))
+    (let (*))
+    (let* (*))
+    (letrec (*))
+    (andlet* (*))
+    (let 1 (*))                         ; named let
+    (case 1 *)
+    (cond *)
+
+    ;;TODO other module
+    (match 1 *)
+    (match-lambda *)
+    (match-lambda* *)
+    (match-let (*))
+    (match-let 1 (*))
+    (match-let* (*))
+    (match-letrec (*))
+    ))
+
+(defun gosh-opening--with-brancket-p (context)
+  (loop for p in gosh-opening--auto-bracket-alist
+        if (and (eq (car p) (car context))
+                (let ((pos (cadr context))
+                      (pointer (caddr context)))
+                  (or 
+                   (and (eq pos (cadr p)) 
+                        (equal pointer (caddr p)))
+                   (equal pointer (cadr p)))))
+        return t))
+
+(defun gosh-opening--parse-current-context ()
+  (save-excursion
+    (let ((pos 0)
+          (pointer '*)
+          prev sym)
+      (catch 'done
+        (while (not sym)
+          (let ((count 0))
+            (while (and (not (looking-at "^("))
+                        (let ((next (gosh--scan-sexps (point) -1)))
+                          (when next
+                            (goto-char next)
+                            next)))
+              (setq count (1+ count)))
+            (while (and (looking-back "(")
+                        (not (looking-at "^("))
+                        (not (setq sym (symbol-at-point))))
+              (setq pointer (list pointer))
+              (backward-char))
+            (when sym
+              (setq pos (1- count)))
+            (when (equal prev (point))
+              (throw 'done nil))
+            (setq prev (point))))
+        (list sym pos pointer)))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -675,11 +762,13 @@ Evaluate s-expression, syntax check, test-module, etc."
 
 (defun gosh-sticky-timer-process ()
   ;; check buffer mode to avoid endless freeze 
-  (when (and gosh-sticky-mode 
-             (eq major-mode 'gosh-mode)
-             (not (minibufferp (current-buffer))))
-    (gosh-sticky-backend-watcher)
-    (gosh-sticky-modeline-update)))
+  (save-match-data
+    (with-local-quit
+      (when (and gosh-sticky-mode 
+                 (eq major-mode 'gosh-mode)
+                 (not (minibufferp (current-buffer))))
+        (gosh-sticky-backend-watcher)
+        (gosh-sticky-modeline-update)))))
 
 (defun gosh-sticky-backend-watcher ()
   (unless (gosh-backend-active-process)
@@ -815,20 +904,23 @@ Evaluate s-expression, syntax check, test-module, etc."
                       (catch 'done
                         (unless (= (process-exit-status proc) 0)
                           (throw 'done 
-                                 `(:propertize "NG" 
-                                               face gosh-modeline-error-face
-                                               help-echo "Gosh test error: executing error"
-                                               mouse-face mode-line-highlight)))
+                                 `(:propertize 
+                                   "NG" 
+                                   face gosh-modeline-error-face
+                                   help-echo "Gosh test error: executing error"
+                                   mouse-face mode-line-highlight)))
                         (let (errors)
                           (goto-char (point-min))
                           (while (re-search-forward "ERROR:[ \t]*\\(.*\\)" nil t)
                             (setq errors (cons (match-string 1) errors)))
                           (when errors
                             (throw 'done 
-                                   `(:propertize "NG" 
-                                                 face gosh-modeline-error-face
-                                                 help-echo ,(concat "Gosh test error: " (prin1-to-string errors))
-                                                 mouse-face mode-line-highlight)))
+                                   `(:propertize 
+                                     "NG" 
+                                     face gosh-modeline-error-face
+                                     help-echo ,(concat "Gosh test error: "
+                                                        (prin1-to-string errors))
+                                     mouse-face mode-line-highlight)))
                           `(:propertize "OK"
                                         face gosh-modeline-normal-face))))
                   (gosh-sticky-close-process proc))))))))
@@ -874,25 +966,27 @@ Evaluate s-expression, syntax check, test-module, etc."
     ;; (define-key map "\C-c\er" 'gosh-refactor-rename-symbol-afaiui)
     (define-key map "\C-c\C-p" 'gosh-popup-test-result)
     
-    (define-key map ")" 'gosh-insert-closing-paren)
-    (define-key map "]" 'gosh-insert-closing-bracket)
-    (define-key map "(" 'gosh-insert-opening-paren)
-    (define-key map "[" 'gosh-insert-opening-bracket)
+    (define-key map ")" 'gosh-closing-insert-paren)
+    (define-key map "]" 'gosh-closing-insert-bracket)
+    (define-key map "(" 'gosh-opening-insert-paren)
+    (define-key map "[" 'gosh-opening-insert-bracket)
 
     (setq gosh-mode-map map)))
 
 (defvar gosh-mode-hook nil)
 
+;;TODO autoload?
+;;;###autoload
 (define-derived-mode gosh-mode scheme-mode "Gosh"
   "Major mode for Gauche programming."
-  ;;TODO check documents
-  ;; (when (boundp 'syntax-propertize-function)
-  ;;   (set (make-local-variable 'syntax-propertize-function)
-  ;;        'gosh-syntax-table-apply-region))
-  (set (make-local-variable 'font-lock-syntactic-keywords)
-       (append
-        font-lock-syntactic-keywords
-        gosh-font-lock-syntactic-keywords))
+  (if (boundp 'syntax-propertize-function)
+      ;;TODO check documents
+      (set (make-local-variable 'syntax-propertize-function)
+           'gosh-syntax-table-apply-region)
+    (set (make-local-variable 'font-lock-syntactic-keywords)
+         (append
+          font-lock-syntactic-keywords
+          gosh-font-lock-syntactic-keywords)))
   (set (make-local-variable 'after-change-functions)
        'gosh-after-change-function)
   (add-to-list (make-local-variable 'mode-line-process)
@@ -924,7 +1018,7 @@ Evaluate s-expression, syntax check, test-module, etc."
 
 (defconst gosh-font-lock-syntactic-keywords
   `(
-    (,gosh-regexp-literal-regexp (1 (6)) (2 (7)) (4 (7)))
+    (,gosh-regexp-literal-regexp (1 (6) t) (2 (7 . ?/)) (4 (7 . ?/)))
     ))
 
 (defun gosh-syntax-table-apply-region (start end)
@@ -934,17 +1028,20 @@ Evaluate s-expression, syntax check, test-module, etc."
       (save-restriction
         (narrow-to-region start end)
         (goto-char (point-min))
-        (while (re-search-forward gosh-regexp-literal-regexp nil t)
-          (gosh-syntax-table-set-properties (match-beginning 0) (match-end 0)))))
+        (while (re-search-forward "#/" nil t)
+          (gosh-syntax-table-set-properties (match-beginning 0)))))
     (set-buffer-modified-p modified)))
 
 (defun gosh-syntax-table-put-property (beg end value)
   (put-text-property beg end 'syntax-table value (current-buffer)))
 
-(defun gosh-syntax-table-set-properties (beg end)
+(defun gosh-syntax-table-set-properties (beg)
   (let ((curpos beg)
+        ;;TODO how about "string"?
+        (max (min (line-end-position 5) (point-max)))
         (state 0))
-    (while (<= curpos end)
+    (while (and (< curpos max)
+                (< state 3))
       (cond
        ((= state 0)
         (when (= (char-after curpos) ?#)
@@ -965,9 +1062,12 @@ Evaluate s-expression, syntax check, test-module, etc."
           ;; (1) = punctuation, (2) = word
           (cond
            ((= (char-before curpos) ?\\)
-            (gosh-syntax-table-put-property curpos (+ curpos 2) '(2)))
+            ;;TODO correct?
+            (gosh-syntax-table-put-property (1- curpos) (1+ curpos) '(2)))
            (t
-            (gosh-syntax-table-put-property curpos (1+ curpos) '(7)))))
+            ;; finish regexp literal
+            (gosh-syntax-table-put-property curpos (1+ curpos) '(7))
+            (setq state (1+ state)))))
 
          ;; everything else
          (t
@@ -1253,39 +1353,43 @@ Set this variable before open by `gosh-mode'."
     (reverse res)))
 
 (defun gosh-eldoc-rotate-print-info ()
-  (condition-case err
-      (when (eldoc-display-message-p)
-        (when (eq (aref gosh-eldoc--cached-data 0) (point))
-          (let* ((index (aref gosh-eldoc--cached-data 1))
-                 (info (aref gosh-eldoc--cached-data 2))
-                 (len (length info)))
-            (when (> len 1)
-              (aset gosh-eldoc--cached-data 1 (% (1+ index) len))
-              (eldoc-message (nth index info))))))
-    (error (message "gosh-eldoc error: %s" err))))
+  (save-match-data
+    (with-local-quit
+      (condition-case err
+          (when (eldoc-display-message-p)
+            (when (eq (aref gosh-eldoc--cached-data 0) (point))
+              (let* ((index (aref gosh-eldoc--cached-data 1))
+                     (info (aref gosh-eldoc--cached-data 2))
+                     (len (length info)))
+                (when (> len 1)
+                  (aset gosh-eldoc--cached-data 1 (% (1+ index) len))
+                  (eldoc-message (nth index info))))))
+        (error (message "gosh-eldoc error: %s" err))))))
 
 (defun gosh-eldoc-print-current-symbol-info ()
-  (let* ((fnsym0 (gosh-parse-fnsym-current-sexp))
-         (fnpos (if (consp fnsym0) (cadr fnsym0) 0))
-         (sym (and (consp fnsym0) (gosh-nth* fnpos (car fnsym0))))
-         (fnsym (cond ((atom fnsym0) fnsym0)
-                      (t (caar fnsym0))))
-         (env (save-excursion
-                (gosh-beginning-of-string)
-                (gosh-parse-current-env)))
-         (spec1 (and fnsym (gosh-env-matches env fnsym t)))
-         (spec2 (and sym (gosh-env-matches env sym t)))
-         (string1 (and spec1 
-                       (gosh-eldoc--find-and-print-strings
-                        spec1 env
-                        (cons fnpos (nthcdr (1- fnpos) (car fnsym0))))))
-         (string2 (and (> fnpos 0)
-                       spec2 
-                       (gosh-eldoc--find-and-print-strings
-                        spec2 env nil)))
-         (strings (remq nil (append string1 string2))))
-    (gosh-eldoc--cache-set (point) 0 strings)
-    (car strings)))
+  (save-match-data
+    (with-local-quit
+      (let* ((fnsym0 (gosh-parse-fnsym-current-sexp))
+             (fnpos (if (consp fnsym0) (cadr fnsym0) 0))
+             (sym (and (consp fnsym0) (gosh-nth* fnpos (car fnsym0))))
+             (fnsym (cond ((atom fnsym0) fnsym0)
+                          (t (caar fnsym0))))
+             (env (save-excursion
+                    (gosh-beginning-of-string)
+                    (gosh-parse-current-env)))
+             (spec1 (and fnsym (gosh-env-matches env fnsym t)))
+             (spec2 (and sym (gosh-env-matches env sym t)))
+             (string1 (and spec1 
+                           (gosh-eldoc--find-and-print-strings
+                            spec1 env
+                            (cons fnpos (nthcdr (1- fnpos) (car fnsym0))))))
+             (string2 (and (> fnpos 0)
+                           spec2 
+                           (gosh-eldoc--find-and-print-strings
+                            spec2 env nil)))
+             (strings (remq nil (append string1 string2))))
+        (gosh-eldoc--cache-set (point) 0 strings)
+        (car strings)))))
 
 (defun gosh-eldoc--cache-set (point index info)
   (aset gosh-eldoc--cached-data 0 point)
@@ -1333,10 +1437,24 @@ Set this variable before open by `gosh-mode'."
         ((nth 3 spec)
          "")
         ((and (consp type)
+              (memq (car type) '(class)))
+         (concat "Class: "
+                 (gosh-eldoc--sexp->string (car spec))
+                 ;;super class
+                 (when (cadr type)
+                   (concat 
+                    " Base: "
+                    (gosh-eldoc--sexp->string (cadr type))))
+                 (when (caddr type)
+                   (concat 
+                    " Slots: "
+                    (gosh-eldoc--sexp->string 
+                     (mapcar 'car-safe (caddr type)))))))
+        ((and (consp type)
               (memq (car type) '(syntax lambda)))
          (concat
           (and (eq (car type) 'syntax)
-               "syntax: ")
+               "Syntax: ")
           (gosh-eldoc--sexp->string
            (cons (car spec)
                  (gosh-eldoc--canonicalize-order
@@ -1351,12 +1469,12 @@ Set this variable before open by `gosh-mode'."
          (gosh-eldoc--sexp->string (car spec)))
         ((and (consp type) (eq (car type) 'string) (stringp (cdr type)))
          (concat
-          "string: \""
+          "String: \""
           (gosh-eldoc--sexp->string (cdr type))
           "\""))
         ((and (consp type) (eq (car type) 'number) (stringp (cdr type)))
          (concat
-          "number: "
+          "Number: "
           (gosh-eldoc--sexp->string (cdr type))))
         ((symbolp type)
          (let ((spec (gosh-env-lookup env type)))
@@ -1368,7 +1486,7 @@ Set this variable before open by `gosh-mode'."
        (if (and (not (nth 3 spec)) (nth 4 spec)) " - " "")
        (or (nth 4 spec) ""))))
    ((and (consp spec) (null (cdr spec)))
-    "some of ( parameter | alias | dynamic loaded procedure )")))
+    "Some of ( Parameter | Alias | Dynamic loaded procedure )")))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1393,6 +1511,11 @@ Set this variable before open by `gosh-mode'."
 
 (defun gosh-intern-soft (name)
   (intern-soft name gosh-obarray))
+
+(defun gosh--scan-sexps (point count)
+  (condition-case nil
+      (scan-sexps point count)
+    (scan-error nil)))
 
 (defun gosh-symbol-eq (symbol1 symbol2)
   (let ((name1 (symbol-name symbol1))
@@ -1588,19 +1711,21 @@ referenced mew-complete.el"
 
 (defun gosh-context-string-p (&optional point)
   (save-excursion
-    (let ((parses (parse-partial-sexp (point-min) (or point (point)))))
-      (nth 3 parses))))
+    (let ((context (parse-partial-sexp (point-min) (or point (point)))))
+      (when (and context (nth 3 context))
+        (cons (nth 3 context) (nth 8 context))))))
 
 (defun gosh-context-comment-p (&optional point)
   (save-excursion
-    (let ((parses (parse-partial-sexp (point-min) (or point (point)))))
-      (nth 4 parses))))
+    (let ((context (parse-partial-sexp (point-min) (or point (point)))))
+      (when (and context (nth 4 context))
+        (cons (nth 4 context) (nth 8 context))))))
 
 (defun gosh-context-code-p (&optional point)
   (save-excursion
-    (let ((parses (parse-partial-sexp (point-min) (or point (point)))))
-      (and (not (nth 3 parses))
-           (not (nth 4 parses))))))
+    (let ((context (parse-partial-sexp (point-min) (or point (point)))))
+      (and (not (nth 3 context))
+           (not (nth 4 context))))))
 
 (defun gosh-beginning-of-sexp ()
   (unless (bobp)
@@ -1639,18 +1764,17 @@ referenced mew-complete.el"
     (not (eq first (point)))))
 
 (defun gosh-beginning-of-string ()
-  (when (gosh-context-string-p)
-    (search-backward "\"" nil t)
-    ;; search double-quote non escaped
-    (while (and (> (point) (point-min)) (eq ?\\ (char-before)))
-      (search-backward "\"" nil t))))
+  (let ((context (gosh-context-string-p)))
+    (when context
+      (goto-char (cdr context)))))
 
 (defun gosh-end-of-string ()
-  (when (gosh-context-string-p)
-    (search-forward "\"" nil t)
-    ;; search double-quote non escaped
-    (while (and (< (point) (point-max)) (eq ?\\ (char-before (1- (point)))))
-      (search-forward "\"" nil t))))
+  (let ((context (gosh-context-string-p)))
+    (when context
+      (goto-char (cdr context))
+      (let ((end (gosh--scan-sexps (point) 1)))
+        (when end
+          (goto-char end))))))
 
 ;; for the enclosing sexp, returns a cons of the leading symbol (if
 ;; any) and the current position within the sexp (starting at 0)
@@ -2230,6 +2354,14 @@ referenced mew-complete.el"
         (gosh-beginning-of-next-sexp)
         (gosh-parse-sexp-type-at-point))))))
 
+(defun gosh-parse-class-of-current-define ()
+  (save-excursion
+    (let ((super (gosh-nth-sexp-at-point 2))
+          (slots (gosh-nth-sexp-at-point 3))
+          ;;TODO options
+          )
+      (list super slots))))
+
 (defun gosh-parse-applying-of-current-define ()
   (save-excursion
     (gosh-beginning-of-next-sexp)
@@ -2256,7 +2388,9 @@ referenced mew-complete.el"
                (type (gosh-parse-type-of-current-define)))
            (list (if type (list name type) (list name)))))
         ((define-class)
-         (list (list (gosh-parse-name-of-current-define) 'non-procedure)))
+         (let ((name (gosh-parse-name-of-current-define))
+               (contents (gosh-parse-class-of-current-define)))
+           `((,name (class ,@contents)))))
         ((define-record-type)
          (backward-char)
          (ignore-errors
@@ -3050,11 +3184,12 @@ d:/home == /cygdrive/d/home
       (ac-define-source gosh-keywords
         '((candidates . gosh-ac-keywords-candidates)
           (symbol . "k")
-          (prefix . "[ \t\n]\\(:\\(?:\\sw\\|\\s_\\)+\\)")
+          (prefix . "[ \t\n]\\(:\\(?:\\sw\\|\\s_\\)*\\)")
           (requires . 1)
           (cache)))
 
-      (let ((syntaxes '("use" "import" "select-module" "with-module" "extend" "define-in-module")))
+      (let ((syntaxes '("use" "import" "select-module"
+                        "with-module" "extend" "define-in-module")))
         (ac-define-source gosh-modules
           `((candidates . gosh-ac-module-candidates)
             (symbol . "m")
@@ -3097,23 +3232,53 @@ d:/home == /cygdrive/d/home
   (let ((fnsym (gosh-parse-fnsym-current-sexp)))
     (when (and (cadr fnsym) (> (cadr fnsym) 0))
       (let ((fn (caar fnsym))
-            (env (gosh-parse-current-env))
-            (res '())
-            key-args)
-        (gosh-map-env-symbols env c
-          (when (and (eq (car c) fn)
-                     (consp (cadr c))
-                     (memq (caadr c) '(lambda syntax)))
-            (setq key-args (cdr (member :key (cadadr c))))
-            (setq res (append 
-                       (mapcar (lambda (k)
-                                 (gosh-ac-symbol->keyword-string 
-                                  (if (consp k)
-                                      (car k)
-                                    k)))
-                               key-args)
-                       res))))
-        res))))
+            (env (gosh-parse-current-env)))
+        (cond
+         ((eq fn 'make)
+          (gosh-ac-keywords-class-slot-candidates fnsym env))
+         (t
+          (gosh-ac-keywords-generic-candidates fn fnsym env)))))))
+
+(defun gosh-ac-keywords-class-slot-candidates (fnsym env)
+  (let ((class (cadar fnsym)) 
+        res)
+    (when class
+      (gosh-map-env-symbols env c
+        (when (and (consp c)
+                   (consp (cadr c))
+                   (eq (caadr c) 'class)
+                   (eq class (car c)))
+          (let ((slots (car (cddadr c))))
+            (mapcar
+             (lambda (k)
+               (cond
+                ((atom k)
+                 (setq res (cons (gosh-ac-symbol->keyword-string k) res)))
+                ((memq :init-keyword k)
+                 (setq res (cons (gosh-ac-symbol->keyword-string
+                                  (cadr (memq :init-keyword k)))
+                                 res)))
+                ((car k)
+                 (setq res (cons
+                            (gosh-ac-symbol->keyword-string (car k))
+                            res)))))
+             slots))))
+      res)))
+
+(defun gosh-ac-keywords-generic-candidates (fn fnsym env)
+  (let (res)
+    (gosh-map-env-symbols env c
+      (when (and (eq (car c) fn)
+                 (consp (cadr c))
+                 (memq (caadr c) '(lambda syntax)))
+        (let ((key-args (cdr (member :key (cadadr c)))))
+          (mapcar (lambda (k)
+                    (setq res (cons 
+                               (gosh-ac-symbol->keyword-string 
+                                (if (consp k) (car k) k))
+                               res)))
+                  key-args))))
+    res))
 
 (defun gosh-ac-symbol->keyword-string (sym)
   (let ((name (symbol-name sym)))
@@ -3194,7 +3359,7 @@ d:/home == /cygdrive/d/home
          (method
           (funcall method state indent-point normal-indent)))))))
 
-;;TODO
+;;TODO to gosh-config
 (defvar gosh--smart-indent-alist
   '(
     (util.match 

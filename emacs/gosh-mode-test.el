@@ -28,6 +28,31 @@
 \(define (hoge-key-opt :optional arg1 (arg2 #f) :key (key1 #f) key2))
 ")
 
+(let ((parenthese 
+       (lambda (count)
+         (goto-char (point-min))
+         (loop repeat count
+               do (re-search-forward "(" nil t))
+         (backward-char))))
+  (with-temp-buffer
+    (insert "(let (()) (()))")
+    (funcall parenthese 2)
+    (assert (equal (gosh-opening--parse-current-context) `(let 0 *)))
+    (funcall parenthese 3)
+    (assert (equal (gosh-opening--parse-current-context) `(let 0 (*)))))
+  (with-temp-buffer
+    (insert "(case a () ())")
+    (funcall parenthese 2)
+    (assert (equal (gosh-opening--parse-current-context) `(case 1 *)))
+    (funcall parenthese 3)
+    (assert (equal (gosh-opening--parse-current-context) `(case 2 *)))))
+
+(assert (equal (gosh-opening--match-p '(let 1 ((*)))) nil))
+(assert (equal (gosh-opening--match-p '(let 1 (*))) t))
+(assert (equal (gosh-opening--match-p '(let 0 (*))) t))
+(assert (equal (gosh-opening--match-p '(let 0 ((*)))) nil))
+(assert (equal (gosh-opening--match-p '(let 2 *)) nil))
+
 ;;TODO more test
 (dont-compile
   (expectations 
