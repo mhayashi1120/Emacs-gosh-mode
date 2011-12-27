@@ -39,7 +39,8 @@
 ;;   each executable script.
 ;;   module script. (all module have one backend(?))
 ;; * create parser process that is separated from backend process?
-
+;; * make completely using flymake
+;; 
 ;; scheme-send-last-sexp to any keybind
 
 ;; gosh-eval-buffer to C-c C-b
@@ -57,6 +58,9 @@
 ;;   when :prefix symbol
 
 ;; * risky-local-variable
+
+;; * re-consider find-file-noselect
+;;   remove history? or other low level api?
 
 ;;; Code:
 
@@ -282,25 +286,22 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
     (when (and full (string-match "/gosh\\(\\.exe\\)?$" full))
       full)))
 
-;;TODO delete duplicates (preserve seq)
-(defun gosh-available-modules ()
+(defun gosh-available-modules (&optional full)
   "All module symbols in *load-path*"
   (let ((paths (gosh-load-path)))
-    (mapcar
-     (lambda (f) 
-       (subst-char-in-string ?/ ?. f))
-     (mapcar
-      'file-name-sans-extension
-      (gosh-append-map
-       (lambda (dir)
-         (let ((len (length dir)))
-           (mapcar 
-            (lambda (f) (substring f (+ 1 len)))
-            (gosh-directory-tree-files dir "\\.scm$"))))
-       (mapcar 'directory-file-name paths))))))
+    (gosh-append-map
+     (lambda (dir)
+       (let ((len (length dir)))
+         (mapcar 
+          (lambda (f) 
+            (if full 
+                f
+              (subst-char-in-string 
+               ?/ ?. (file-name-sans-extension (substring f (+ 1 len))))))
+          (gosh-directory-tree-files dir "\\.scm$"))))
+     (mapcar 'directory-file-name paths))))
 
 (defun gosh--module->file (mod)
-  ;;TODO current-executable and switch load-path
   (let* ((file (concat (subst-char-in-string ?. ?/ (symbol-name mod)) ".scm"))
          (dir
           (gosh-any-file-in-path
@@ -336,37 +337,35 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
       (nreverse list))))
 
 (defun gosh-jump-thingatpt ()
-  "Jumpt to current symbol definition.
+  "Jump to current symbol definition.
 
-TODO prefixed symbol
-  push-mark"
+TODO push-mark"
   (interactive)
-  (let* ((sym (gosh-parse-symbol-at-point))
-         (modules 
-          (append
-           (mapcar 
-            (lambda (x) (cons x ""))
-            (ignore-errors (gosh-parse-current-base-modules)))
-           (ignore-errors 
-             (gosh-parse-buffer-import-modules-with-prefix)))))
+  (let* ((sym (gosh-parse-symbol-at-point)))
     (catch 'found
       (when (assq sym (gosh-parse-current-globals t))
-        (gosh-jump-to-definition sym)
+        (gosh-jump-to-def sym)
         (throw 'found t))
+      ;; search base modules
+      (mapc 
+       (lambda (x)
+         (when (gosh-jump-to-module-def x sym)
+           (throw 'found t)))
+       (ignore-errors (gosh-parse-current-base-modules)))
       ;; search imported modules
-      (mapc
-       (lambda (m)
-         (let ((mf (or (and (stringp m) m) (car m)))
-               (sym2 (or (and (listp m) 
-                              (intern-soft (substring (symbol-name sym) (length (cdr m)))))
-                         sym)))
-           (when (memq sym2 (gosh-exports-functions mf))
-             (let ((buffer (get-file-buffer mf)))
-               (set-buffer (or buffer (find-file-noselect mf)))
-               (when (gosh-jump-to-definition sym2)
-                 (switch-to-buffer (current-buffer))
-                 (throw 'found t))))))
-       (gosh-guessed-module-files modules (symbol-name sym)))
+      (let ((modules 
+             (ignore-errors 
+               (gosh-parse-buffer-import-modules-with-prefix))))
+        (mapc
+         (lambda (m)
+           (let ((mf (or (and (stringp m) m) (car m)))
+                 (sym2 (or (and (listp m) 
+                                (intern-soft (substring (symbol-name sym) (length (cdr m)))))
+                           sym)))
+             (when (memq sym2 (gosh-exports-functions mf))
+               (when (gosh-jump-to-module-def mf sym2)
+                 (throw 'found t)))))
+         (gosh-guessed-module-files modules (symbol-name sym))))
       ;; jump to module (cursor point as a module name)
       (let ((file (gosh--module->file sym)))
         (when file
@@ -374,7 +373,16 @@ TODO prefixed symbol
           (throw 'found t)))
       (message "Not found definition %s" sym))))
 
-(defun gosh-jump-to-definition (definition)
+(defun gosh-jump-to-module-def (module symbol)
+  (let* ((mf (or (and (stringp module) module)
+                 (gosh--module->file module)))
+         (buf (get-file-buffer mf)))
+    (set-buffer (or buf (find-file-noselect mf)))
+    (when (gosh-jump-to-def symbol)
+      (switch-to-buffer (current-buffer))
+      t)))
+
+(defun gosh-jump-to-def (definition)
   (let ((name (symbol-name definition))
         (first (point)))
     (goto-char (point-min))
@@ -414,6 +422,75 @@ TODO prefixed symbol
        (push (gosh--module->file (car m)) 3rd))
      imports)
     (remq nil (append 1st 2nd 3rd))))
+
+(defun gosh-import-module-thingatpt ()
+  "Import a new module if missing.
+
+TODO
+if define-module is exists then insert statement to the form of `define-module'
+else insert top level of the script.
+
+`import' statement
+
+"
+  (interactive)
+  (barf-if-buffer-read-only)
+  (let* ((sym (gosh-parse-symbol-at-point))
+         (cm (gosh-parse-context-module))
+         module)
+    (catch 'found
+      (unless sym (throw 'found 'not-found))
+      ;; search imported modules
+      (setq module (gosh-guessed-module-from-info (symbol-name sym)))
+      (when module
+        (throw 'found t))
+      (message "Exported module is not found `%s'" sym))
+    (unless module
+      (error "Module for `%s' is not found" sym))
+    (save-excursion
+      (goto-char (point-min))
+      (cond
+       ((re-search-forward (format "(use[ \t\n]+\\_<%s\\_>" module) nil t)
+        (ding)
+        (message "Module %s have already imported." module))
+       ((re-search-forward "^ *\\((use\\b\\)" nil t)
+        ;; TODO what should i do when statement not found...
+        (goto-char (match-beginning 1))
+        (gosh--insert-import-statement module))
+       ((re-search-forward (format "^ *(define-module %s\\_>" cm) nil t)
+        ;;TODO test
+        (forward-line 1)
+        (gosh--insert-import-statement module))
+       ((re-search-forward "^ *(" nil t)
+        ;;TODO test
+        (forward-line 0)
+        (gosh--insert-import-statement module))
+       (t
+        ;;TODO
+        (error "Unable find point"))))))
+
+(defun gosh--insert-import-statement (module)
+  ;;FIXME
+  (let ((inhibit-read-only t))
+    (insert (format "(use %s)\n" module))
+    (indent-for-tab-command)
+    (message "Module %s is imported now." module)
+    (sit-for 0.5)))
+
+(defun gosh-guessed-module-from-info (name)
+  (let (message-log-max)
+    (save-window-excursion
+      (condition-case nil
+          (let ((win (info-lookup 'symbol name 'gosh-mode))
+                (buf (get-buffer "*info*")))
+            (when (and win buf)
+              (with-current-buffer buf
+                (save-excursion
+                  (save-restriction
+                    (widen)
+                    (and (re-search-backward "Module: \\([^ \n\t]+\\)" nil t)
+                         (match-string 1)))))))
+        (error nil)))))
 
 (defun gosh-exports-functions (file)
   (gosh-with-find-file file
@@ -467,7 +544,8 @@ Arg FORCE non-nil means forcely insert bracket."
   (interactive "P")
   (gosh-closing--insert force ?\] ?\)))
 
-;;TODO re-consider autopair.el
+;;TODO re-consider with autopair.el
+;;TODO when insert second bracket (match a [] [])
 (defun gosh-opening--insert (force default-open)
   (insert default-open)
   ;; status after insert open char.
@@ -475,24 +553,25 @@ Arg FORCE non-nil means forcely insert bracket."
                  (let ((first (point))
                        (next nil))
                    (cond
+                    ;; goto the current toplevel
                     ((not (re-search-backward "^(" nil t))
                      'unexpected)
-                    ((setq next (gosh--scan-sexps (point) 1))
-                     (goto-char next)
-                     (cond
-                      ((> first next)
-                       'unexpected)
-                      ((not (re-search-forward "^(" nil t))
-                       'balanced)
-                      ;;TODO when next is comment
-                      ((not (looking-at "[ \t\n]*("))
-                       'unbalanced)
-                      ((gosh--scan-sexps next 1)
-                       'balanced)
-                      (t
-                       'unbalanced)))
                     (t
-                     'opening))))))
+                     (let ((s (point)))
+                       (forward-char)
+                       ;; goto next toplevel or end of buffer
+                       (or
+                        (progn
+                          (when (re-search-forward "^(" nil t)
+                            (backward-char)
+                            t))
+                        (goto-char (point-max)))
+                       ;;TODO check parse-partial-sexp doc
+                       (let ((part (parse-partial-sexp s (point))))
+                         (cond
+                           ((zerop (car part)) 'balanced)
+                           ((minusp (car part)) 'unbalanced)
+                           (t 'opening))))))))))
     ;;TODO re consider it
     (when force
       (cond
@@ -515,8 +594,8 @@ Arg FORCE non-nil means forcely insert bracket."
         ;; insert and backward with checking paren
         (backward-char)
         (gosh-opening--switch-paren)
-        ;; forward to first statement
-        (skip-chars-forward "([ \t\n"))
+        ;; move to after inserted point
+        (forward-char))
        ((eq state 'opening)
         (when (save-excursion
                 (backward-char)
@@ -527,9 +606,8 @@ Arg FORCE non-nil means forcely insert bracket."
                     t)))
           (forward-char)))
        ((eq state 'unbalanced)
-        ;; insert and backward with checking paren
-        (backward-char)
-        (gosh-opening--switch-paren))))
+        ;; do nothing
+        )))
     (when blink-paren-function
       (save-excursion
         (backward-char 1)
@@ -540,7 +618,6 @@ Arg FORCE non-nil means forcely insert bracket."
              (funcall blink-paren-function))))))
 
 (defun gosh-opening--switch-paren ()
-  ;;TODO in regexp or string context
   (let ((open (char-after))
         (next (gosh--scan-sexps (point) 1)))
     (when (and next (memq open '(?\( ?\[)))
@@ -569,10 +646,12 @@ Arg FORCE non-nil means forcely insert bracket."
     (let (*))
     (let* (*))
     (letrec (*))
-    (andlet* (*))
-    (let 1 (*))                         ; named let
+    (and-let* (*))
+    ;; (let 1 (*))                         ; named let
     (case 1 *)
     (cond *)
+    ;;TODO
+    ;; (guard 
 
     ;;TODO other module
     (match 1 *)
@@ -590,7 +669,11 @@ Arg FORCE non-nil means forcely insert bracket."
                 (let ((pos (cadr context))
                       (pointer (caddr context)))
                   (or 
-                   (and (eq pos (cadr p)) 
+                   ;; TODO reconsider this condition
+                   (and (equal pointer '*)
+                        (numberp (cadr p))
+                        (<= (cadr p) pos))
+                   (and (eq pos (cadr p))
                         (equal pointer (caddr p)))
                    (equal pointer (cadr p)))))
         return t))
@@ -641,11 +724,10 @@ Arg FORCE non-nil means forcely insert bracket."
   "Face used to highlight mode line."
   :group 'gosh-mode)
 
-;;TODO no need? or rename?
 (defface gosh-modeline-lightdown-face
   '((t
      :foreground "White"))
-  "TODO Face used to highlight mode line."
+  "Face used to unhighlight mode line."
   :group 'gosh-mode)
 
 (defface gosh-modeline-working-face
@@ -878,7 +960,6 @@ Evaluate s-expression, syntax check, test-module, etc."
         (gosh-goto-line line)
         (when (= (point) (point-max))
           (forward-line -1))
-        ;;TODO completely using flymake
         (flymake-make-overlay
          (point) (line-end-position) 
          text 'flymake-errline 'flymake-errline))))))
@@ -959,6 +1040,7 @@ Evaluate s-expression, syntax check, test-module, etc."
     (set-keymap-parent map scheme-mode-map)
 
     (define-key map "\M-\C-i" 'gosh-smart-complete)
+    (define-key map "\C-c\M-I" 'gosh-import-module-thingatpt)
     (define-key map "\C-c\C-j" 'gosh-jump-thingatpt)
     (define-key map "\C-c\C-u" 'gosh-test-module) ;;todo key bind is?
     (define-key map "\C-c?" 'gosh-show-info)
@@ -975,12 +1057,11 @@ Evaluate s-expression, syntax check, test-module, etc."
 
 (defvar gosh-mode-hook nil)
 
-;;TODO autoload?
+;;TODO autoload works?
 ;;;###autoload
 (define-derived-mode gosh-mode scheme-mode "Gosh"
   "Major mode for Gauche programming."
   (if (boundp 'syntax-propertize-function)
-      ;;TODO check documents
       (set (make-local-variable 'syntax-propertize-function)
            'gosh-syntax-table-apply-region)
     (set (make-local-variable 'font-lock-syntactic-keywords)
@@ -1037,7 +1118,9 @@ Evaluate s-expression, syntax check, test-module, etc."
 
 (defun gosh-syntax-table-set-properties (beg)
   (let ((curpos beg)
-        ;;TODO how about "string"?
+        ;;TODO how about in "string"?
+        ;; "aa #/hoge/"
+        ;; #/hoge/i
         (max (min (line-end-position 5) (point-max)))
         (state 0))
     (while (and (< curpos max)
@@ -1062,8 +1145,10 @@ Evaluate s-expression, syntax check, test-module, etc."
           ;; (1) = punctuation, (2) = word
           (cond
            ((= (char-before curpos) ?\\)
-            ;;TODO correct?
             (gosh-syntax-table-put-property (1- curpos) (1+ curpos) '(2)))
+           ((= (char-after (1+ curpos)) ?i)
+            (gosh-syntax-table-put-property curpos (+ curpos 2) '(7))
+            (setq state (1+ state)))
            (t
             ;; finish regexp literal
             (gosh-syntax-table-put-property curpos (1+ curpos) '(7))
@@ -1536,6 +1621,13 @@ Set this variable before open by `gosh-mode'."
 (defun gosh-symbol-memq (symbol list)
   (memq (gosh-intern-safe symbol) 
         (mapcar 'gosh-intern-safe list)))
+
+(defun gosh-string-split-word (string)
+  (loop with start = 0
+        while (string-match "\\w+" string start)
+        collect (progn 
+                  (setq start (match-end 0))
+                  (match-string 0 string))))
 
 
 
@@ -2104,9 +2196,11 @@ referenced mew-complete.el"
   (let ((vars '())
         (start (point))
         (limit (save-excursion (beginning-of-defun) (+ (point) 1)))
-        (let-limit (save-excursion (gosh-beginning-of-sexp)
-                                   (gosh-beginning-of-sexp)
-                                   (point)))
+        (let-limit (save-excursion 
+                     (ignore-errors
+                       (gosh-beginning-of-sexp)
+                       (gosh-beginning-of-sexp))
+                     (point)))
         (scan-internal))
     (save-excursion
       (while (> (point) limit)
@@ -3379,11 +3473,12 @@ d:/home == /cygdrive/d/home
      (let*-values . 1))
     (gauche.net
      (call-with-client-socket . 1))
-    (gauche.charconv'
+    (gauche.charconv
      (call-with-input-conversion . 1))
     ))
 
 (defun gosh--smart-indent-assoc-symbol (symbol name &optional in-module alist)
+  ;;TODO if current module matched
   (let ((prefixes (or in-module (gosh-parse-buffer-import-modules-with-prefix)))
         (alist (or alist gosh--smart-indent-alist)))
     (catch 'found
@@ -3830,17 +3925,17 @@ And print value in the echo area.
 
 (defvar gosh-refactor-read-symbol-history nil)
 
-(defun gosh-refactor-trim-expression (s)
+(defun gosh-refactor--trim-expression (s)
   (if (string-match "^[ \t\n]*\\(\\(?:.\\|\n\\)*\\)" s)
       (match-string 1 s)
     s))
 
-(defun gosh-refactor-read-sexp-string ()
-  (gosh-refactor-trim-expression
+(defun gosh-refactor--read-sexp-string ()
+  (gosh-refactor--trim-expression
    (buffer-substring (point)
                      (progn (forward-sexp 1) (point)))))
 
-(defun gosh-refactor-goto-top-of-form ()
+(defun gosh-refactor--goto-top-of-form ()
   (let ((continue t))
     (condition-case nil
         (progn
@@ -3854,37 +3949,41 @@ And print value in the echo area.
        (backward-char 1)))
     continue))
 
+(defun gosh-refactor--create-regexp (symbol)
+  "Create SYMBOL exclusive regexp."
+  (format "\\_<\\(%s\\)\\_>" (regexp-quote symbol)))
+
 ;;TODO define-method define-constant define-syntax
-(defun gosh-refactor-find-binding-region (name)
+(defun gosh-refactor--find-binding-region (name)
   (catch 'done
-    (let ((name-regexp (erefactor-create-regexp name)))
+    (let ((name-regexp (gosh-refactor--create-regexp name)))
       (save-excursion
-        (while (gosh-refactor-goto-top-of-form)
+        (while (gosh-refactor--goto-top-of-form)
           (let ((start (point))
                 (end (save-excursion (forward-sexp) (point)))
                 function arg)
             ;; skip parenthese
             (forward-char)
-            (setq function (gosh-refactor-read-sexp-string))
+            (setq function (gosh-refactor--read-sexp-string))
             (cond
              ((member function '("let" "let*" "letrec" "let1"
                                  "if-let1" "rlet" "and-let*" "fluid-let"
                                  "receive" "lambda"))
               ;;TODO named let
               ;; FIXME incorrect about let* and let
-              (setq arg (gosh-refactor-read-sexp-string))
+              (setq arg (gosh-refactor--read-sexp-string))
               (when (string-match name-regexp arg)
                 (throw 'done (cons start end))))
              ((member function '("define"))
-              (setq arg (gosh-refactor-read-sexp-string))
+              (setq arg (gosh-refactor--read-sexp-string))
               (when (string-match name-regexp arg)
                 ;;FIXME dirty
                 (goto-char start)
-                (gosh-refactor-goto-top-of-form)
+                (gosh-refactor--goto-top-of-form)
                 (let ((start (point))
                       (end (save-excursion (forward-sexp) (point))))
                   (unless (save-excursion 
-                            (gosh-refactor-goto-top-of-form))
+                            (gosh-refactor--goto-top-of-form))
                     ;; Top of file
                     (setq end (point-max)))
                   (throw 'done (cons start end))))))
@@ -3892,7 +3991,17 @@ And print value in the echo area.
     nil))
 
 (defun gosh-refactor-rename-symbol-read-args ()
-  (erefactor-rename-symbol-read-args 'gosh-refactor-read-symbol-history))
+  (let (current-name prompt new-name)
+    (barf-if-buffer-read-only)
+    (unless (setq current-name (thing-at-point 'symbol))
+      (error "No symbol at point"))
+    (setq prompt (format "%s -> New name: " current-name))
+    (setq new-name 
+          (read-string prompt current-name 
+                       'gosh-refactor-read-symbol-history))
+    (when (string= current-name new-name)
+      (error "No difference"))
+    (list current-name new-name)))
 
 (defun gosh-refactor-find-executable-scripts ()
   (let (list)
@@ -3902,6 +4011,7 @@ And print value in the echo area.
         (lambda (file)
           (when (and (file-writable-p file)
                      (not (eq (car (file-attributes file)) t)))
+            ;; read shebang
             (with-temp-buffer
               (let ((coding-system-for-read 'raw-text))
                 (insert-file-contents file nil 0 256))
@@ -3916,20 +4026,20 @@ And print value in the echo area.
   "Rename symbol at point."
   (interactive (gosh-refactor-rename-symbol-read-args))
   (let (region)
-    (setq region (gosh-refactor-find-binding-region old-name))
+    (setq region (gosh-refactor--find-binding-region old-name))
     (erefactor-rename-region old-name new-name region)))
 
-;;TODO
-;; *load-path* files
-;; writable PATH files?
-;; name -> dwim?
-;; this symbol is not defined in this module.
-;;  jump to the module and try again.
-(defun gosh-refactor-rename-symbol-afaiui (old-name new-name)
-  "Rename symbol As Far As I Understand It"
-  ;; (split-string (getenv "GAUCHE_LOAD_PATH") path-separator)
-  ;; (scheme-current-globals)
-  )
+;; ;;TODO
+;; ;; *load-path* files
+;; ;; writable PATH files?
+;; ;; name -> dwim?
+;; ;; this symbol is not defined in this module.
+;; ;;  jump to the module and try again.
+;; (defun gosh-refactor-rename-symbol-afaiui (old-name new-name)
+;;   "Rename symbol As Far As I Understand It"
+;;   ;; (split-string (getenv "GAUCHE_LOAD_PATH") path-separator)
+;;   ;; (scheme-current-globals)
+;;   )
 
 
 
@@ -3949,6 +4059,27 @@ And print value in the echo area.
 (defun gosh-info-lookup-initialize ()
   (gosh-info-lookup-add-help 'gosh-mode)
   (gosh-info-lookup-add-help 'gosh-inferior-mode))
+
+(defun gosh-info--non-documented-modules ()
+  (let ((documented (gosh-info--documented-modules)))
+    (loop for m in (gosh-available-modules)
+          unless (member m documented)
+          collect m)))
+
+(defvar gosh-info--documented-modules nil)
+(defun gosh-info--documented-modules ()
+  (or gosh-info--documented-modules
+      ;; list of documented modules
+      (save-window-excursion
+        (save-excursion
+          (Info-goto-node "(gauche-refe.info)Module Index")
+          (save-excursion
+            (goto-char (point-min))
+            (let (res)
+              (while (re-search-forward "^\\* \\([^ \t\n]+\\):[ \t]+" nil t)
+                (setq res (cons (match-string-no-properties 1) res)))
+              (setq gosh-info--documented-modules
+                    (nreverse res))))))))
 
 
 
