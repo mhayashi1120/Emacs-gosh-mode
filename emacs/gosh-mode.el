@@ -62,6 +62,8 @@
 ;; * re-consider find-file-noselect
 ;;   remove history? or other low level api?
 
+;; * (make-temp-directory :optional (prefix #f) )
+;;                                             ^cursor
 ;;; Code:
 
 
@@ -649,6 +651,7 @@ Arg FORCE non-nil means forcely insert bracket."
     (and-let* (*))
     ;; (let 1 (*))                         ; named let
     (case 1 *)
+    (ecase 1 *)
     (cond *)
     ;;TODO
     ;; (guard 
@@ -1042,7 +1045,7 @@ Evaluate s-expression, syntax check, test-module, etc."
     (define-key map "\M-\C-i" 'gosh-smart-complete)
     (define-key map "\C-c\M-I" 'gosh-import-module-thingatpt)
     (define-key map "\C-c\C-j" 'gosh-jump-thingatpt)
-    (define-key map "\C-c\C-u" 'gosh-test-module) ;;todo key bind is?
+    (define-key map "\C-c\C-u" 'gosh-test-module)
     (define-key map "\C-c?" 'gosh-show-info)
     (define-key map "\C-c\M-r" 'gosh-refactor-rename-symbol)
     ;; (define-key map "\C-c\er" 'gosh-refactor-rename-symbol-afaiui)
@@ -3859,19 +3862,18 @@ And print value in the echo area.
     ;; this case block several seconds in `gosh-backend-eval'
     (gosh-sticky-backend-switch-context)))
 
-;;TODO
 (defun gosh-test-module ()
+  "Execute test for module which is cursor on."
   (interactive)
   (let ((mod (gosh-parse-context-module)))
-    ;;TODO
     (gosh-sticky-validate-async mod)))
 
-;; todo irresponsible function...
 (defun gosh-popup-test-result ()
+  "Show test result if there is."
   (interactive)
   (cond
    ((null gosh-sticky-test-result)
-    (message "No error."))
+    (message "Current module is not tested yet."))
    (t
     (let ((msg (cadr (memq 'help-echo gosh-sticky-test-result))))
       (if msg

@@ -111,6 +111,7 @@
 
 ;; TODO incorrect at partical-scheme?
 (put 'with-output-to-string 'scheme-indent-function 0)
+(put 'ecase 'scheme-indent-function 1)
 
 
 
