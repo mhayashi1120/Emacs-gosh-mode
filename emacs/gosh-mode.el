@@ -602,7 +602,7 @@ Arg FORCE non-nil means forcely insert bracket."
         (when (save-excursion
                 (backward-char)
                 (let ((context (gosh-opening--parse-current-context)))
-                  (when (and context (gosh-opening--with-brancket-p context))
+                  (when (and context (gosh-opening--with-bracket-p context))
                     (delete-char 1)
                     (insert "[")
                     t)))
@@ -641,71 +641,82 @@ Arg FORCE non-nil means forcely insert bracket."
   (gosh-opening--insert force ?\[))
 
 ;; TODO move to gosh-config
-(defvar gosh-opening--auto-bracket-alist 
+(defvar gosh-opening--auto-bracket-alist
   '(
     (fluid-let (*))
     (do (*))
     (let (*))
     (let* (*))
+    (let gosh-symbol-p (*))             ; named let
     (letrec (*))
     (and-let* (*))
-    ;; (let 1 (*))                         ; named let
-    (case 1 *)
-    (ecase 1 *)
+    (case t *)
+    (ecase t *)
     (cond *)
-    ;;TODO
-    ;; (guard 
+    (guard (gosh-symbol-p *))
 
     ;;TODO other module
-    (match 1 *)
+    (match t *)
     (match-lambda *)
     (match-lambda* *)
     (match-let (*))
-    (match-let 1 (*))
+    (match-let t (*))
     (match-let* (*))
     (match-letrec (*))
     ))
 
-(defun gosh-opening--with-brancket-p (context)
-  (loop for p in gosh-opening--auto-bracket-alist
-        if (and (eq (car p) (car context))
-                (let ((pos (cadr context))
-                      (pointer (caddr context)))
-                  (or 
-                   ;; TODO reconsider this condition
-                   (and (equal pointer '*)
-                        (numberp (cadr p))
-                        (<= (cadr p) pos))
-                   (and (eq pos (cadr p))
-                        (equal pointer (caddr p)))
-                   (equal pointer (cadr p)))))
-        return t))
+;; `*' point to the cursor position.
+(defun gosh-opening--with-bracket-p (context)
+  (flet ((match-to 
+          (def args)
+          (loop for a1 in def
+                for a2 on args
+                if (eq a1 '*)
+                return (member a1 a2)
+                else if (listp a1)
+                return (match-to a1 (car a2))
+                else if (and (functionp a1)
+                             (not (funcall a1 (car a2))))
+                return nil)))
+    (let ((proc (car context)) (args (cdr context)))
+      (loop for (def-name . def-args) in gosh-opening--auto-bracket-alist
+            if (and (eq def-name proc)
+                    (match-to def-args args))
+            return t))))
 
-(defun gosh-opening--parse-current-context ()
+(defun gosh-opening--parse-current-context (&optional count)
   (save-excursion
-    (let ((pos 0)
-          (pointer '*)
-          prev sym)
-      (catch 'done
-        (while (not sym)
-          (let ((count 0))
-            (while (and (not (looking-at "^("))
-                        (let ((next (gosh--scan-sexps (point) -1)))
-                          (when next
-                            (goto-char next)
-                            next)))
-              (setq count (1+ count)))
-            (while (and (looking-back "(")
-                        (not (looking-at "^("))
-                        (not (setq sym (symbol-at-point))))
-              (setq pointer (list pointer))
-              (backward-char))
-            (when sym
-              (setq pos (1- count)))
-            (when (equal prev (point))
-              (throw 'done nil))
-            (setq prev (point))))
-        (list sym pos pointer)))))
+    (let ((c (or count 0))
+          (start (point)))
+      (while (and 
+              (not (bobp))
+              (not (looking-at "^[[(]")) ; top level
+              (condition-case nil
+                  (progn
+                    (backward-sexp)
+                    t)
+                (scan-error 
+                 (cond
+                  ((plusp c)
+                   (decf c)
+                   (skip-chars-backward " \t\n(["))
+                  ((looking-at "\\w") 
+                   nil)
+                  (t
+                   (backward-char)
+                   t))))))
+      (skip-chars-backward " \t\n([")
+      (let* ((partial (buffer-substring-no-properties (point) start))
+             (parsed (parse-partial-sexp (point) start))
+             (parenthese (mapcar 
+                          (lambda (x)
+                            (gosh--paren-against-char (char-after x)))
+                          (reverse (nth 9 parsed))))
+             (closing (concat parenthese))
+             (sexp (car
+                    (gosh-read-from-string 
+                     (concat partial " *" closing)))))
+        (and (consp sexp) sexp)))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1609,6 +1620,11 @@ Set this variable before open by `gosh-mode'."
   (let ((name1 (symbol-name symbol1))
         (name2 (symbol-name symbol2)))
     (eq (gosh-intern name1) (gosh-intern name2))))
+
+(defun gosh-symbol-p (symbol)
+  (and symbol
+       ;;TODO nil in scheme symbol
+       (symbolp symbol)))
 
 (defun gosh-intern-safe (obj)
   (cond
