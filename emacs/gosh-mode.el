@@ -458,25 +458,22 @@ else insert top level of the script.
       (error "Module for `%s' is not found" sym))
     (save-excursion
       (goto-char (point-min))
+      ;;TODO reconsider when multiple module is defined in the buffer.
       (cond
        ((re-search-forward (format "(use[ \t\n]+\\_<%s\\_>" module) nil t)
         (ding)
         (message "Module %s have already imported." module))
        ((re-search-forward "^ *\\((use\\b\\)" nil t)
-        ;; TODO what should i do when statement not found...
         (goto-char (match-beginning 1))
         (gosh--insert-import-statement module))
        ((re-search-forward (format "^ *(define-module %s\\_>" cm) nil t)
-        ;;TODO test
         (forward-line 1)
         (gosh--insert-import-statement module))
-       ((re-search-forward "^ *(" nil t)
-        ;;TODO test
+       ((re-search-forward "^ *(" nil t) ; first statement
         (forward-line 0)
         (gosh--insert-import-statement module))
        (t
-        ;;TODO
-        (error "Unable find point"))))))
+        (error "Unable find properly point to insert import statement"))))))
 
 (defun gosh--insert-import-statement (module)
   ;;FIXME
@@ -1119,7 +1116,9 @@ Evaluate s-expression, syntax check, test-module, etc."
 
 (defconst gosh-font-lock-syntactic-keywords
   `(
-    (,gosh-regexp-literal-regexp (1 (6) t) (2 (7 . ?/)) (4 (7 . ?/)))
+    (,gosh-regexp-literal-regexp 
+     ;; (15) is generic string delimiter
+     (1 (6) t) (2 (15)) (4 (15) nil t) (5 (15) nil t))
     ))
 
 (defun gosh-syntax-table-apply-region (start end)
@@ -1130,7 +1129,9 @@ Evaluate s-expression, syntax check, test-module, etc."
         (narrow-to-region start end)
         (goto-char (point-min))
         (while (re-search-forward "#/" nil t)
-          (gosh-syntax-table-set-properties (match-beginning 0)))))
+          (let ((beg (match-beginning 0)))
+            (when (gosh-context-code-p beg)
+              (gosh-syntax-table-set-properties beg))))))
     (set-buffer-modified-p modified)))
 
 (defun gosh-syntax-table-put-property (beg end value)
@@ -1138,9 +1139,9 @@ Evaluate s-expression, syntax check, test-module, etc."
 
 (defun gosh-syntax-table-set-properties (beg)
   (let ((curpos beg)
-        ;;TODO how about in "string"?
-        ;; "aa #/hoge/"
-        ;; #/hoge/i
+        ;; "aa #/regexp/"
+        ;; #/ignore case regexp/i
+        ;; #/regexp \/contains slash \//
         (max (min (line-end-position 5) (point-max)))
         (state 0))
     (while (and (< curpos max)
@@ -1148,30 +1149,32 @@ Evaluate s-expression, syntax check, test-module, etc."
       (cond
        ((= state 0)
         (when (= (char-after curpos) ?#)
-          ;; (6) = expression prefix, (3) = symbol
+          ;; (6) = expression prefix
           (gosh-syntax-table-put-property curpos (1+ curpos) '(6)))
         (setq state (+ 1 state)))
 
        ((= state 1)
         (when (= (char-after curpos) ?/)
-          ;; (7) = string quote
-          (gosh-syntax-table-put-property curpos (1+ curpos) '(7)))
+          ;; (15) = generic string delimiter
+          (gosh-syntax-table-put-property curpos (1+ curpos) '(15)))
         (setq state (+ 1 state)))
 
        ((= state 2)
         (cond
+         ((= (char-after curpos) ?\\)
+          ;; (9) = escape
+          (gosh-syntax-table-put-property curpos (1+ curpos) '(9))
+          (setq curpos (1+ curpos)))
          ;; handle backslash inside the string
          ((= (char-after curpos) ?/)
-          ;; (1) = punctuation, (2) = word
           (cond
-           ((= (char-before curpos) ?\\)
-            (gosh-syntax-table-put-property (1- curpos) (1+ curpos) '(2)))
            ((= (char-after (1+ curpos)) ?i)
-            (gosh-syntax-table-put-property curpos (+ curpos 2) '(7))
+            (setq curpos (1+ curpos))
+            (gosh-syntax-table-put-property curpos (1+ curpos) '(15))
             (setq state (1+ state)))
            (t
             ;; finish regexp literal
-            (gosh-syntax-table-put-property curpos (1+ curpos) '(7))
+            (gosh-syntax-table-put-property curpos (1+ curpos) '(15))
             (setq state (1+ state)))))
 
          ;; everything else

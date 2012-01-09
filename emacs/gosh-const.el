@@ -86,7 +86,9 @@
             "[ \t]+\\(\\(?:\\sw\\|\\.\\)+\\)?")))
 
 (defconst gosh-regexp-literal-regexp 
-  "\\(#\\)\\(/\\)\\(\\(?:\\\\.\\|[^/]\\)*\\)\\(/\\)\\(i\\)?")
+  ;; for `font-lock-syntactic-keywords' (Emacs 23 or earlier)
+  ;; last slash or `i' must let separated subexp.
+  "\\(#\\)\\(/\\)\\(\\(?:\\\\.\\|[^/]\\)*?\\)\\(?:/\\(i\\)\\|\\(/\\)\\)")
 
 (defconst *gosh-scheme-r5rs-info*
   '((define (syntax (identifier value) undefined) "define a new variable")
