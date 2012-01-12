@@ -4,7 +4,7 @@
 ;; Keywords: lisp gauche scheme edit
 ;; URL: https://github.com/mhayashi1120/Emacs-gosh-mode/raw/master/gosh-mode.el
 ;; Emacs: GNU Emacs 22 or later
-;; Version: 0.1.6
+;; Version: 0.1.7
 
 ;; This program is free software; you can redistribute it and/or
 ;; modify it under the terms of the GNU General Public License as
@@ -347,11 +347,27 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
 
 (defun gosh-jump-thingatpt ()
   "Jump to current symbol definition.
-
-TODO push-mark"
+"
   (interactive)
   (let* ((sym (gosh-parse-symbol-at-point)))
     (catch 'found
+      (when (assq sym (gosh-parse-context-local-vars))
+        (let* ((first (point))
+               (start (or (prog1 
+                              (re-search-backward "^(" nil t)
+                            (forward-char 1))
+                          (point-min)))
+               (end (or (re-search-forward "^(" nil t) (point-max))))
+          (save-restriction
+            (narrow-to-region start end)
+            (or
+             (and (gosh-jump-to-def sym)
+                  (throw 'found t))
+             (and (goto-char (point-min))
+                  (re-search-forward (format "\\_<%s\\_>" sym) nil t)
+                  (throw 'found t))))
+          ;; jump is faild.
+          (goto-char first)))
       (when (assq sym (gosh-parse-current-globals t))
         (gosh-jump-to-def sym)
         (throw 'found t))
@@ -395,10 +411,13 @@ TODO push-mark"
   (let ((name (symbol-name definition))
         (first (point)))
     (goto-char (point-min))
-    (if (re-search-forward (format "^[ \t]*(def.*\\_<%s\\_>" (regexp-quote name)) nil t)
-        (forward-line 0)
+    (cond
+     ((re-search-forward (format "^[ \t]*(def.*\\_<%s\\_>" (regexp-quote name)) nil t)
+      (push-mark first)
+      (forward-line 0))
+     (t
       (goto-char first)
-      nil)))
+      nil))))
 
 (defun gosh-guessed-module-files (imported symbol)
   (let ((symnm (or (and (stringp symbol) symbol)
@@ -519,22 +538,45 @@ else insert top level of the script.
     (?\) ?\()
     (?\] ?\[)))
 
-(defun gosh-closing--insert (force default-close other-close)
+(defun gosh-closing--balance-all-paren ()
+  "Balance all closing parenthese"
+  (let ((state (gosh-paren--current-status)))
+    (when (eq state 'balanced)
+      (let (start (end (point)))
+        (save-excursion
+          (backward-sexp)
+          (setq start (point))
+          (save-restriction
+            (narrow-to-region start end)
+            ;; search opening paren
+            (while (re-search-forward "[(\\[]" nil t)
+              (when (gosh-context-code-p)
+                (let* ((opening (char-after (1- (point))))
+                       (end (gosh--scan-sexps (1- (point)) 1))
+                       (actual-close (char-before end))
+                       (closing (gosh--paren-against-char opening)))
+                  (unless (eq actual-close closing)
+                    (save-excursion
+                      (goto-char end)
+                      (delete-region (1- (point)) (point))
+                      (insert closing))))))))))))
+
+(defun gosh-closing--insert (force default-close)
   (insert default-close)
   (unless force
-    (let ((other-open (gosh--paren-against-char other-close))
-          (open-pt (gosh--scan-sexps (point) -1)))
+    (let ((start (gosh--scan-sexps (point) -1)))
       (cond
        ((not (gosh-context-code-p)))
-       ((not open-pt)
+       ((not start)
         (beep))
        (t
-        (let ((open-char (aref (buffer-substring-no-properties
-                                open-pt (1+ open-pt))
-                               0)))
-          (when (= open-char other-open)
-            (delete-backward-char 1)
-            (insert other-close)))))))
+        (let* ((opening (gosh--paren-against-char default-close))
+               (actual-open (char-after start))
+               (closing (gosh--paren-against-char actual-open)))
+          (unless (eq actual-open opening)
+            (delete-region (1- (point)) (point))
+            (insert closing)))
+        (gosh-closing--balance-all-paren)))))
   (when blink-paren-function
     (funcall blink-paren-function)))
 
@@ -542,42 +584,45 @@ else insert top level of the script.
   "Close opening parenthese or bracket.
 Arg FORCE non-nil means forcely insert parenthese."
   (interactive "P")
-  (gosh-closing--insert force ?\) ?\]))
+  (gosh-closing--insert force ?\)))
 
 (defun gosh-closing-insert-bracket (&optional force)
   "Close opening parenthese or bracket.
 Arg FORCE non-nil means forcely insert bracket."
   (interactive "P")
-  (gosh-closing--insert force ?\] ?\)))
+  (gosh-closing--insert force ?\]))
+
+(defun gosh-paren--current-status ()
+  (save-excursion
+    (let ((first (point))
+          (next nil))
+      (cond
+       ;; goto the current toplevel
+       ((not (re-search-backward "^(" nil t))
+        'unexpected)
+       (t
+        (let ((s (point)))
+          (forward-char)
+          ;; goto next toplevel or end of buffer
+          (or
+           (progn
+             (when (re-search-forward "^(" nil t)
+               (backward-char)
+               t))
+           (goto-char (point-max)))
+          ;;TODO check parse-partial-sexp doc
+          (let ((part (parse-partial-sexp s (point))))
+            (cond
+             ((zerop (car part)) 'balanced)
+             ((minusp (car part)) 'unbalanced)
+             (t 'opening)))))))))
 
 ;;TODO re-consider with autopair.el
 ;;TODO when insert second bracket (match a [] [])
 (defun gosh-opening--insert (force default-open)
   (insert default-open)
   ;; status after insert open char.
-  (let ((state (save-excursion
-                 (let ((first (point))
-                       (next nil))
-                   (cond
-                    ;; goto the current toplevel
-                    ((not (re-search-backward "^(" nil t))
-                     'unexpected)
-                    (t
-                     (let ((s (point)))
-                       (forward-char)
-                       ;; goto next toplevel or end of buffer
-                       (or
-                        (progn
-                          (when (re-search-forward "^(" nil t)
-                            (backward-char)
-                            t))
-                        (goto-char (point-max)))
-                       ;;TODO check parse-partial-sexp doc
-                       (let ((part (parse-partial-sexp s (point))))
-                         (cond
-                           ((zerop (car part)) 'balanced)
-                           ((minusp (car part)) 'unbalanced)
-                           (t 'opening))))))))))
+  (let ((state (gosh-paren--current-status)))
     ;;TODO re consider it
     (when force
       (cond
@@ -2058,7 +2103,7 @@ referenced mew-complete.el"
         (vars '()))
     (forward-char 1)
     (while (< (point) end)
-      (when (eq ?\( (char-after))
+      (when (memq (char-after) '(?\( ?\[))
         (save-excursion
           (forward-char 1)
           (when (and loopp (looking-at "\\(for\\|let\\|with\\)\\>"))
