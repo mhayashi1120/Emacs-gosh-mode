@@ -37,21 +37,22 @@
   (with-temp-buffer
     (insert "(let (()) (()))")
     (funcall parenthese 2)
-    (assert (equal (gosh-opening--parse-current-context) `(let 0 *)))
+    (assert (equal (gosh-opening--parse-current-context) `(let *)))
     (funcall parenthese 3)
-    (assert (equal (gosh-opening--parse-current-context) `(let 0 (*)))))
+    (assert (equal (gosh-opening--parse-current-context) `(let (*)))))
   (with-temp-buffer
     (insert "(case a () ())")
     (funcall parenthese 2)
-    (assert (equal (gosh-opening--parse-current-context) `(case 1 *)))
+    (assert (equal (gosh-opening--parse-current-context) `(case a *)))
     (funcall parenthese 3)
-    (assert (equal (gosh-opening--parse-current-context) `(case 2 *)))))
+    ;;TODO () is '() in scheme world..
+    (assert (equal (gosh-opening--parse-current-context) `(case a nil *)))))
 
-(assert (equal (gosh-opening--match-p '(let 1 ((*)))) nil))
-(assert (equal (gosh-opening--match-p '(let 1 (*))) t))
-(assert (equal (gosh-opening--match-p '(let 0 (*))) t))
-(assert (equal (gosh-opening--match-p '(let 0 ((*)))) nil))
-(assert (equal (gosh-opening--match-p '(let 2 *)) nil))
+(assert (equal (gosh-opening--with-bracket-p '(let loop ((*)))) nil))
+(assert (equal (gosh-opening--with-bracket-p '(let loop (*))) t))
+(assert (equal (gosh-opening--with-bracket-p '(let (*))) t))
+(assert (equal (gosh-opening--with-bracket-p '(let ((*)))) nil))
+(assert (equal (gosh-opening--with-bracket-p '(let loop ((a "")) *)) nil))
 
 ;;TODO more test
 (dont-compile
