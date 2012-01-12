@@ -549,7 +549,7 @@ else insert top level of the script.
           (save-restriction
             (narrow-to-region start end)
             ;; search opening paren
-            (while (re-search-forward "[(\\[]" nil t)
+            (while (re-search-forward "[[(]" nil t)
               (when (gosh-context-code-p)
                 (let* ((opening (char-after (1- (point))))
                        (end (gosh--scan-sexps (1- (point)) 1))
@@ -671,7 +671,7 @@ Arg FORCE non-nil means forcely insert bracket."
 (defun gosh-opening--switch-paren ()
   (let ((open (char-after))
         (next (gosh--scan-sexps (point) 1)))
-    (when (and next (memq open '(?\( ?\[)))
+    (when (and next (eq (char-syntax open) ?\())
       (let* ((close (char-before next))
              (against (gosh--paren-against-char close)))
         (unless (eq against open)
@@ -1904,7 +1904,7 @@ referenced mew-complete.el"
 (defun gosh-beginning-of-current-sexp-operator ()
   (let ((pos 0))
     (skip-syntax-backward "w_")
-    (while (and (not (bobp)) (not (eq ?\( (char-before))))
+    (while (and (not (bobp)) (not (eq ?\( (char-syntax (char-before)))))
       (gosh-beginning-of-sexp)
       (incf pos))
     pos))
@@ -2103,7 +2103,7 @@ referenced mew-complete.el"
         (vars '()))
     (forward-char 1)
     (while (< (point) end)
-      (when (memq (char-after) '(?\( ?\[))
+      (when (eq (char-syntax (char-after)) ?\()
         (save-excursion
           (forward-char 1)
           (when (and loopp (looking-at "\\(for\\|let\\|with\\)\\>"))
@@ -2483,9 +2483,9 @@ referenced mew-complete.el"
         (if (ignore-errors (forward-sexp) t)
             (let ((end (point)))
               (backward-sexp)
-              (when (eq ?\( (char-after))
+              (when (eq ?\( (char-syntax (char-after)))
                 (forward-char)
-                (when (not (eq ?\( (char-after)))
+                (when (not (eq ?\( (char-syntax (char-after))))
                   (let ((sym (gosh-parse-symbol-at-point)))
                     (cond
                      ((gosh-module-symbol-p sym)
