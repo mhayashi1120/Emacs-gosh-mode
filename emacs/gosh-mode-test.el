@@ -53,9 +53,9 @@
 (when (memq system-type '(windows-nt))
   (ert-deftest gosh-mode-test--w32-path ()
     :tags '(gosh-mode)
-    (should (equal "c:/cygwin/usr/local/ " (gosh-cygpath->emacs-path "/usr/local")))
-    (should (equal "usr/local/ " (gosh-cygpath->emacs-path "usr/local")))
-    (should (equal "d:/home " (gosh-cygpath->emacs-path "/cygdrive/d/home")))
+    (should (equal "c:/cygwin/usr/local/" (gosh-cygpath->emacs-path "/usr/local/")))
+    (should (equal "usr/local/" (gosh-cygpath->emacs-path "usr/local/")))
+    (should (equal "d:/home" (gosh-cygpath->emacs-path "/cygdrive/d/home")))
 
     (should (equal "/usr" (gosh-emacs-path->cygpath "c:/cygwin/usr")))
     (should (equal "/cygdrive/c/usr" (gosh-emacs-path->cygpath "c:/usr")))
