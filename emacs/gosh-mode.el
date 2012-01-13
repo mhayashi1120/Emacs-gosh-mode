@@ -4,7 +4,7 @@
 ;; Keywords: lisp gauche scheme edit
 ;; URL: https://github.com/mhayashi1120/Emacs-gosh-mode/raw/master/gosh-mode.el
 ;; Emacs: GNU Emacs 22 or later
-;; Version: 0.1.8
+;; Version: 0.1.9
 
 ;; This program is free software; you can redistribute it and/or
 ;; modify it under the terms of the GNU General Public License as
@@ -558,7 +558,7 @@ else insert top level of the script.
                   (unless (eq actual-close closing)
                     (save-excursion
                       (goto-char end)
-                      (delete-region (1- (point)) (point))
+                      (delete-char -1)
                       (insert closing))))))))))))
 
 (defun gosh-closing--insert (force default-close)
@@ -2860,17 +2860,19 @@ d:/home == /cygdrive/d/home
       path))))
 
 (defun gosh-emacs-path->cygpath (path)
-  (let ((path (expand-file-name path))
+  (let ((abspath (expand-file-name path))
         (cygdrive gosh-cygwin-cygdrive)
         (installed gosh-cygwin-directory)
         (case-fold-search t))
     (cond
-     ((string-match (concat "^" (regexp-quote installed) "\\(.*\\)") path)
-      (concat "/" (match-string 1 path)))
-     ((string-match "^\\([a-zA-Z]\\):/\\(.*\\)" path)
-      (format "%s%s/%s" cygdrive (match-string 1 path) (match-string 2 path)))
-     ((string-match "^/" path)
-      (expand-file-name (substring path 1) installed))
+     ((not (file-name-absolute-p path))
+      path)
+     ((string-match (concat "^" (regexp-quote installed) "\\(.*\\)") abspath)
+      (concat "/" (match-string 1 abspath)))
+     ((string-match "^\\([a-zA-Z]\\):/\\(.*\\)" abspath)
+      (format "%s%s/%s" cygdrive (match-string 1 abspath) (match-string 2 abspath)))
+     ((string-match "^/" abspath)
+      (expand-file-name (substring abspath 1) installed))
      (t
       path))))
 
