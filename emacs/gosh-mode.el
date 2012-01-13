@@ -44,7 +44,7 @@
 ;; scheme-send-last-sexp to any keybind
 
 ;; gosh-eval-buffer to C-c C-b
-;; gosh-eval-region to C-c TODO
+;; gosh-eval-region to C-c C-n
 
 ;; * unload `user' module except followings
 ;;   *program-name*, *argv*
@@ -60,7 +60,7 @@
 ;; * risky-local-variable
 
 ;; * re-consider find-file-noselect
-;;   remove history? or other low level api?
+;;   remove history? or use other low level api?
 
 ;; * (make-temp-directory :optional (prefix #f) )
 ;;                                             ^cursor
