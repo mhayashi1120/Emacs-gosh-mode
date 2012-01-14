@@ -44,11 +44,11 @@
 (ert-deftest gosh-mode-test--with-bracket ()
   :tags '(gosh-mode)
 
-  (should (equal (gosh-opening--with-bracket-p '(let loop ((*)))) nil))
-  (should (equal (gosh-opening--with-bracket-p '(let loop (*))) t))
-  (should (equal (gosh-opening--with-bracket-p '(let (*))) t))
-  (should (equal (gosh-opening--with-bracket-p '(let ((*)))) nil))
-  (should (equal (gosh-opening--with-bracket-p '(let loop ((a "")) *)) nil)))
+  (should (equal (gosh-opening--context-bracket-p '(let loop ((*)))) nil))
+  (should (equal (gosh-opening--context-bracket-p '(let loop (*))) t))
+  (should (equal (gosh-opening--context-bracket-p '(let (*))) t))
+  (should (equal (gosh-opening--context-bracket-p '(let ((*)))) nil))
+  (should (equal (gosh-opening--context-bracket-p '(let loop ((a "")) *)) nil)))
 
 (when (memq system-type '(windows-nt))
   (ert-deftest gosh-mode-test--w32-path ()
@@ -94,6 +94,16 @@
            (gosh-eldoc--object->string '(hoge (opts (quote ()))))
            "(hoge (opts ()))")))
 
+(ert-deftest gosh-mode-test--defining-indent-rule ()
+  :tags '(gosh-mode)
+  (let ((gosh--smart-indent-alist nil))
+    (should (equal (gosh-mode-indent-rule 'a 1) '(a . 1)))
+    (should (equal (gosh-mode-indent-rule 'a 2 'm) '(a . 2)))
+    (should (equal (gosh-mode-indent-rule 'a 3) '(a . 3)))
+    (should (equal gosh--smart-indent-alist
+                   '((m (a . 2))
+                     (a . 3))))))
+                     
 (provide 'gosh-mode-test)
 
 ;;; gosh-mode-test.el ends here

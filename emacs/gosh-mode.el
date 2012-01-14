@@ -353,7 +353,7 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
     (catch 'found
       (when (assq sym (gosh-parse-context-local-vars))
         (let* ((first (point))
-               (start (or (prog1 
+               (start (or (prog1
                               (re-search-backward "^(" nil t)
                             (forward-char 1))
                           (point-min)))
@@ -650,11 +650,10 @@ Arg FORCE non-nil means forcely insert bracket."
        ((eq state 'opening)
         (when (save-excursion
                 (backward-char)
-                (let ((context (gosh-opening--parse-current-context)))
-                  (when (and context (gosh-opening--with-bracket-p context))
-                    (delete-char 1)
-                    (insert "[")
-                    t)))
+                (when (gosh-opening--bracket-p)
+                  (delete-char 1)
+                  (insert "[")
+                  t))
           (forward-char)))
        ((eq state 'unbalanced)
         ;; do nothing
@@ -714,7 +713,7 @@ Arg FORCE non-nil means forcely insert bracket."
     ))
 
 ;; `*' point to the cursor position.
-(defun gosh-opening--with-bracket-p (context)
+(defun gosh-opening--context-bracket-p (context)
   (flet ((match-to
           (def args)
           (loop for a1 in def
@@ -731,6 +730,14 @@ Arg FORCE non-nil means forcely insert bracket."
             if (and (eq def-name proc)
                     (match-to def-args args))
             return t))))
+
+(defun gosh-opening--bracket-p ()
+  ;; retry 5 count backward current sexp
+  (loop with context
+        for i from 0 to 5
+        do (setq context (gosh-opening--parse-current-context i))
+        if (and context (gosh-opening--context-bracket-p context))
+        return t))
 
 (defun gosh-opening--parse-current-context (&optional count)
   (save-excursion
@@ -1161,7 +1168,7 @@ Evaluate s-expression, syntax check, test-module, etc."
 
 (defconst gosh-font-lock-syntactic-keywords
   `(
-    (,gosh-regexp-literal-regexp 
+    (,gosh-regexp-literal-regexp
      ;; (15) is generic string delimiter
      (1 (6) t) (2 (15)) (4 (15) nil t) (5 (15) nil t))
     ))
@@ -2713,7 +2720,7 @@ referenced mew-complete.el"
               (gosh-goto-next-top-level)))))
     res))
 
-(defun gosh-parse-current-exports (&optional only-current)
+(defun gosh-parse-current-exports (&optional only-current env)
   (let ((res '()))
     (save-excursion
       (goto-char (point-min))
@@ -2737,10 +2744,16 @@ referenced mew-complete.el"
                 ((and (listp decls) (assq 'export decls))
                  (setq res (nconc (cdr (assq 'export decls)) res)))
                 ((and (listp decls) (assq 'export-all decls))
+                 (setq res (nconc (mapcar 'car (or env (gosh-parse-current-globals)))
+                                  res))
+                 ;; skip all
                  (goto-char (point-max))))))
             ((export export-if-defined)
              (setq res (nconc (cdr (gosh-nth-sexp-at-point 0)) res)))
             ((export-all)
+             (setq res (nconc (mapcar 'car (or env (gosh-parse-current-globals)))
+                              res))
+             ;; skip all
              (goto-char (point-max)))
             ((extend)
              (unless only-current
@@ -3555,43 +3568,85 @@ d:/home == /cygdrive/d/home
      (call-with-client-socket . 1))
     (gauche.charconv
      (call-with-input-conversion . 1))
-    ))
+    )
+  "
+Pseudo EBNF is below.
+
+ALIST ::= { MODULE | PROCEDURE }
+MODULE ::= module-symbol { PROCEDURE }
+PROCEDURE ::= (regexp . LEVEL) | (procedure-symbol . LEVEL)
+LEVEL ::= number
+
+")
+
+(defun gosh-mode-indent-rule (procedure-symbol-or-regexp level &optional module)
+  (let ((sym-or-reg procedure-symbol-or-regexp))
+    (catch 'done
+      (mapc
+       (lambda (x)
+         (cond
+          ((not (consp x)))
+          ((and (null module)
+                (atom (cdr x)))
+           (cond
+            ((and (symbolp (car x))
+                  (eq sym-or-reg (car x)))
+             (setcdr x level)
+             (throw 'done x))
+            ((and (stringp (car x))
+                  (equal sym-or-reg (car x)))
+             (setcdr x level)
+             (throw 'done x))))
+          ((and module
+                (listp (cdr x))
+                (eq module (car x)))
+           (let ((pair (assoc sym-or-reg (cdr x))))
+             (cond
+              (pair
+               (setcdr pair level))
+              (t
+               (setq pair (cons sym-or-reg level))
+               (setcdr x (cons pair (cdr x)))))
+             (throw 'done pair)))))
+       gosh--smart-indent-alist)
+      ;; not found
+      (let ((procedure (cons sym-or-reg level)))
+        (setq gosh--smart-indent-alist
+              (cons
+               (if module
+                   (cons module (list procedure))
+                 procedure)
+               gosh--smart-indent-alist))
+        procedure))))
 
 (defun gosh--smart-indent-assoc-symbol (symbol name &optional in-module alist)
-  ;;TODO if current module matched
   (let ((prefixes (or in-module (gosh-parse-buffer-import-modules-with-prefix)))
+        (module (intern (gosh-parse-context-module)))
         (alist (or alist gosh--smart-indent-alist)))
     (catch 'found
       (mapc
        (lambda (x)
-         (when (and (consp x)
-                    (symbolp (car x))
-                    (numberp (cdr x)))
+         (cond
+          ((not (consp x)))
+          ((and (symbolp (car x))
+                (numberp (cdr x)))
            ;; car is symbol name
            (when (eq symbol (car x))
-             (throw 'found (cdr x)))))
-       alist)
-      (mapc
-       (lambda (x)
-         (when (and (consp x)
-                    (stringp (car x))
-                    (numberp (cdr x)))
+             (throw 'found (cdr x))))
+          ((and (stringp (car x))
+                (numberp (cdr x)))
            ;; car is regexp
            (when (string-match (car x) name)
-             (throw 'found (cdr x)))))
-       alist)
-      (mapc
-       (lambda (x)
-         (when (and (consp x)
-                    (symbolp (car x))
-                    (listp (cdr x)))
-           ;; car is a module name
-           ;; cdr is definitions.
+             (throw 'found (cdr x))))
+          ((and (symbolp (car x))
+                (listp (cdr x)))
            (mapc
             (lambda (import)
               (when (consp import)
                 (let ((res
                        (cond
+                        ((eq module (car x))
+                         (gosh--smart-indent-assoc-symbol symbol name t (cdr x)))
                         ((not (eq (car import) (car x))) nil)
                         ((string= (cdr import) "")
                          (gosh--smart-indent-assoc-symbol symbol name t (cdr x)))
@@ -3603,7 +3658,7 @@ d:/home == /cygdrive/d/home
                         (t nil))))
                   (when res
                     (throw 'found res)))))
-            prefixes)))
+            prefixes))))
        alist)
       nil)))
 
