@@ -394,7 +394,7 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
       ;; jump to module (cursor point as a module name)
       (let ((file (gosh--module->file sym)))
         (when file
-          (switch-to-buffer (find-file-noselect file))
+          (switch-to-buffer (gosh--find-file-noselect file))
           (throw 'found t)))
       (message "Not found definition %s" sym))))
 
@@ -402,7 +402,7 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
   (let* ((mf (or (and (stringp module) module)
                  (gosh--module->file module)))
          (buf (get-file-buffer mf)))
-    (set-buffer (or buf (find-file-noselect mf)))
+    (set-buffer (or buf (gosh--find-file-noselect mf)))
     (when (gosh-jump-to-def symbol)
       (switch-to-buffer (current-buffer))
       t)))
@@ -1802,6 +1802,11 @@ This function come from apel"
            files)))
       res)))
 
+(defun gosh--find-file-noselect (file &optional nowarn)
+  (let* ((file-name-history)
+         (buf (find-file-noselect file nowarn)))
+    buf))
+
 (defmacro gosh-with-find-file (path-expr &rest body)
   (declare (indent 1))
   (let ((path (gensym "path"))
@@ -1809,7 +1814,7 @@ This function come from apel"
         (res (gensym "res")))
     `(let* ((,path (file-truename ,path-expr))
             (,buf (get-file-buffer ,path)))
-       (with-current-buffer (or ,buf (find-file-noselect ,path t))
+       (with-current-buffer (or ,buf (gosh--find-file-noselect ,path t))
          (let (,res)
            (unwind-protect
                (setq ,res (ignore-errors (save-excursion ,@body)))
