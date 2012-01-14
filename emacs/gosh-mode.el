@@ -2653,7 +2653,7 @@ referenced mew-complete.el"
 
 (defun gosh-parse-exported-symbols ()
   (let ((env (gosh-parse-current-globals))
-        (exports (gosh-parse-current-exports t))
+        (exports (gosh-parse-current-exports t env))
         (res '()))
     ;; if source file execute dynamic load.
     ;; global definition (env) will be null.
