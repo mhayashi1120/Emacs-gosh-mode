@@ -62,12 +62,6 @@
 ;; * re-consider find-file-noselect
 ;;   remove history? or use other low level api?
 
-;; * (make-temp-directory :optional (prefix #f) )
-;;                                             ^cursor
-
-;; * auto bracket
-;;   (guard (e (else #f))) => (guard (e [else #f]))
-
 ;; * auto bracket
 ;;   prefixed symbol
 
@@ -79,7 +73,7 @@
   :group 'lisp
   :prefix "gosh-")
 
-(defvar gosh-mode-version "0.1.4")
+(defvar gosh-mode-version "0.1.9")
 
 
 
@@ -550,7 +544,9 @@ else insert top level of the script.
             (narrow-to-region start end)
             ;; search opening paren
             (while (re-search-forward "[[(]" nil t)
-              (when (gosh-context-code-p)
+              (when (and (gosh-context-code-p)
+                         ;; escaped parenthese
+                         (not (eq (char-before (1- (point))) ?\\)))
                 (let* ((opening (char-after (1- (point))))
                        (end (gosh--scan-sexps (1- (point)) 1))
                        (actual-close (char-before end))
@@ -701,6 +697,7 @@ Arg FORCE non-nil means forcely insert bracket."
     (case t *)
     (ecase t *)
     (cond *)
+    (cond-list *)
     (guard (gosh-symbol-p *))
 
     (match t *)
@@ -1410,6 +1407,9 @@ Set this variable before open by `gosh-mode'."
                              (assq key2 keywords)))))
     (unless target-exp
       (setq target-exp (nth index real-sexp)))
+    ;; index exceed maximum but 
+    ;; * (lambda args)
+    ;; * (lambda (:rest args))
     (unless target-exp
       (gosh-aif (gosh-eldoc--sexp-rest-arg real-sexp)
           (setq target-exp it)))
@@ -1495,11 +1495,16 @@ Set this variable before open by `gosh-mode'."
      (lambda (x)
        (when (and (vectorp x)
                   (> (length x) 0)
-                  (string-match "\\.\\.\\.$" (symbol-name (aref x 0))))
+                  (let ((sym (aref x 0)))
+                    (and (symbolp sym)
+                         (string-match "\\.\\.\\.$" (symbol-name sym)))))
          (throw 'found x)))
      sexp)
-    (let ((last (car (last sexp))))
-      (when (and (symbolp last) (string-match "\\.\\.\\.$" (symbol-name last)))
+    ;; vector SEXP to list
+    (let ((last (car (last (append sexp nil)))))
+      (when (and last
+                 (symbolp last)
+                 (string-match "\\.\\.\\.$" (symbol-name last)))
         (throw 'found last)))
     nil))
 
@@ -3546,37 +3551,18 @@ d:/home == /cygdrive/d/home
          (method
           (funcall method state indent-point normal-indent)))))))
 
-;;TODO to gosh-config
-(defvar gosh--smart-indent-alist
-  '(
-    (util.match
-     (match . 1)
-     (match-let . 2)
-     (match-let* . 1)
-     (match-letrec . 1)
-     (match-let1 . 2)
-     )
-    (www.cgi.test
-     (call-with-cgi-script . 2))
-    (file.util
-     (with-lock-file . 1)
-     )
-    (srfi-11
-     (let-values . 1)
-     (let*-values . 1))
-    (gauche.net
-     (call-with-client-socket . 1))
-    (gauche.charconv
-     (call-with-input-conversion . 1))
-    )
+(defvar gosh--smart-indent-alist nil
   "
 Pseudo EBNF is below.
 
 ALIST ::= { MODULE | PROCEDURE }
-MODULE ::= module-symbol { PROCEDURE }
-PROCEDURE ::= (regexp . LEVEL) | (procedure-symbol . LEVEL)
-LEVEL ::= number
+MODULE ::= MODULE-SYMBOL , { PROCEDURE }
+PROCEDURE ::= REGEXP , LEVEL | PROCEDURE-SYMBOL , LEVEL
 
+LEVEL ::= number
+REGEXP ::= string
+MODULE-SYMBOL ::= symbol
+PROCEDURE-SYMBOL ::= symbol
 ")
 
 (defun gosh-mode-indent-rule (procedure-symbol-or-regexp level &optional module)

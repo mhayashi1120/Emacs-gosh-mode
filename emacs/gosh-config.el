@@ -113,6 +113,23 @@
 (put 'with-output-to-string 'scheme-indent-function 0)
 (put 'ecase 'scheme-indent-function 1)
 
+(gosh-mode-indent-rule 'match 1 'util.match)
+(gosh-mode-indent-rule 'match-let 2 'util.match)
+(gosh-mode-indent-rule 'match-let* 1 'util.match)
+(gosh-mode-indent-rule 'match-letrec 1 'util.match)
+(gosh-mode-indent-rule 'match-let1 2 'util.match)
+(gosh-mode-indent-rule 'call-with-cgi-script 2 'www.cgi.test)
+(gosh-mode-indent-rule 'with-lock-file 1 'file.util)
+(gosh-mode-indent-rule 'let-values 1 'srfi-11)
+(gosh-mode-indent-rule 'let*-values 1 'srfi-11)
+(gosh-mode-indent-rule 'call-with-client-socket 1 'gauche.net)
+(gosh-mode-indent-rule 'call-with-input-conversion 1 'gauche.charconv)
+
+(gosh-mode-indent-rule '^ 1)
+;; (loop for c from ?a to ?z
+;;       do (gosh-mode-indent-rule 
+;;           (intern (format "^%c" c)) nil))
+
 
 
 (add-to-list 'interpreter-mode-alist '("gosh" . gosh-mode))
