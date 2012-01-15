@@ -355,10 +355,10 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
           (save-restriction
             (narrow-to-region start end)
             (or
-             (and (gosh-jump-to-def sym)
-                  (throw 'found t))
              (and (goto-char (point-min))
                   (re-search-forward (format "\\_<%s\\_>" sym) nil t)
+                  (throw 'found t))
+             (and (gosh-jump-to-def sym)
                   (throw 'found t))))
           ;; jump is faild.
           (goto-char first)))
@@ -403,10 +403,12 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
 
 (defun gosh-jump-to-def (definition)
   (let ((name (symbol-name definition))
-        (first (point)))
+        (first (point))
+        (regexp (format "^[ \t]*(def\\(?:\\s_\\|\\sw\\)*\\(?:(\\|[ \t]\\)+\\_<%s\\_>" 
+                        (regexp-quote name))))
     (goto-char (point-min))
     (cond
-     ((re-search-forward (format "^[ \t]*(def.*\\_<%s\\_>" (regexp-quote name)) nil t)
+     ((re-search-forward regexp nil t)
       (push-mark first)
       (forward-line 0))
      (t
@@ -2383,9 +2385,15 @@ referenced mew-complete.el"
                                       (and (consp (cdr x))
                                            (consp (cadr x))
                                            (eq 'lambda (caadr x))
-                                           (mapcar 'list
-                                                   (gosh-flatten
-                                                    (cadadr x)))))
+                                           (mapcar 
+                                            (lambda (x)
+                                              (cond
+                                               ((atom x)
+                                                (list x))
+                                               (t
+                                                x)))
+                                            (gosh-flatten
+                                             (cadadr x)))))
                                     defs)
                                    (and (not (= 1 (current-column))) defs)
                                    vars)))

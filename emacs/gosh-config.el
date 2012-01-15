@@ -126,9 +126,6 @@
 (gosh-mode-indent-rule 'call-with-input-conversion 1 'gauche.charconv)
 
 (gosh-mode-indent-rule '^ 1)
-;; (loop for c from ?a to ?z
-;;       do (gosh-mode-indent-rule 
-;;           (intern (format "^%c" c)) nil))
 
 
 
