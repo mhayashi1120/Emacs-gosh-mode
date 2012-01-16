@@ -21,7 +21,7 @@
 ;; Boston, MA 02110-1301, USA.
 
 ;;; Commentary:
-;; 
+;;
 
 ;;; Code:
 
@@ -30,11 +30,10 @@
 
 
 (defconst gosh-const-procedure-keyword-list
-  '( 
+  '(
     ;; define methods
-    "define" "define-class" "define-condition-type" "define-constant"
-    "define-generic" "define-in-module" "define-macro" "define-method"
-    "define-module" "define-record-type" "define-syntax" "define-values"
+    "define-condition-type"
+    "define-in-module" "define-record-type" "define-values"
 
     "export" "export-if-defined" "export-all"
 
@@ -43,7 +42,7 @@
     "^"
     "^a" "^b" "^c" "^d" "^e" "^f" "^g" "^h" "^i"
     "^j" "^k" "^l" "^m" "^n" "^o" "^p" "^q" "^r"
-    "^s" "^t" "^u" "^v" "^w" "^x" "^y" "^z" 
+    "^s" "^t" "^u" "^v" "^w" "^x" "^y" "^z"
 
     ;; keywords special indent function by `scheme-indent-function' property
     "and-let*" "begin0" "call-with-client-socket"
@@ -74,6 +73,17 @@
             (regexp-opt gosh-const-procedure-keyword-list)
             "\\)\\_>")))
 
+(defconst gosh-const-generic-keyword-list
+  '(
+    "=>" "<>"
+    ))
+
+(defconst gosh-defined-generic-keyword-regexp
+  (eval-when-compile
+    (concat "\\(\\_<"
+            (regexp-opt gosh-const-generic-keyword-list)
+            "\\)\\_>")))
+
 (defconst gosh-basic-syntax-keyword-list
   '(
     "extend" "use" "import" "provide"
@@ -81,11 +91,11 @@
 
 (defconst gosh-basic-syntax-keyword-regexp
   (eval-when-compile
-    (concat "(" 
+    (concat "("
             (regexp-opt gosh-basic-syntax-keyword-list t)
             "[ \t]+\\(\\(?:\\sw\\|\\.\\)+\\)?")))
 
-(defconst gosh-regexp-literal-regexp 
+(defconst gosh-regexp-literal-regexp
   ;; for `font-lock-syntactic-keywords' (Emacs 23 or earlier)
   ;; last slash or `i' must let separated subexp.
   "\\(#\\)\\(/\\)\\(\\(?:\\\\.\\|[^/]\\)*?\\)\\(?:/\\(i\\)\\|\\(/\\)\\)")
@@ -317,7 +327,7 @@
    ;; SRFI 0
    ("Feature-based conditional expansion construct"
     (cond-expand (syntax (clause \.\.\.))))
-   
+
    ;; SRFI 1
    ("List Library"
     (xcons (lambda (object object) pair))
@@ -3998,7 +4008,7 @@
 
 (defconst gosh-info-appendixes-ja
   '(
-    ("(gauche-refj.info)Index - 手続きと構文索引" nil 
+    ("(gauche-refj.info)Index - 手続きと構文索引" nil
      "^[ \t]+-- [^:]+:[ \t]*" nil)
     ("(gauche-refj.info)Index - モジュール索引"   nil
      "^[ \t]+-- [^:]+:[ \t]*" nil)
@@ -4008,7 +4018,7 @@
      "^[ \t]+-- [^:]+:[ \t]*" nil)))
 
 (defconst gosh-info-appendixes-en
-  '(("(gauche-refe.info)Function and Syntax Index" nil 
+  '(("(gauche-refe.info)Function and Syntax Index" nil
      "^[ \t]+-- [^:]+:[ \t]*" nil)
     ("(gauche-refe.info)Module Index"   nil
      "^[ \t]+-- [^:]+:[ \t]*" nil)

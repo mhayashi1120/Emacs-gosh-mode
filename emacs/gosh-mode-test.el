@@ -1,7 +1,7 @@
 ;;; gosh-mode-test.el --- Test for gosh-mode
 
 ;;; Commentary:
-;; 
+;;
 ;; Load this file to execute unit-test.
 
 (require 'ert)
@@ -15,7 +15,7 @@
 (ert-deftest gosh-mode-test--parse-current-context ()
   :tags '(gosh-mode)
 
-  (let ((parenthese 
+  (let ((parenthese
          (lambda (count)
            (goto-char (point-min))
            (loop repeat count
@@ -44,11 +44,20 @@
 (ert-deftest gosh-mode-test--with-bracket ()
   :tags '(gosh-mode)
 
-  (should (equal (gosh-opening--with-bracket-p '(let loop ((*)))) nil))
-  (should (equal (gosh-opening--with-bracket-p '(let loop (*))) t))
-  (should (equal (gosh-opening--with-bracket-p '(let (*))) t))
-  (should (equal (gosh-opening--with-bracket-p '(let ((*)))) nil))
-  (should (equal (gosh-opening--with-bracket-p '(let loop ((a "")) *)) nil)))
+  (let ((gosh-opening--auto-bracket-alist
+         '((let (*))
+           (let gosh-symbol-p (*))
+           (guard (gosh-symbol-p *))
+           )))
+    (should (equal (gosh-opening--context-bracket-p '(let loop ((*)))) nil))
+    (should (equal (gosh-opening--context-bracket-p '(let loop (*))) t))
+    (should (equal (gosh-opening--context-bracket-p '(let (*))) t))
+    (should (equal (gosh-opening--context-bracket-p '(let ((*)))) nil))
+    (should (equal (gosh-opening--context-bracket-p '(let loop ((a "")) *)) nil))
+    (should (equal (gosh-opening--context-bracket-p '(guard (e *))) t))
+    (should (equal (gosh-opening--context-bracket-p '(guard (e (else *)))) nil))
+    (should (equal (gosh-opening--context-bracket-p '(guard (e (any proc) (else *)))) nil))
+    (should (equal (gosh-opening--context-bracket-p '(guard (e (any proc) *))) t))))
 
 (when (memq system-type '(windows-nt))
   (ert-deftest gosh-mode-test--w32-path ()
@@ -66,7 +75,7 @@
 (defconst gosh-mode-test-code1
   "
 \(define-module my.test.module
-  (export 
+  (export
    hoge hoge-rest
    hoge-opt hoge-key hoge-key-opt))
 
@@ -82,7 +91,7 @@
   (should (equal (gosh-mode-test-with  gosh-mode-test-code1
                    (gosh-parse-current-exports))
                  '(hoge  hoge-rest hoge-opt hoge-key hoge-key-opt)))
-  (should (equal 
+  (should (equal
            (gosh-mode-test-with  gosh-mode-test-code1
              (gosh-parse-current-globals))
            '((hoge-key-opt (lambda (:optional arg1 (arg2 \#f) :key (key1 \#f) key2)))
@@ -90,9 +99,19 @@
              (hoge-opt (lambda (:optional arg1 (arg2 \#f))))
              (hoge-rest (lambda args))
              (hoge (lambda (args))))))
-  (should (equal 
+  (should (equal
            (gosh-eldoc--object->string '(hoge (opts (quote ()))))
            "(hoge (opts ()))")))
+
+(ert-deftest gosh-mode-test--defining-indent-rule ()
+  :tags '(gosh-mode)
+  (let ((gosh--smart-indent-alist nil))
+    (should (equal (gosh-mode-indent-rule 'a 1) '(a . 1)))
+    (should (equal (gosh-mode-indent-rule 'a 2 'm) '(a . 2)))
+    (should (equal (gosh-mode-indent-rule 'a 3) '(a . 3)))
+    (should (equal gosh--smart-indent-alist
+                   '((m (a . 2))
+                     (a . 3))))))
 
 (provide 'gosh-mode-test)
 
