@@ -1,7 +1,7 @@
 ;;; gosh-mode-test.el --- Test for gosh-mode
 
 ;;; Commentary:
-;; 
+;;
 ;; Load this file to execute unit-test.
 
 (require 'ert)
@@ -15,7 +15,7 @@
 (ert-deftest gosh-mode-test--parse-current-context ()
   :tags '(gosh-mode)
 
-  (let ((parenthese 
+  (let ((parenthese
          (lambda (count)
            (goto-char (point-min))
            (loop repeat count
@@ -75,7 +75,7 @@
 (defconst gosh-mode-test-code1
   "
 \(define-module my.test.module
-  (export 
+  (export
    hoge hoge-rest
    hoge-opt hoge-key hoge-key-opt))
 
@@ -91,7 +91,7 @@
   (should (equal (gosh-mode-test-with  gosh-mode-test-code1
                    (gosh-parse-current-exports))
                  '(hoge  hoge-rest hoge-opt hoge-key hoge-key-opt)))
-  (should (equal 
+  (should (equal
            (gosh-mode-test-with  gosh-mode-test-code1
              (gosh-parse-current-globals))
            '((hoge-key-opt (lambda (:optional arg1 (arg2 \#f) :key (key1 \#f) key2)))
@@ -99,7 +99,7 @@
              (hoge-opt (lambda (:optional arg1 (arg2 \#f))))
              (hoge-rest (lambda args))
              (hoge (lambda (args))))))
-  (should (equal 
+  (should (equal
            (gosh-eldoc--object->string '(hoge (opts (quote ()))))
            "(hoge (opts ()))")))
 
@@ -112,7 +112,7 @@
     (should (equal gosh--smart-indent-alist
                    '((m (a . 2))
                      (a . 3))))))
-                     
+
 (provide 'gosh-mode-test)
 
 ;;; gosh-mode-test.el ends here
