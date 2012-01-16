@@ -22,7 +22,7 @@
 
 
 ;;; Commentary:
-;; 
+;;
 
 ;;; Code:
 
@@ -31,7 +31,7 @@
 ;; no error exists or not
 (require 'auto-complete-config nil t)
 
-(when (or (not (boundp 'scheme-program-name)) 
+(when (or (not (boundp 'scheme-program-name))
           (and scheme-program-name (not (string-match "gosh" scheme-program-name))))
   (setq scheme-program-name (format "%s -i" gosh-default-command)))
 
@@ -132,22 +132,23 @@
 (add-to-list 'interpreter-mode-alist '("gosh" . gosh-mode))
 
 ;; font lock user customizable
-(font-lock-add-keywords 
+(font-lock-add-keywords
  'gosh-mode
  `(("\\`#.+" 0 font-lock-comment-delimiter-face)
-   (gosh-font-lock-keywords 1 font-lock-keyword-face)
-   (gosh-font-lock-basic-syntax 
+   (gosh-font-lock-procedure-keywords 1 font-lock-keyword-face)
+   (gosh-font-lock-syntax-keywords 1 font-lock-constant-face)
+   (gosh-font-lock-basic-syntax
     (1 font-lock-keyword-face)
     (2 font-lock-constant-face nil t))))
 
-(add-to-list 'auto-mode-alist 
+(add-to-list 'auto-mode-alist
              '("\\.scm\\(?:\\.[0-9]+\\)?$" . gosh-mode))
 
-(add-to-list 'auto-mode-alist 
+(add-to-list 'auto-mode-alist
              '("\\.stub\\(?:\\.[0-9]+\\)?$" . scheme-mode))
 
-(add-hook 'gosh-mode-hook 
-          (lambda () 
+(add-hook 'gosh-mode-hook
+          (lambda ()
             (make-local-variable 'lisp-indent-function)
             (setq lisp-indent-function 'gosh-smart-indent)
             (setq indent-tabs-mode nil)
@@ -155,7 +156,7 @@
             (turn-on-eldoc-mode)))
 
 (add-hook 'gosh-inferior-mode-hook
-          (lambda () 
+          (lambda ()
             (turn-on-eldoc-mode)))
 
 (when (featurep 'auto-highlight-symbol)

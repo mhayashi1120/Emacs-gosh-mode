@@ -32,9 +32,8 @@
 (defconst gosh-const-procedure-keyword-list
   '( 
     ;; define methods
-    "define" "define-class" "define-condition-type" "define-constant"
-    "define-generic" "define-in-module" "define-macro" "define-method"
-    "define-module" "define-record-type" "define-syntax" "define-values"
+    "define-condition-type"
+    "define-in-module" "define-record-type" "define-values"
 
     "export" "export-if-defined" "export-all"
 
@@ -72,6 +71,17 @@
   (eval-when-compile
     (concat "(\\("
             (regexp-opt gosh-const-procedure-keyword-list)
+            "\\)\\_>")))
+
+(defconst gosh-const-generic-keyword-list
+  '(
+    "=>" "<>"
+    ))
+
+(defconst gosh-defined-generic-keyword-regexp
+  (eval-when-compile
+    (concat "\\(\\_<"
+            (regexp-opt gosh-const-generic-keyword-list)
             "\\)\\_>")))
 
 (defconst gosh-basic-syntax-keyword-list

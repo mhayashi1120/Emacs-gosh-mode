@@ -402,10 +402,10 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
       t)))
 
 (defun gosh-jump-to-def (definition)
-  (let ((name (symbol-name definition))
-        (first (point))
-        (regexp (format "^[ \t]*(def\\(?:\\s_\\|\\sw\\)*\\(?:(\\|[ \t]\\)+\\_<%s\\_>" 
-                        (regexp-quote name))))
+  (let* ((name (symbol-name definition))
+         (first (point))
+         (regexp (format "^[ \t]*(def\\(?:\\s_\\|\\sw\\)*\\(?:(\\|[ \t]\\)+\\_<%s\\_>"
+                         (regexp-quote name))))
     (goto-char (point-min))
     (cond
      ((re-search-forward regexp nil t)
@@ -1141,6 +1141,13 @@ Evaluate s-expression, syntax check, test-module, etc."
   (add-to-list (make-local-variable 'mode-line-process)
                'gosh-mode-line-process
                'append)
+  ;; clone font lock settings
+  ;; for preserving scheme original settings.
+  (setq font-lock-defaults
+        (gosh-font-lock--clone-keywords font-lock-defaults))
+  (setcar font-lock-defaults
+          '(gosh-font-lock--keywords
+            gosh-font-lock--keywords-2))
   (setq gosh-buffer-change-time (float-time))
   (gosh-eldoc-config)
   (gosh-ac-mode-initialize)
@@ -1151,15 +1158,67 @@ Evaluate s-expression, syntax check, test-module, etc."
 ;; font-lock
 ;;
 
-(defun gosh-font-lock-keywords (bound)
+(defun gosh-font-lock-procedure-keywords (bound)
   ;; ignore if quack is activated
   (and (not (featurep 'quack))
        (re-search-forward gosh-defined-procedure-keyword-regexp bound t)))
+
+(defun gosh-font-lock-syntax-keywords (bound)
+  (and (not (featurep 'quack))
+       (re-search-forward gosh-defined-generic-keyword-regexp bound t)))
 
 (defun gosh-font-lock-basic-syntax (bound)
   ;; ignore if quack is activated
   (and (not (featurep 'quack))
        (re-search-forward gosh-basic-syntax-keyword-regexp bound t)))
+
+(defun gosh-font-lock--clone-keywords (keywords)
+  (let ((ks keywords)
+        res)
+    (while (consp ks)
+      (setq res
+            (append
+             res
+             (list
+              (if (consp (car ks))
+                  (gosh-font-lock--clone-keywords (car ks))
+                (car ks)))))
+      (setq ks (cdr ks)))
+    (when ks
+      (setq res (append res ks)))
+    res))
+
+;; modify scheme fontify rule
+;; gauche accept `[' same as `('
+(defun gosh-font-lock--modify-scheme-keywords (keywords)
+  (mapc
+   (lambda (key)
+     (let ((regexp (car key)))
+       (when (and (stringp regexp) (string-match "^(" regexp))
+         (setcar key (concat "[[(]" (substring regexp 1))))))
+   keywords))
+
+(defvar gosh-font-lock--keywords-2
+  (let ((keywords (gosh-font-lock--clone-keywords scheme-font-lock-keywords-2)))
+    (setq keywords
+          (cons
+           `(
+             ,(concat
+               "(\\(define\\*?\\(?:"
+               "\\(-constant\\)"
+               "\\)\\)\\_>[\s\t]*(?\\([^\s\t\n]+\\)"
+               )
+             (1 font-lock-keyword-face)
+             (3 (cond
+                 ((match-beginning 2) font-lock-variable-name-face)
+                 (t font-lock-type-face)) nil t))
+           keywords))    (gosh-font-lock--modify-scheme-keywords keywords)
+    keywords))
+
+(defvar gosh-font-lock--keywords
+  (let ((keywords (gosh-font-lock--clone-keywords scheme-font-lock-keywords)))
+    (gosh-font-lock--modify-scheme-keywords keywords)
+    keywords))
 
 ;;
 ;; syntax
@@ -1409,7 +1468,7 @@ Set this variable before open by `gosh-mode'."
                              (assq key2 keywords)))))
     (unless target-exp
       (setq target-exp (nth index real-sexp)))
-    ;; index exceed maximum but 
+    ;; index exceed maximum but
     ;; * (lambda args)
     ;; * (lambda (:rest args))
     (unless target-exp
@@ -2385,7 +2444,7 @@ referenced mew-complete.el"
                                       (and (consp (cdr x))
                                            (consp (cadr x))
                                            (eq 'lambda (caadr x))
-                                           (mapcar 
+                                           (mapcar
                                             (lambda (x)
                                               (cond
                                                ((atom x)
