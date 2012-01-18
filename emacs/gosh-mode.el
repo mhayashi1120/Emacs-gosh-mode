@@ -3632,7 +3632,7 @@ MODULE-SYMBOL ::= symbol
 PROCEDURE-SYMBOL ::= symbol
 ")
 
-(defun gosh-mode-indent-rule (procedure-symbol-or-regexp level &optional module)
+(defun gosh-smart-indent-rule (procedure-symbol-or-regexp level &optional module)
   (let ((sym-or-reg procedure-symbol-or-regexp))
     (catch 'done
       (mapc
