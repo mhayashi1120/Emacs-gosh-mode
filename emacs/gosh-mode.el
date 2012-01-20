@@ -420,7 +420,7 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
                    (symbol-name symbol)))
         (imports imported)
         1st 2nd 3rd)
-    (let ((prefix (if (string-match "^\\([^-]+\\)" symnm)
+    (let ((prefix (if (string-match "\\`\\([^-]+\\)" symnm)
                       (match-string 1 symnm)
                     symnm))
           (words (split-string symnm "\\b" t)))
@@ -772,6 +772,40 @@ Arg FORCE non-nil means forcely insert bracket."
                      (concat partial " *" closing)))))
         (and (consp sexp) sexp)))))
 
+(defun gosh--sort-sexp-region (start end)
+  "Sort sexp between START and END."
+  (interactive "r")
+  (save-excursion
+    (save-restriction
+      (narrow-to-region start end)
+      (goto-char (point-min))
+      (let ((lis nil)
+            (reg-start (point))
+            reg-end)
+        (condition-case nil
+            (while (not (eobp))
+              (let* ((beg (point))
+                     (sexp (gosh-read))
+                     (end (point))
+                     (key (prin1-to-string sexp))
+                     (contents (buffer-substring beg end)))
+                (setq reg-end end)
+                (setq lis (cons (list key contents) lis))))
+          (error nil))
+        (when reg-end
+          (setq lis (sort lis (lambda (x y) (string-lessp (car x) (car y)))))
+          (delete-region reg-start reg-end)
+          (goto-char reg-start)
+          (mapc
+           (lambda (s)
+             (let ((contents (cadr s)))
+               (when (string-match "\\`[ \t\n]+" contents)
+                 (setq contents (substring contents (match-end 0))))
+               (insert contents)
+               (unless (memq (char-before) '(?\n))
+                 (insert "\n"))))
+           lis))))))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Sticky to emacs
@@ -1008,7 +1042,7 @@ Evaluate s-expression, syntax check, test-module, etc."
             (process-send-string proc (format "(test-module '%s)\n" module))
             ;; to terminate gosh process
             (process-send-eof proc))
-           ((re-search-forward "^gosh: \\(.*\\)" nil t)
+           ((re-search-forward "^gosh: \\(.*\\)\n" nil t)
             ;;TODO multiple error message?
             (let ((message (match-string 1)))
               (with-current-buffer buffer
@@ -1026,11 +1060,32 @@ Evaluate s-expression, syntax check, test-module, etc."
       (let ((line (string-to-number (match-string 1 message)))
             (text (match-string 2 message)))
         (gosh-goto-line line)
-        (when (= (point) (point-max))
+        ;; move backward until line is not empty.
+        (while (and (not (bobp))
+                    (= (point) (line-end-position)))
           (forward-line -1))
         (flymake-make-overlay
          (point) (line-end-position)
          text 'flymake-errline 'flymake-errline))))))
+
+(defun gosh-sticky-error-texts ()
+  (mapconcat
+   'identity
+   (mapcar
+    (lambda (o)
+      (format "line:%d %s" 
+              (line-number-at-pos (overlay-start o))
+              (or (overlay-get o 'help-echo) "")))
+    (gosh-sticky-error-overlays)) "\n"))
+   
+(defun gosh-sticky-error-overlays ()
+  (remq
+   nil
+   (mapcar
+    (lambda (o)
+      (and (overlay-get o 'flymake-overlay)
+           o))
+    (overlays-in (point-min) (point-max)))))
 
 (defun gosh-sticky-validate-remove-error ()
   (save-restriction
@@ -4048,7 +4103,7 @@ And print value in the echo area.
     (gosh-sticky-backend-switch-context)))
 
 (defun gosh-test-module ()
-  "Execute test for module which is cursor on."
+  "Execute test for module which is cursor indicated to."
   (interactive)
   (let ((mod (gosh-parse-context-module)))
     (gosh-sticky-validate-async mod)))
@@ -4060,10 +4115,15 @@ And print value in the echo area.
    ((null gosh-sticky-test-result)
     (message "Current module is not tested yet."))
    (t
-    (let ((msg (cadr (memq 'help-echo gosh-sticky-test-result))))
-      (if msg
-          (message "%s" msg)
-        (message "No error."))))))
+    (let ((msg (cadr (memq 'help-echo gosh-sticky-test-result)))
+          (err (gosh-sticky-error-texts)))
+      (cond
+       ((and msg err)
+        (message "%s\n%s" msg err))
+       (msg
+        (message "%s" msg))
+       (t
+        (message "No error.")))))))
 
 
 
