@@ -73,7 +73,7 @@
   :group 'lisp
   :prefix "gosh-")
 
-(defvar gosh-mode-version "0.1.9")
+(defvar gosh-mode-version "0.2.0")
 
 
 
@@ -1071,11 +1071,11 @@ Evaluate s-expression, syntax check, test-module, etc."
    'identity
    (mapcar
     (lambda (o)
-      (format "line:%d %s" 
+      (format "line:%d %s"
               (line-number-at-pos (overlay-start o))
               (or (overlay-get o 'help-echo) "")))
     (gosh-sticky-error-overlays)) "\n"))
-   
+
 (defun gosh-sticky-error-overlays ()
   (remq
    nil
@@ -4191,7 +4191,7 @@ And print value in the echo area.
   :group 'gosh-mode)
 
 (defun gosh-refactor--goto-top-of-form (&optional point)
-  (let ((parse (nth 9 (parse-partial-sexp 
+  (let ((parse (nth 9 (parse-partial-sexp
                        (point-min) (or point (point))))))
     (when parse
       (goto-char (car (last parse))))))
@@ -4258,7 +4258,7 @@ And print value in the echo area.
 
 (defun gosh-refactor--query (prompt)
   ;; TODO `?' char popup help.
-  (loop with msg = (format 
+  (loop with msg = (format
                     "%s (Y)es, (N)o, (A)ll of highlighting, (Q)uit or All in buffer(!): "
                     prompt)
         with c
@@ -4276,7 +4276,7 @@ And print value in the echo area.
         return 'all-of-buffer))
 
 (defun gosh-refactor--overlays-in (start end)
-  (remove-if-not 
+  (remove-if-not
    (lambda (ov) (overlay-get ov 'gosh-refactor-overlay-p))
    (overlays-in start end)))
 
@@ -4306,7 +4306,7 @@ And print value in the echo area.
   (loop with point = (point)
         with no-confirm
         with done
-        do 
+        do
         (let* ((region (gosh-refactor--next-region point))
                (start (car region))
                (end (cdr region))
@@ -4316,7 +4316,7 @@ And print value in the echo area.
                             (unless (memq no-confirm '(all-of-buffer))
                               (setq no-confirm nil)))
                 for ov in ovs
-                do 
+                do
                 (let ((old-face (overlay-get ov 'face)))
                   (goto-char (overlay-start ov))
                   (overlay-put ov 'face 'gosh-refactor-on-cursor-face)
@@ -4334,7 +4334,7 @@ And print value in the echo area.
                           ('all-of-buffer
                            (gosh-refactor--replace-string ov new-string)
                            (sit-for 0.2)
-                           (setq start (save-excursion 
+                           (setq start (save-excursion
                                          (gosh-refactor--goto-toplevel)
                                          (point)))
                            (setq no-confirm query))
@@ -4350,7 +4350,7 @@ And print value in the echo area.
         never (or done (= point (point-min)))))
 
 (defun gosh-refactor--dehighlight ()
-  (remove-overlays 
+  (remove-overlays
    (point-min) (point-max) 'gosh-refactor-overlay-p t))
 
 (defun gosh-refactor--highlight-symbol (symbol)
