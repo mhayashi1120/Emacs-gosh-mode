@@ -475,9 +475,15 @@ else insert top level of the script.
       ;;TODO reconsider when multiple module is defined in the buffer.
       (cond
        ((re-search-forward (format "(use[ \t\n]+\\_<%s\\_>" module) nil t)
-        (ding)
-        (message "Module %s have already imported." module))
-       ((re-search-forward "^ *\\((use\\b\\)" nil t)
+        (cond
+         ((gosh-context-code-p)
+          (ding)
+          (message "Module %s have already imported." module))
+         ((and (forward-line 0)
+               (looking-at "^\\([ \t]*;+[ \t]*\\)"))
+          ;; uncomment guessed as temporarily commented out statement.
+          (replace-match "" nil nil nil 1))))
+       ((re-search-forward "^ *\\((use\\_>\\)" nil t) ; first `use' statements
         (goto-char (match-beginning 1))
         (gosh--insert-import-statement module))
        ((re-search-forward (format "^ *(define-module %s\\_>" cm) nil t)
