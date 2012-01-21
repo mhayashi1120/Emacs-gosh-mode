@@ -4190,15 +4190,23 @@ And print value in the echo area.
   "Face for highlighting of matches that is current definition."
   :group 'gosh-mode)
 
-(defun gosh-refactor--goto-top-of-form ()
-  (let ((parse (nth 9 (parse-partial-sexp (point-min) (point)))))
+(defun gosh-refactor--goto-top-of-form (&optional point)
+  (let ((parse (nth 9 (parse-partial-sexp 
+                       (point-min) (or point (point))))))
     (when parse
       (goto-char (car (last parse))))))
 
+(defun gosh-refactor--goto-toplevel ()
+  (let ((parse (nth 9 (parse-partial-sexp (point-min) (point)))))
+    (when parse
+      (goto-char (car parse)))))
+
 (defun gosh-refactor-rename-symbol-read-args ()
-  (let (current prompt new)
-    (barf-if-buffer-read-only)
-    (unless (setq current (thing-at-point 'symbol))
+  (barf-if-buffer-read-only)
+  (let* ((sym (gosh-parse-symbol-at-point))
+         (current (symbol-name sym))
+         prompt new)
+    (unless (and sym current)
       (error "No symbol at point"))
     (when (string-match "\\`\\^[a-z]\\'" current)
       (setq current (substring current 1)))
@@ -4240,13 +4248,18 @@ And print value in the echo area.
       (progn
         (gosh-refactor--highlight-symbol old-name)
         (save-excursion
-          (gosh-refactor--interactive-replace new-name)))
+          (let ((highlighter (make-overlay (point-min) (point-min))))
+            (unwind-protect
+                (progn
+                  (overlay-put highlighter 'face 'highlight)
+                  (gosh-refactor--interactive-replace new-name highlighter))
+              (delete-overlay highlighter)))))
     (gosh-refactor--dehighlight)))
 
 (defun gosh-refactor--query (prompt)
   ;; TODO `?' char popup help.
   (loop with msg = (format 
-                    "%s (Y)es, (N)o, (A)ll, (Q)uit or All in buffer(!): "
+                    "%s (Y)es, (N)o, (A)ll of highlighting, (Q)uit or All in buffer(!): "
                     prompt)
         with c
         while t
@@ -4258,9 +4271,9 @@ And print value in the echo area.
         else if (eq c ?q)
         return 'quit
         else if (eq c ?a)
-        return 'all
+        return 'all-of-highlight
         else if (eq c ?!)
-        return 'all-of-them))
+        return 'all-of-buffer))
 
 (defun gosh-refactor--overlays-in (start end)
   (remove-if-not 
@@ -4289,16 +4302,7 @@ And print value in the echo area.
         (setq end (point-marker))
         (cons start end))))))
 
-(defun gosh-refactor--flash-region (start end)
-  (let ((ol (make-overlay start end)))
-    (unwind-protect
-        (progn
-          (overlay-put ol 'face 'highlight)
-          (sit-for 0.1))
-      (delete-overlay ol))))
-
-;;TODO
-(defun gosh-refactor--interactive-replace (new-string)
+(defun gosh-refactor--interactive-replace (new-string highlighter)
   (loop with point = (point)
         with no-confirm
         with done
@@ -4307,9 +4311,11 @@ And print value in the echo area.
                (start (car region))
                (end (cdr region))
                (ovs (gosh-refactor--scheduled-overlays start end)))
-          (when ovs
-            (gosh-refactor--flash-region start end))
-          (loop for ov in ovs
+          (loop initially (progn
+                            (move-overlay highlighter start end)
+                            (unless (memq no-confirm '(all-of-buffer))
+                              (setq no-confirm nil)))
+                for ov in ovs
                 do 
                 (let ((old-face (overlay-get ov 'face)))
                   (goto-char (overlay-start ov))
@@ -4325,20 +4331,22 @@ And print value in the echo area.
                           ('quit
                            (setq done t)
                            (return))
-                          ('all-of-them
+                          ('all-of-buffer
                            (gosh-refactor--replace-string ov new-string)
                            (sit-for 0.2)
-                           ;;TODO
                            (setq start (save-excursion 
-                                         (re-search-backward "^(" nil t)))
+                                         (gosh-refactor--goto-toplevel)
+                                         (point)))
                            (setq no-confirm query))
-                          ('all
-                           ;;TODO
-                           )))
+                          ('all-of-highlight
+                           (gosh-refactor--replace-string ov new-string)
+                           (sit-for 0.2)
+                           (setq no-confirm query))))
                     (when (eq (overlay-get ov 'face) 'gosh-refactor-on-cursor-face)
                       (overlay-put ov 'face old-face)))))
           ;; move base point to start of region
           (setq point start))
+        ;;TODO consider this condition
         never (or done (= point (point-min)))))
 
 (defun gosh-refactor--dehighlight ()
