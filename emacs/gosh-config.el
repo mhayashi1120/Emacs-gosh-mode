@@ -109,6 +109,9 @@
 (put 'with-locking-mutex 'scheme-indent-function 1)
 (put 'without-echoing  'scheme-indent-function 1)
 
+;; 
+(put 'begin0 'scheme-indent-function 1)
+
 ;; TODO incorrect at partical-scheme?
 (put 'with-output-to-string 'scheme-indent-function 0)
 (put 'ecase 'scheme-indent-function 1)

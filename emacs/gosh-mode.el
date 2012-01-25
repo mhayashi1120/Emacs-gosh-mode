@@ -1115,7 +1115,7 @@ Evaluate s-expression, syntax check, test-module, etc."
                                  `(:propertize
                                    "NG"
                                    face gosh-modeline-error-face
-                                   help-echo "Gosh test error: executing error"
+                                   help-echo "Gosh test error: Unable to load this file"
                                    mouse-face mode-line-highlight)))
                         (let (errors)
                           (goto-char (point-min))
@@ -4187,13 +4187,18 @@ And print value in the echo area.
   :group 'gosh-mode)
 
 (defface gosh-refactor-ignore-face
-  '((t (:inherit isearch-fail)))
+  '((t (:background "yellow" :inherit shadow)))
   "Face for highlighting of ignore while renaming."
   :group 'gosh-mode)
 
 (defface gosh-refactor-replaced-face
   '((t (:inherit match)))
-  "Face for highlighting of matches that is current definition."
+  "Face for highlighting of matches that was replaced successfully."
+  :group 'gosh-mode)
+
+(defface gosh-refactor-warning-face
+  '((t (:inherit font-lock-warning-face)))
+  "Face for highlighting of matches that is same as new definition."
   :group 'gosh-mode)
 
 (defun gosh-refactor--goto-top-of-form (&optional point)
@@ -4287,11 +4292,15 @@ And print value in the echo area.
    (overlays-in start end)))
 
 (defun gosh-refactor--scheduled-overlays (start end)
-  (sort
+  (gosh-refactor--sort-overlays
    (remove-if
     (lambda (ov) (overlay-get ov 'gosh-refactor-done))
-    (gosh-refactor--overlays-in start end))
-   (lambda (o1 o2) (< (overlay-start o1) (overlay-start o2)))))
+    (gosh-refactor--overlays-in start end))))
+
+(defun gosh-refactor--sort-overlays (overlays)
+  (sort overlays 
+        (lambda (o1 o2) 
+          (< (overlay-start o1) (overlay-start o2)))))
 
 (defun gosh-refactor--next-region (point)
   (cond
@@ -4308,17 +4317,53 @@ And print value in the echo area.
         (setq end (point-marker))
         (cons start end))))))
 
-(defun gosh-refactor--interactive-replace (new-string highlighter)
+(defun gosh-refactor--check-bound-region (new region &optional region-1)
+  "Highlight NEW regexp as warning face."
+  (let ((warns (gosh-refactor--highlight-bound-region new region region-1)))
+    (when warns
+      ;;TODO
+      (unless (gosh-refactor--confirm-with-popup 
+               (format "New text is already bound. Continue? " new) warns)
+        ;;TODO
+        (signal 'quit nil)))))
+
+(defun gosh-refactor--highlight-bound-region (new region &optional region-1)
+  (save-excursion
+    (goto-char (car region))
+    (let ((case-fold-search)
+          (ovs '()))
+      (while (re-search-forward new (cdr region) t)
+        (unless (and region-1
+                     (< (car region-1) (point))
+                     (< (point) (cdr region-1)))
+          (let* ((match (reverse (match-data)))
+                 ;; last subexp
+                 (end (car match))
+                 (start (cadr match)))
+            (let ((ov (make-overlay start end)))
+              (overlay-put ov 'priority 1000)
+              (overlay-put ov 'face 'gosh-refactor-warning-face)
+              (overlay-put ov 'gosh-refactor-bound-p t)
+              (setq ovs (cons ov ovs))))))
+      (nreverse ovs))))
+
+(defun gosh-refactor--interactive-replace (new-string highlight)
+  "Replace highlighted text interactively by NEW-STRING.
+HIGHLIGHT is a marker to make be explicitly the target is."
   (loop with point = (point)
         with no-confirm
         with done
+        with prev-region
+        with new = (gosh-refactor--symbol-regexp new-string)
         do
         (let* ((region (gosh-refactor--next-region point))
                (start (car region))
                (end (cdr region))
                (ovs (gosh-refactor--scheduled-overlays start end)))
           (loop initially (progn
-                            (move-overlay highlighter start end)
+                            (gosh-refactor--check-bound-region
+                             new region prev-region)
+                            (move-overlay highlight start end)
                             (unless (memq no-confirm '(all-of-buffer))
                               (setq no-confirm nil)))
                 for ov in ovs
@@ -4350,14 +4395,15 @@ And print value in the echo area.
                            (setq no-confirm query))))
                     (when (eq (overlay-get ov 'face) 'gosh-refactor-on-cursor-face)
                       (overlay-put ov 'face old-face)))))
+          (setq prev-region region)
           ;; move base point to start of region
           (setq point start))
         ;;TODO consider this condition
         never (or done (= point (point-min)))))
 
 (defun gosh-refactor--dehighlight ()
-  (remove-overlays
-   (point-min) (point-max) 'gosh-refactor-overlay-p t))
+  (remove-overlays (point-min) (point-max) 'gosh-refactor-overlay-p t)
+  (remove-overlays (point-min) (point-max) 'gosh-refactor-bound-p t))
 
 (defun gosh-refactor--highlight-symbol (symbol)
   (let ((regexp (gosh-refactor--symbol-regexp symbol)))
@@ -4395,11 +4441,12 @@ CHECK is function that accept no arg and return boolean."
         (while (and (re-search-forward regexp nil t)
                     (< (point) end))
           (let* ((match (reverse (match-data)))
+                 ;; last subexp
                  (end (car match))
                  (start (cadr match)))
             (unless (gosh-refactor--overlays-in start end)
               (let((ov (make-overlay start end)))
-                (overlay-put ov 'priority 1) ;; few value TODO
+                (overlay-put ov 'priority 1000)
                 (overlay-put ov 'face face)
                 (overlay-put ov 'gosh-refactor-overlay-p t)
                 (setq ovs (cons ov ovs))))))
@@ -4432,6 +4479,38 @@ CHECK is function that accept no arg and return boolean."
       (format "\\_<\\(?:\\^\\(%s\\)\\|\\(%s\\)\\)\\_>" name name)))
    (t
     (format "\\_<\\(%s\\)\\_>" (regexp-quote symbol)))))
+
+(defun gosh-refactor--confirm-with-popup (prompt overlays)
+  (save-window-excursion
+    (save-excursion
+      (gosh-refactor--rotate-overlays (car overlays) overlays)
+      (unwind-protect
+          (y-or-n-p prompt)
+        (when gosh-refactor--rotate-timer
+          (cancel-timer gosh-refactor--rotate-timer)
+          (setq gosh-refactor--rotate-timer nil))))))
+
+(defvar gosh-refactor--rotate-timer nil)
+(defun gosh-refactor--rotate-overlays (ov overlays)
+  (when overlays
+    (save-match-data
+      (with-local-quit
+        (switch-to-buffer (overlay-buffer ov))
+        (goto-char (overlay-start ov))
+        (recenter)
+        (let ((next (gosh-refactor--rotate-next-overlay ov overlays)))
+          (setq gosh-refactor--rotate-timer
+                (run-with-timer 
+                 1 nil
+                 'gosh-refactor--rotate-overlays
+                 (or next (car overlays)) overlays)))))))
+
+(defun gosh-refactor--rotate-next-overlay (base overlays)
+  (let ((first (line-number-at-pos (window-start)))
+        (last (line-number-at-pos (window-end))))
+    (loop for next on (cdr (memq base overlays))
+          if (>= (line-number-at-pos (overlay-start (car next))) last)
+          return (car next))))
 
 ;; ;;TODO
 ;; ;; *load-path* files
