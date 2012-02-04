@@ -106,9 +106,9 @@
 (ert-deftest gosh-mode-test--defining-indent-rule ()
   :tags '(gosh-mode)
   (let ((gosh--smart-indent-alist nil))
-    (should (equal (gosh-mode-indent-rule 'a 1) '(a . 1)))
-    (should (equal (gosh-mode-indent-rule 'a 2 'm) '(a . 2)))
-    (should (equal (gosh-mode-indent-rule 'a 3) '(a . 3)))
+    (should (equal (gosh-smart-indent-rule 'a 1) '(a . 1)))
+    (should (equal (gosh-smart-indent-rule 'a 2 'm) '(a . 2)))
+    (should (equal (gosh-smart-indent-rule 'a 3) '(a . 3)))
     (should (equal gosh--smart-indent-alist
                    '((m (a . 2))
                      (a . 3))))))

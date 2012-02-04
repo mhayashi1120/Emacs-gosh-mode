@@ -4,7 +4,7 @@
 ;; Keywords: lisp gauche scheme edit
 ;; URL: https://github.com/mhayashi1120/Emacs-gosh-mode/raw/master/gosh-mode.el
 ;; Emacs: GNU Emacs 22 or later
-;; Version: 0.1.9
+;; Version: 0.2.0
 
 ;; This program is free software; you can redistribute it and/or
 ;; modify it under the terms of the GNU General Public License as
@@ -73,7 +73,7 @@
   :group 'lisp
   :prefix "gosh-")
 
-(defvar gosh-mode-version "0.1.9")
+(defvar gosh-mode-version "0.2.0")
 
 
 
@@ -85,7 +85,6 @@
 (require 'eldoc nil t)
 (require 'scheme)
 (require 'cmuscheme)
-(require 'erefactor)
 (require 'info-look)
 (require 'flymake)
 
@@ -420,7 +419,7 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
                    (symbol-name symbol)))
         (imports imported)
         1st 2nd 3rd)
-    (let ((prefix (if (string-match "^\\([^-]+\\)" symnm)
+    (let ((prefix (if (string-match "\\`\\([^-]+\\)" symnm)
                       (match-string 1 symnm)
                     symnm))
           (words (split-string symnm "\\b" t)))
@@ -435,7 +434,7 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
                   (not (string= (cdr import-as) "")))
              (when (gosh-string-starts-with (cdr import-as) symnm)
                (push (cons file (cdr import-as)) 1st))
-             (setq imports (remq import-as imports)))
+             (setq imports (delq import-as imports)))
             ((member prefix names)
              (push file 2nd))
             ((intersection words names :test 'string=)
@@ -445,7 +444,7 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
      (lambda (m)
        (push (gosh--module->file (car m)) 3rd))
      imports)
-    (remq nil (append 1st 2nd 3rd))))
+    (delq nil (append 1st 2nd 3rd))))
 
 (defun gosh-import-module-thingatpt ()
   "Import a new module if missing.
@@ -476,9 +475,15 @@ else insert top level of the script.
       ;;TODO reconsider when multiple module is defined in the buffer.
       (cond
        ((re-search-forward (format "(use[ \t\n]+\\_<%s\\_>" module) nil t)
-        (ding)
-        (message "Module %s have already imported." module))
-       ((re-search-forward "^ *\\((use\\b\\)" nil t)
+        (cond
+         ((gosh-context-code-p)
+          (ding)
+          (message "Module %s have already imported." module))
+         ((and (forward-line 0)
+               (looking-at "^\\([ \t]*;+[ \t]*\\)"))
+          ;; uncomment guessed as temporarily commented out statement.
+          (replace-match "" nil nil nil 1))))
+       ((re-search-forward "^ *\\((use\\_>\\)" nil t) ; first `use' statements
         (goto-char (match-beginning 1))
         (gosh--insert-import-statement module))
        ((re-search-forward (format "^ *(define-module %s\\_>" cm) nil t)
@@ -743,8 +748,7 @@ Arg FORCE non-nil means forcely insert bracket."
     (let ((c (or count 0))
           (start (point)))
       (while (and
-              (not (bobp))
-              (not (looking-at "^[[(]")) ; top level
+              (not (gosh-context-toplevel-p)) ; top level
               (condition-case nil
                   (progn
                     (backward-sexp)
@@ -771,6 +775,40 @@ Arg FORCE non-nil means forcely insert bracket."
                     (gosh-read-from-string
                      (concat partial " *" closing)))))
         (and (consp sexp) sexp)))))
+
+(defun gosh--sort-sexp-region (start end)
+  "Sort sexp between START and END."
+  (interactive "r")
+  (save-excursion
+    (save-restriction
+      (narrow-to-region start end)
+      (goto-char (point-min))
+      (let ((lis nil)
+            (reg-start (point))
+            reg-end)
+        (condition-case nil
+            (while (not (eobp))
+              (let* ((beg (point))
+                     (sexp (gosh-read))
+                     (end (point))
+                     (key (prin1-to-string sexp))
+                     (contents (buffer-substring beg end)))
+                (setq reg-end end)
+                (setq lis (cons (list key contents) lis))))
+          (error nil))
+        (when reg-end
+          (setq lis (sort lis (lambda (x y) (string-lessp (car x) (car y)))))
+          (delete-region reg-start reg-end)
+          (goto-char reg-start)
+          (mapc
+           (lambda (s)
+             (let ((contents (cadr s)))
+               (when (string-match "\\`[ \t\n]+" contents)
+                 (setq contents (substring contents (match-end 0))))
+               (insert contents)
+               (unless (memq (char-before) '(?\n))
+                 (insert "\n"))))
+           lis))))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1008,7 +1046,7 @@ Evaluate s-expression, syntax check, test-module, etc."
             (process-send-string proc (format "(test-module '%s)\n" module))
             ;; to terminate gosh process
             (process-send-eof proc))
-           ((re-search-forward "^gosh: \\(.*\\)" nil t)
+           ((re-search-forward "^gosh: \\(.*\\)\n" nil t)
             ;;TODO multiple error message?
             (let ((message (match-string 1)))
               (with-current-buffer buffer
@@ -1026,11 +1064,32 @@ Evaluate s-expression, syntax check, test-module, etc."
       (let ((line (string-to-number (match-string 1 message)))
             (text (match-string 2 message)))
         (gosh-goto-line line)
-        (when (= (point) (point-max))
+        ;; move backward until line is not empty.
+        (while (and (not (bobp))
+                    (= (point) (line-end-position)))
           (forward-line -1))
         (flymake-make-overlay
          (point) (line-end-position)
          text 'flymake-errline 'flymake-errline))))))
+
+(defun gosh-sticky-error-texts ()
+  (mapconcat
+   'identity
+   (mapcar
+    (lambda (o)
+      (format "line:%d %s"
+              (line-number-at-pos (overlay-start o))
+              (or (overlay-get o 'help-echo) "")))
+    (gosh-sticky-error-overlays)) "\n"))
+
+(defun gosh-sticky-error-overlays ()
+  (remq
+   nil
+   (mapcar
+    (lambda (o)
+      (and (overlay-get o 'flymake-overlay)
+           o))
+    (overlays-in (point-min) (point-max)))))
 
 (defun gosh-sticky-validate-remove-error ()
   (save-restriction
@@ -1056,7 +1115,7 @@ Evaluate s-expression, syntax check, test-module, etc."
                                  `(:propertize
                                    "NG"
                                    face gosh-modeline-error-face
-                                   help-echo "Gosh test error: executing error"
+                                   help-echo "Gosh test error: Unable to load this file"
                                    mouse-face mode-line-highlight)))
                         (let (errors)
                           (goto-char (point-min))
@@ -1970,6 +2029,9 @@ referenced mew-complete.el"
       (and (not (nth 3 context))
            (not (nth 4 context))))))
 
+(defun gosh-context-toplevel-p (&optional point)
+  (not (nth 9 (parse-partial-sexp (point-min) (or point (point))))))
+
 (defun gosh-beginning-of-sexp ()
   (unless (bobp)
     (let ((syn (char-syntax (char-before (point)))))
@@ -2130,17 +2192,9 @@ referenced mew-complete.el"
                (keywordp sym))
       sym)))
 
-(defun gosh-parse-context-toplevel-p ()
-  (save-excursion
-    (while (and (not (bobp))
-                (condition-case err
-                    (progn (backward-sexp) t)
-                  (scan-error nil))))
-    (bobp)))
-
 (defun gosh-parse-last-expression-define-p ()
   "Return t if last expression is top-level define-*"
-  (and (gosh-parse-context-toplevel-p)
+  (and (gosh-context-toplevel-p)
        (save-excursion
          (beginning-of-defun)
          (looking-at "([ \t\n]*define"))))
@@ -2306,7 +2360,7 @@ referenced mew-complete.el"
         (let ((matcher (lambda ()
                          (when (looking-at "(\\(?:with\\|define\\)-module[ \t\n]+\\([^ \t\n()]+\\)")
                            (throw 'return (match-string-no-properties 1)))))
-              (toplevel (gosh-parse-context-toplevel-p)))
+              (toplevel (gosh-context-toplevel-p)))
           (unless toplevel
             (while (and (not (bobp))
                         (not (looking-at "^("))) ; while not top level
@@ -2521,7 +2575,7 @@ referenced mew-complete.el"
 
 (defun gosh-parse-fnsym-current-sexp ()
   (let (sexp count count-up dangling)
-    (unless (gosh-parse-context-toplevel-p)
+    (unless (gosh-context-toplevel-p)
       (save-excursion
         (let (start end)
           (gosh-beginning-of-string)
@@ -3632,7 +3686,7 @@ MODULE-SYMBOL ::= symbol
 PROCEDURE-SYMBOL ::= symbol
 ")
 
-(defun gosh-mode-indent-rule (procedure-symbol-or-regexp level &optional module)
+(defun gosh-smart-indent-rule (procedure-symbol-or-regexp level &optional module)
   (let ((sym-or-reg procedure-symbol-or-regexp))
     (catch 'done
       (mapc
@@ -4048,7 +4102,7 @@ And print value in the echo area.
     (gosh-sticky-backend-switch-context)))
 
 (defun gosh-test-module ()
-  "Execute test for module which is cursor on."
+  "Execute test for module which is cursor indicated to."
   (interactive)
   (let ((mod (gosh-parse-context-module)))
     (gosh-sticky-validate-async mod)))
@@ -4060,10 +4114,15 @@ And print value in the echo area.
    ((null gosh-sticky-test-result)
     (message "Current module is not tested yet."))
    (t
-    (let ((msg (cadr (memq 'help-echo gosh-sticky-test-result))))
-      (if msg
-          (message "%s" msg)
-        (message "No error."))))))
+    (let ((msg (cadr (memq 'help-echo gosh-sticky-test-result)))
+          (err (gosh-sticky-error-texts)))
+      (cond
+       ((and msg err)
+        (message "%s\n%s" msg err))
+       (msg
+        (message "%s" msg))
+       (t
+        (message "No error.")))))))
 
 
 
@@ -4112,83 +4171,65 @@ And print value in the echo area.
 
 (defvar gosh-refactor-read-symbol-history nil)
 
-(defun gosh-refactor--trim-expression (s)
-  (if (string-match "^[ \t\n]*\\(\\(?:.\\|\n\\)*\\)" s)
-      (match-string 1 s)
-    s))
+(defface gosh-refactor-on-cursor-face
+  '((t (:inherit isearch)))
+  "Face for highlighting of symbol at cursor."
+  :group 'gosh-mode)
 
-(defun gosh-refactor--read-sexp-string ()
-  (gosh-refactor--trim-expression
-   (buffer-substring (point)
-                     (progn (forward-sexp 1) (point)))))
+(defface gosh-refactor-scheduled-local-face
+  '((t (:inherit lazy-highlight)))
+  "Face for highlighting of matches that is current definition."
+  :group 'gosh-mode)
 
-(defun gosh-refactor--goto-top-of-form ()
-  (let ((continue t))
-    (condition-case nil
-        (progn
-          (while (not (bobp))
-            (backward-sexp))
-          (when (bobp)
-            (setq continue nil)
-            (when (re-search-forward "^[ \t]*(")
-              (goto-char (match-beginning 0)))))
-      (scan-error
-       (backward-char 1)))
-    continue))
+(defface gosh-refactor-scheduled-global-face
+  '((t (:bold t :inherit lazy-highlight)))
+  "Face for highlighting of matches."
+  :group 'gosh-mode)
 
-(defun gosh-refactor--create-regexp (symbol)
-  "Create SYMBOL exclusive regexp."
-  (format "\\_<\\(%s\\)\\_>" (regexp-quote symbol)))
+(defface gosh-refactor-ignore-face
+  '((t (:background "yellow" :inherit shadow)))
+  "Face for highlighting of ignore while renaming."
+  :group 'gosh-mode)
 
-;;TODO define-method define-constant define-syntax
-(defun gosh-refactor--find-binding-region (name)
-  (catch 'done
-    (let ((name-regexp (gosh-refactor--create-regexp name)))
-      (save-excursion
-        (while (gosh-refactor--goto-top-of-form)
-          (let ((start (point))
-                (end (save-excursion (forward-sexp) (point)))
-                function arg)
-            ;; skip parenthese
-            (forward-char)
-            (setq function (gosh-refactor--read-sexp-string))
-            (cond
-             ((member function '("let" "let*" "letrec" "let1"
-                                 "if-let1" "rlet" "and-let*" "fluid-let"
-                                 "receive" "lambda"))
-              ;;TODO named let
-              ;; FIXME incorrect about let* and let
-              (setq arg (gosh-refactor--read-sexp-string))
-              (when (string-match name-regexp arg)
-                (throw 'done (cons start end))))
-             ((member function '("define"))
-              (setq arg (gosh-refactor--read-sexp-string))
-              (when (string-match name-regexp arg)
-                ;;FIXME dirty
-                (goto-char start)
-                (gosh-refactor--goto-top-of-form)
-                (let ((start (point))
-                      (end (save-excursion (forward-sexp) (point))))
-                  (unless (save-excursion
-                            (gosh-refactor--goto-top-of-form))
-                    ;; Top of file
-                    (setq end (point-max)))
-                  (throw 'done (cons start end))))))
-            (goto-char start)))))
-    nil))
+(defface gosh-refactor-replaced-face
+  '((t (:inherit match)))
+  "Face for highlighting of matches that was replaced successfully."
+  :group 'gosh-mode)
+
+(defface gosh-refactor-warning-face
+  '((t (:inherit font-lock-warning-face)))
+  "Face for highlighting of matches that is same as new definition."
+  :group 'gosh-mode)
+
+(defun gosh-refactor--goto-top-of-form (&optional point)
+  (let ((parse (nth 9 (parse-partial-sexp
+                       (point-min) (or point (point))))))
+    (when parse
+      (goto-char (car (last parse))))))
+
+(defun gosh-refactor--goto-toplevel ()
+  (let ((parse (nth 9 (parse-partial-sexp (point-min) (point)))))
+    (when parse
+      (goto-char (car parse)))))
 
 (defun gosh-refactor-rename-symbol-read-args ()
-  (let (current-name prompt new-name)
-    (barf-if-buffer-read-only)
-    (unless (setq current-name (thing-at-point 'symbol))
+  (barf-if-buffer-read-only)
+  (let* ((sym (gosh-parse-symbol-at-point))
+         (current (symbol-name sym))
+         prompt new)
+    (unless (and sym current)
       (error "No symbol at point"))
-    (setq prompt (format "%s -> New name: " current-name))
-    (setq new-name
-          (read-string prompt current-name
+    (when (string-match "\\`\\^[a-z]\\'" current)
+      (setq current (substring current 1)))
+    (setq prompt (format "%s -> New name: " current))
+    (setq new
+          (read-string prompt current
                        'gosh-refactor-read-symbol-history))
-    (when (string= current-name new-name)
+    (when (string= new "")
+      (error "No new symbol"))
+    (when (string= current new)
       (error "No difference"))
-    (list current-name new-name)))
+    (list current new)))
 
 (defun gosh-refactor-find-executable-scripts ()
   (let (list)
@@ -4212,9 +4253,264 @@ And print value in the echo area.
 (defun gosh-refactor-rename-symbol (old-name new-name)
   "Rename symbol at point."
   (interactive (gosh-refactor-rename-symbol-read-args))
-  (let (region)
-    (setq region (gosh-refactor--find-binding-region old-name))
-    (erefactor-rename-region old-name new-name region)))
+  ;; clear highlight just in case
+  (gosh-refactor--dehighlight)
+  (unwind-protect
+      (progn
+        (gosh-refactor--highlight-symbol old-name)
+        (save-excursion
+          (let ((highlighter (make-overlay (point-min) (point-min))))
+            (unwind-protect
+                (progn
+                  (overlay-put highlighter 'face 'highlight)
+                  (gosh-refactor--interactive-replace new-name highlighter))
+              (delete-overlay highlighter)))))
+    (gosh-refactor--dehighlight)))
+
+(defun gosh-refactor--query (prompt)
+  ;; TODO `?' char popup help.
+  (loop with msg = (format
+                    "%s (Y)es, (N)o, (A)ll of highlighting, (Q)uit or All in buffer(!): "
+                    prompt)
+        with c
+        while t
+        do (setq c (downcase (read-char msg)))
+        if (eq c ?\y)
+        return 'yes
+        else if (eq c ?n)
+        return 'no
+        else if (eq c ?q)
+        return 'quit
+        else if (eq c ?a)
+        return 'all-of-highlight
+        else if (eq c ?!)
+        return 'all-of-buffer))
+
+(defun gosh-refactor--overlays-in (start end)
+  (remove-if-not
+   (lambda (ov) (overlay-get ov 'gosh-refactor-overlay-p))
+   (overlays-in start end)))
+
+(defun gosh-refactor--scheduled-overlays (start end)
+  (gosh-refactor--sort-overlays
+   (remove-if
+    (lambda (ov) (overlay-get ov 'gosh-refactor-done))
+    (gosh-refactor--overlays-in start end))))
+
+(defun gosh-refactor--sort-overlays (overlays)
+  (sort overlays 
+        (lambda (o1 o2) 
+          (< (overlay-start o1) (overlay-start o2)))))
+
+(defun gosh-refactor--next-region (point)
+  (cond
+   ((= (point-min) (point)) nil)
+   ((gosh-context-toplevel-p point)
+    (cons (point-min-marker) (point-max-marker)))
+   (t
+    (save-excursion
+      (goto-char point)
+      (let (start end)
+        (gosh-refactor--goto-top-of-form)
+        (setq start (point-marker))
+        (gosh-read)
+        (setq end (point-marker))
+        (cons start end))))))
+
+(defun gosh-refactor--check-bound-region (new region &optional region-1)
+  "Highlight NEW regexp as warning face."
+  (let ((warns (gosh-refactor--highlight-bound-region new region region-1)))
+    (when warns
+      ;;TODO
+      (unless (gosh-refactor--confirm-with-popup 
+               (format "New text is already bound. Continue? " new) warns)
+        ;;TODO
+        (signal 'quit nil)))))
+
+(defun gosh-refactor--highlight-bound-region (new region &optional region-1)
+  (save-excursion
+    (goto-char (car region))
+    (let ((case-fold-search)
+          (ovs '()))
+      (while (re-search-forward new (cdr region) t)
+        (unless (and region-1
+                     (< (car region-1) (point))
+                     (< (point) (cdr region-1)))
+          (let* ((match (reverse (match-data)))
+                 ;; last subexp
+                 (end (car match))
+                 (start (cadr match)))
+            (let ((ov (make-overlay start end)))
+              (overlay-put ov 'priority 1000)
+              (overlay-put ov 'face 'gosh-refactor-warning-face)
+              (overlay-put ov 'gosh-refactor-bound-p t)
+              (setq ovs (cons ov ovs))))))
+      (nreverse ovs))))
+
+(defun gosh-refactor--interactive-replace (new-string highlight)
+  "Replace highlighted text interactively by NEW-STRING.
+HIGHLIGHT is a marker to make be explicitly the target is."
+  (loop with point = (point)
+        with no-confirm
+        with done
+        with prev-region
+        with new = (gosh-refactor--symbol-regexp new-string)
+        do
+        (let* ((region (gosh-refactor--next-region point))
+               (start (car region))
+               (end (cdr region))
+               (ovs (gosh-refactor--scheduled-overlays start end)))
+          (loop initially (progn
+                            (gosh-refactor--check-bound-region
+                             new region prev-region)
+                            (move-overlay highlight start end)
+                            (unless (memq no-confirm '(all-of-buffer))
+                              (setq no-confirm nil)))
+                for ov in ovs
+                do
+                (let ((old-face (overlay-get ov 'face)))
+                  (goto-char (overlay-start ov))
+                  (overlay-put ov 'face 'gosh-refactor-on-cursor-face)
+                  (unwind-protect
+                      (let ((query (or no-confirm
+                                       (gosh-refactor--query "Rename: "))))
+                        (case query
+                          ('yes
+                           (gosh-refactor--replace-string ov new-string))
+                          ('no
+                           (gosh-refactor--mark-as-finished ov))
+                          ('quit
+                           (setq done t)
+                           (return))
+                          ('all-of-buffer
+                           (gosh-refactor--replace-string ov new-string)
+                           (sit-for 0.2)
+                           (setq start (save-excursion
+                                         (gosh-refactor--goto-toplevel)
+                                         (point)))
+                           (setq no-confirm query))
+                          ('all-of-highlight
+                           (gosh-refactor--replace-string ov new-string)
+                           (sit-for 0.2)
+                           (setq no-confirm query))))
+                    (when (eq (overlay-get ov 'face) 'gosh-refactor-on-cursor-face)
+                      (overlay-put ov 'face old-face)))))
+          (setq prev-region region)
+          ;; move base point to start of region
+          (setq point start))
+        ;;TODO consider this condition
+        never (or done (= point (point-min)))))
+
+(defun gosh-refactor--dehighlight ()
+  (remove-overlays (point-min) (point-max) 'gosh-refactor-overlay-p t)
+  (remove-overlays (point-min) (point-max) 'gosh-refactor-bound-p t))
+
+(defun gosh-refactor--highlight-symbol (symbol)
+  (let ((regexp (gosh-refactor--symbol-regexp symbol)))
+    (gosh-refactor--highlight-current-define regexp)
+    (gosh-refactor--highlight-buffer regexp)))
+
+(defun gosh-refactor--highlight-buffer (regexp)
+  (save-excursion
+    (save-restriction
+      (widen)
+      (gosh-refactor--highlight-region
+       (point-min) (point-max) regexp
+       'gosh-refactor-scheduled-global-face))))
+
+(defun gosh-refactor--highlight-current-define (regexp)
+  (let (start end)
+    (save-excursion
+      (unless (re-search-backward "^(" nil t)
+        (error "Invalid sexp"))
+      (setq start (point-marker))
+      (gosh-read)
+      (setq end (point-marker)))
+    (gosh-refactor--highlight-region
+     start end regexp
+     'gosh-refactor-scheduled-local-face)))
+
+(defun gosh-refactor--highlight-region (start end regexp face)
+  "highlight START to END word that match to REGEXP.
+CHECK is function that accept no arg and return boolean."
+  (save-match-data
+    (save-excursion
+      (goto-char start)
+      (let ((case-fold-search)
+            (ovs '()))
+        (while (and (re-search-forward regexp nil t)
+                    (< (point) end))
+          (let* ((match (reverse (match-data)))
+                 ;; last subexp
+                 (end (car match))
+                 (start (cadr match)))
+            (unless (gosh-refactor--overlays-in start end)
+              (let((ov (make-overlay start end)))
+                (overlay-put ov 'priority 1000)
+                (overlay-put ov 'face face)
+                (overlay-put ov 'gosh-refactor-overlay-p t)
+                (setq ovs (cons ov ovs))))))
+        (nreverse ovs)))))
+
+(defun gosh-refactor--mark-as-finished (ov)
+  (overlay-put ov 'face 'gosh-refactor-ignore-face)
+  (overlay-put ov 'gosh-refactor-done t))
+
+(defun gosh-refactor--replace-string (ov new-string)
+  (let* ((start (overlay-start ov))
+         (end (overlay-end ov))
+         (old (buffer-substring start end)))
+    (overlay-put ov 'gosh-refactor-old-text old)
+    (overlay-put ov 'gosh-refactor-done t)
+    (overlay-put ov 'face 'gosh-refactor-replaced-face)
+    (goto-char start)
+    (delete-region start end)
+    (setq start (point))
+    (insert-before-markers new-string)
+    (setq end (point))
+    ;; restore overlay visible
+    (move-overlay ov start end)))
+
+(defun gosh-refactor--symbol-regexp (symbol)
+  (cond
+   ;; consider the ^a ^b like lambda generator
+   ((string-match "\\`\\^?\\([a-z]\\)\\'" symbol)
+    (let ((name (match-string 1 symbol)))
+      (format "\\_<\\(?:\\^\\(%s\\)\\|\\(%s\\)\\)\\_>" name name)))
+   (t
+    (format "\\_<\\(%s\\)\\_>" (regexp-quote symbol)))))
+
+(defun gosh-refactor--confirm-with-popup (prompt overlays)
+  (save-window-excursion
+    (save-excursion
+      (gosh-refactor--rotate-overlays (car overlays) overlays)
+      (unwind-protect
+          (y-or-n-p prompt)
+        (when gosh-refactor--rotate-timer
+          (cancel-timer gosh-refactor--rotate-timer)
+          (setq gosh-refactor--rotate-timer nil))))))
+
+(defvar gosh-refactor--rotate-timer nil)
+(defun gosh-refactor--rotate-overlays (ov overlays)
+  (when overlays
+    (save-match-data
+      (with-local-quit
+        (switch-to-buffer (overlay-buffer ov))
+        (goto-char (overlay-start ov))
+        (recenter)
+        (let ((next (gosh-refactor--rotate-next-overlay ov overlays)))
+          (setq gosh-refactor--rotate-timer
+                (run-with-timer 
+                 1 nil
+                 'gosh-refactor--rotate-overlays
+                 (or next (car overlays)) overlays)))))))
+
+(defun gosh-refactor--rotate-next-overlay (base overlays)
+  (let ((first (line-number-at-pos (window-start)))
+        (last (line-number-at-pos (window-end))))
+    (loop for next on (cdr (memq base overlays))
+          if (>= (line-number-at-pos (overlay-start (car next))) last)
+          return (car next))))
 
 ;; ;;TODO
 ;; ;; *load-path* files

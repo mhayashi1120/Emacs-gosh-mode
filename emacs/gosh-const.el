@@ -51,7 +51,7 @@
     "call-with-iterator" "call-with-output-conversion"
     "call-with-output-file" "call-with-output-string"
     "call-with-temporary-file" "call-with-values" "dolist" "dotimes"
-    "guard" "if" "if-let1" "if-match" "let*-values" "let-args"
+    "ecase" "guard" "if" "if-let1" "if-match" "let*-values" "let-args"
     "let-keywords*" "let-match" "let-optionals*" "let-syntax"
     "let-values" "let/cc" "let1" "letrec-syntax" "make" "match"
     "multiple-value-bind" "parameterize" "parse-options" "receive"

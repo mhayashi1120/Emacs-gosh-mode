@@ -16,7 +16,6 @@
        "gosh-config.el"
        "gosh-mode.el"
        "gosh-const.el"
-       "erefactor.el"
        ))
 
 ;; (when (memq system-type '(windows-nt))
