@@ -434,7 +434,7 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
                   (not (string= (cdr import-as) "")))
              (when (gosh-string-starts-with (cdr import-as) symnm)
                (push (cons file (cdr import-as)) 1st))
-             (setq imports (remq import-as imports)))
+             (setq imports (delq import-as imports)))
             ((member prefix names)
              (push file 2nd))
             ((intersection words names :test 'string=)
@@ -444,7 +444,7 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
      (lambda (m)
        (push (gosh--module->file (car m)) 3rd))
      imports)
-    (remq nil (append 1st 2nd 3rd))))
+    (delq nil (append 1st 2nd 3rd))))
 
 (defun gosh-import-module-thingatpt ()
   "Import a new module if missing.

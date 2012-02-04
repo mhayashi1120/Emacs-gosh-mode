@@ -11,6 +11,16 @@ License
 
 Distributed under the term of GPLv3.
 
+Install
+-------------
+
+Now the most convenient way to install is
+
+git clone git@github.com:mhayashi1120/Emacs-gosh-mode.git /path/where/you/like
+
+(setq load-path (cons "/path/where/you/like/emacs" load-path))
+
+# make more sophisticated way in the future release. (ex: make install)
 
 .emacs Sample
 -------------
@@ -23,5 +33,5 @@ Distributed under the term of GPLv3.
 
 Note
 ----
-gosh-mode forked from scheme-complete.el
-Many code is duplicated but specialize to Gauche.
+gosh-mode is forked from scheme-complete.el
+Many code have been duplicated but specialize to Gauche.

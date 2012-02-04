@@ -15,9 +15,14 @@ relate to module name
 
 
 
+** test
+
+make process
+release engineering
+
 * low priority
-** gather method document? comment?
-** add ChangeLog 
+** gather method document (info)? in comment at program code?
+** add ChangeLog file
 
 ** Renew
 *** can enable change binary
@@ -38,20 +43,9 @@ In other word, execute emacs and install gauche is not supported.
 
 
 
-** send EnvironmentVariable when evaluate 
+** send EnvironmentVariable after evaluating
 ** backend-eval error must be multiple???
 dynamically put the error properties
-
-** unload module
-module that have following definition
-
-(define *hoge* 'hoge)
-
-After validated, change this definition to 
-
-(define *hoge* *hoge*)
-
-this must have compile error. but remaining previous loaded definition make be valid.
 
 ** resolve object-apply
 
@@ -74,7 +68,7 @@ macro arguments
 method arguments 
 generic each methods arguments
 
-** in the trunk directory
+** in the gauche trunk directory
 browsing trunk repository
 
 ** see completion-at-point
@@ -89,6 +83,7 @@ change behavior like elisp
 ** eldoc display odd
    i don't know exactly why but didn't run eldoc-print* function 
  see gosh-backend-switch-context after-change-function
+
 * egosh
 ** name
 ** reload module if file is modified
