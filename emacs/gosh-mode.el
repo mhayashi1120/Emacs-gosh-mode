@@ -1047,7 +1047,6 @@ Evaluate s-expression, syntax check, test-module, etc."
             ;; to terminate gosh process
             (process-send-eof proc))
            ((re-search-forward "^gosh: \\(.*\\)\n" nil t)
-            ;;TODO multiple error message?
             (let ((message (match-string 1)))
               (with-current-buffer buffer
                 (gosh-sticky-validate-parse-error-message message)
@@ -1102,7 +1101,8 @@ Evaluate s-expression, syntax check, test-module, etc."
 
 (defun gosh-sticky-validate-sentinel (proc event)
   (unless (eq (process-status proc) 'run)
-    (let ((buffer (process-get proc 'gosh-sticky-test-buffer)))
+    (let ((buffer (process-get proc 'gosh-sticky-test-buffer))
+          (errors))
       (if (not (buffer-live-p buffer))
           (gosh-sticky-close-process proc)
         (with-current-buffer buffer
@@ -1117,21 +1117,21 @@ Evaluate s-expression, syntax check, test-module, etc."
                                    face gosh-modeline-error-face
                                    help-echo "Gosh test error: Unable to load this file"
                                    mouse-face mode-line-highlight)))
-                        (let (errors)
-                          (goto-char (point-min))
-                          (while (re-search-forward "ERROR:[ \t]*\\(.*\\)" nil t)
-                            (setq errors (cons (match-string 1) errors)))
-                          (when errors
-                            (throw 'done
-                                   `(:propertize
-                                     "NG"
-                                     face gosh-modeline-error-face
-                                     help-echo ,(concat "Gosh test error: "
-                                                        (prin1-to-string errors))
-                                     mouse-face mode-line-highlight)))
-                          `(:propertize "OK"
-                                        face gosh-modeline-normal-face))))
-                  (gosh-sticky-close-process proc))))))))
+                        (goto-char (point-min))
+                        (while (re-search-forward "ERROR:[ \t]*\\(.*\\)" nil t)
+                          (setq errors (cons (match-string 1) errors)))
+                        (when errors
+                          (throw 'done
+                                 `(:propertize
+                                   "NG"
+                                   face gosh-modeline-error-face
+                                   help-echo ,(concat "Gosh test error: "
+                                                      (prin1-to-string errors))
+                                   mouse-face mode-line-highlight)))
+                        `(:propertize "OK"
+                                      face gosh-modeline-normal-face)))
+                  (gosh-sticky-close-process proc)))
+          (gosh-test--highilght-errors-if-possible errors))))))
 
 (defun gosh-sticky-close-process (proc)
   (delete-process proc)
@@ -4164,6 +4164,58 @@ And print value in the echo area.
   (when (< end 255)
     (setq gosh-current-executable nil))
   (setq gosh-buffer-change-time (float-time)))
+
+
+;; handling gauche.test
+
+(defconst gosh-test--message-alist
+  '(
+    "found dangling autoloads:"
+    "symbols exported but not defined:"
+    "symbols referenced but not defined:"
+    "procedures received wrong number of argument:"
+    ))
+
+(defun gosh-test--parse-results (errors)
+  ;; not exactly correct
+  (let (res)
+    (mapc
+     (lambda (msg)
+       (mapc
+        (lambda (err)
+          (when (string-match (format "%s \\(.+?\\)\\(?: AND \\|$\\)" msg) err)
+            (let* ((line (match-string 1 err))
+                   (syms (split-string line "[, ]" t)))
+              (setq res (append (gosh-test--parse-symbols msg syms) res)))))
+        errors))
+     gosh-test--message-alist)
+    res))
+
+(defun gosh-test--parse-symbols (msg symbols)
+  (delq nil
+        (mapcar 
+         (lambda (x)
+           (cond
+            ((string-match "^(\\([^)]+\\))$" x)
+             (list msg (match-string 1 x) nil))
+            ((string-match "^\\([^(]+\\)(\\([^)]+\\))$" x)
+             (list msg (match-string 2 x) (match-string 1 x)))
+            (t nil)))
+         symbols)))
+
+(defun gosh-test--highilght-errors-if-possible (errors)
+  "Highlight ERRORS as much as possible."
+  (save-excursion
+    (loop for (msg gsym lsym) in (gosh-test--parse-results errors)
+          do (progn 
+               ;; search backward. last definition is the test result. maybe...
+               (goto-char (point-max))
+               (when (re-search-backward (format "^(def.+?\\_<%s\\_>" gsym) nil t)
+                 (when lsym
+                   (re-search-forward (format "\\_<%s\\_>" lsym) nil t))
+                 (flymake-make-overlay
+                  (line-beginning-position) (line-end-position)
+                  msg 'flymake-errline 'flymake-errline))))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
