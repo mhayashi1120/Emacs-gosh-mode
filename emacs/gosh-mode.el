@@ -1071,18 +1071,8 @@ Evaluate s-expression, syntax check, test-module, etc."
          (point) (line-end-position)
          text 'flymake-errline 'flymake-errline))))))
 
-(defun gosh-sticky-error-texts ()
-  (mapconcat
-   'identity
-   (mapcar
-    (lambda (o)
-      (format "line:%d %s"
-              (line-number-at-pos (overlay-start o))
-              (or (overlay-get o 'help-echo) "")))
-    (gosh-sticky-error-overlays)) "\n"))
-
 (defun gosh-sticky-error-overlays ()
-  (remq
+  (delq
    nil
    (mapcar
     (lambda (o)
@@ -1672,7 +1662,7 @@ Set this variable before open by `gosh-mode'."
                            spec2
                            (gosh-eldoc--find-and-print-strings
                             spec2 env nil)))
-             (strings (remq nil (append string1 string2))))
+             (strings (delq nil (append string1 string2))))
         (gosh-eldoc--cache-set (point) 0 strings)
         (car strings)))))
 
@@ -2555,7 +2545,7 @@ referenced mew-complete.el"
      (list (cadr sexp)))
     ((require-extension)
      (when (eq (cadr sexp) 'srfi)
-       (remq
+       (delq
         nil
         (mapcar (lambda (n)
                   (when (numberp n)
@@ -4114,11 +4104,8 @@ And print value in the echo area.
    ((null gosh-sticky-test-result)
     (message "Current module is not tested yet."))
    (t
-    (let ((msg (cadr (memq 'help-echo gosh-sticky-test-result)))
-          (err (gosh-sticky-error-texts)))
+    (let ((msg (cadr (memq 'help-echo gosh-sticky-test-result))))
       (cond
-       ((and msg err)
-        (message "%s\n%s" msg err))
        (msg
         (message "%s" msg))
        (t
@@ -4193,7 +4180,7 @@ And print value in the echo area.
 
 (defun gosh-test--parse-symbols (msg symbols)
   (delq nil
-        (mapcar 
+        (mapcar
          (lambda (x)
            (cond
             ((string-match "^(\\([^)]+\\))$" x)
@@ -4207,7 +4194,7 @@ And print value in the echo area.
   "Highlight ERRORS as much as possible."
   (save-excursion
     (loop for (msg gsym lsym) in (gosh-test--parse-results errors)
-          do (progn 
+          do (progn
                ;; search backward. last definition is the test result. maybe...
                (goto-char (point-max))
                (when (re-search-backward (format "^(def.+?\\_<%s\\_>" gsym) nil t)
@@ -4350,8 +4337,8 @@ And print value in the echo area.
     (gosh-refactor--overlays-in start end))))
 
 (defun gosh-refactor--sort-overlays (overlays)
-  (sort overlays 
-        (lambda (o1 o2) 
+  (sort overlays
+        (lambda (o1 o2)
           (< (overlay-start o1) (overlay-start o2)))))
 
 (defun gosh-refactor--next-region (point)
@@ -4374,7 +4361,7 @@ And print value in the echo area.
   (let ((warns (gosh-refactor--highlight-bound-region new region region-1)))
     (when warns
       ;;TODO
-      (unless (gosh-refactor--confirm-with-popup 
+      (unless (gosh-refactor--confirm-with-popup
                (format "New text is already bound. Continue? " new) warns)
         ;;TODO
         (signal 'quit nil)))))
@@ -4552,7 +4539,7 @@ CHECK is function that accept no arg and return boolean."
         (recenter)
         (let ((next (gosh-refactor--rotate-next-overlay ov overlays)))
           (setq gosh-refactor--rotate-timer
-                (run-with-timer 
+                (run-with-timer
                  1 nil
                  'gosh-refactor--rotate-overlays
                  (or next (car overlays)) overlays)))))))
