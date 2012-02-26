@@ -1047,7 +1047,6 @@ Evaluate s-expression, syntax check, test-module, etc."
             ;; to terminate gosh process
             (process-send-eof proc))
            ((re-search-forward "^gosh: \\(.*\\)\n" nil t)
-            ;;TODO multiple error message?
             (let ((message (match-string 1)))
               (with-current-buffer buffer
                 (gosh-sticky-validate-parse-error-message message)
@@ -1072,18 +1071,8 @@ Evaluate s-expression, syntax check, test-module, etc."
          (point) (line-end-position)
          text 'flymake-errline 'flymake-errline))))))
 
-(defun gosh-sticky-error-texts ()
-  (mapconcat
-   'identity
-   (mapcar
-    (lambda (o)
-      (format "line:%d %s"
-              (line-number-at-pos (overlay-start o))
-              (or (overlay-get o 'help-echo) "")))
-    (gosh-sticky-error-overlays)) "\n"))
-
 (defun gosh-sticky-error-overlays ()
-  (remq
+  (delq
    nil
    (mapcar
     (lambda (o)
@@ -1102,7 +1091,8 @@ Evaluate s-expression, syntax check, test-module, etc."
 
 (defun gosh-sticky-validate-sentinel (proc event)
   (unless (eq (process-status proc) 'run)
-    (let ((buffer (process-get proc 'gosh-sticky-test-buffer)))
+    (let ((buffer (process-get proc 'gosh-sticky-test-buffer))
+          (errors))
       (if (not (buffer-live-p buffer))
           (gosh-sticky-close-process proc)
         (with-current-buffer buffer
@@ -1117,21 +1107,21 @@ Evaluate s-expression, syntax check, test-module, etc."
                                    face gosh-modeline-error-face
                                    help-echo "Gosh test error: Unable to load this file"
                                    mouse-face mode-line-highlight)))
-                        (let (errors)
-                          (goto-char (point-min))
-                          (while (re-search-forward "ERROR:[ \t]*\\(.*\\)" nil t)
-                            (setq errors (cons (match-string 1) errors)))
-                          (when errors
-                            (throw 'done
-                                   `(:propertize
-                                     "NG"
-                                     face gosh-modeline-error-face
-                                     help-echo ,(concat "Gosh test error: "
-                                                        (prin1-to-string errors))
-                                     mouse-face mode-line-highlight)))
-                          `(:propertize "OK"
-                                        face gosh-modeline-normal-face))))
-                  (gosh-sticky-close-process proc))))))))
+                        (goto-char (point-min))
+                        (while (re-search-forward "ERROR:[ \t]*\\(.*\\)" nil t)
+                          (setq errors (cons (match-string 1) errors)))
+                        (when errors
+                          (throw 'done
+                                 `(:propertize
+                                   "NG"
+                                   face gosh-modeline-error-face
+                                   help-echo ,(concat "Gosh test error: "
+                                                      (prin1-to-string errors))
+                                   mouse-face mode-line-highlight)))
+                        `(:propertize "OK"
+                                      face gosh-modeline-normal-face)))
+                  (gosh-sticky-close-process proc)))
+          (gosh-test--highilght-errors-if-possible errors))))))
 
 (defun gosh-sticky-close-process (proc)
   (delete-process proc)
@@ -1672,7 +1662,7 @@ Set this variable before open by `gosh-mode'."
                            spec2
                            (gosh-eldoc--find-and-print-strings
                             spec2 env nil)))
-             (strings (remq nil (append string1 string2))))
+             (strings (delq nil (append string1 string2))))
         (gosh-eldoc--cache-set (point) 0 strings)
         (car strings)))))
 
@@ -2555,7 +2545,7 @@ referenced mew-complete.el"
      (list (cadr sexp)))
     ((require-extension)
      (when (eq (cadr sexp) 'srfi)
-       (remq
+       (delq
         nil
         (mapcar (lambda (n)
                   (when (numberp n)
@@ -4114,11 +4104,8 @@ And print value in the echo area.
    ((null gosh-sticky-test-result)
     (message "Current module is not tested yet."))
    (t
-    (let ((msg (cadr (memq 'help-echo gosh-sticky-test-result)))
-          (err (gosh-sticky-error-texts)))
+    (let ((msg (cadr (memq 'help-echo gosh-sticky-test-result))))
       (cond
-       ((and msg err)
-        (message "%s\n%s" msg err))
        (msg
         (message "%s" msg))
        (t
@@ -4164,6 +4151,58 @@ And print value in the echo area.
   (when (< end 255)
     (setq gosh-current-executable nil))
   (setq gosh-buffer-change-time (float-time)))
+
+
+;; handling gauche.test
+
+(defconst gosh-test--message-alist
+  '(
+    "found dangling autoloads:"
+    "symbols exported but not defined:"
+    "symbols referenced but not defined:"
+    "procedures received wrong number of argument:"
+    ))
+
+(defun gosh-test--parse-results (errors)
+  ;; not exactly correct
+  (let (res)
+    (mapc
+     (lambda (msg)
+       (mapc
+        (lambda (err)
+          (when (string-match (format "%s \\(.+?\\)\\(?: AND \\|$\\)" msg) err)
+            (let* ((line (match-string 1 err))
+                   (syms (split-string line "[, ]" t)))
+              (setq res (append (gosh-test--parse-symbols msg syms) res)))))
+        errors))
+     gosh-test--message-alist)
+    res))
+
+(defun gosh-test--parse-symbols (msg symbols)
+  (delq nil
+        (mapcar
+         (lambda (x)
+           (cond
+            ((string-match "^(\\([^)]+\\))$" x)
+             (list msg (match-string 1 x) nil))
+            ((string-match "^\\([^(]+\\)(\\([^)]+\\))$" x)
+             (list msg (match-string 2 x) (match-string 1 x)))
+            (t nil)))
+         symbols)))
+
+(defun gosh-test--highilght-errors-if-possible (errors)
+  "Highlight ERRORS as much as possible."
+  (save-excursion
+    (loop for (msg gsym lsym) in (gosh-test--parse-results errors)
+          do (progn
+               ;; search backward. last definition is the test result. maybe...
+               (goto-char (point-max))
+               (when (re-search-backward (format "^(def.+?\\_<%s\\_>" gsym) nil t)
+                 (when lsym
+                   (re-search-forward (format "\\_<%s\\_>" lsym) nil t))
+                 (flymake-make-overlay
+                  (line-beginning-position) (line-end-position)
+                  msg 'flymake-errline 'flymake-errline))))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -4298,8 +4337,8 @@ And print value in the echo area.
     (gosh-refactor--overlays-in start end))))
 
 (defun gosh-refactor--sort-overlays (overlays)
-  (sort overlays 
-        (lambda (o1 o2) 
+  (sort overlays
+        (lambda (o1 o2)
           (< (overlay-start o1) (overlay-start o2)))))
 
 (defun gosh-refactor--next-region (point)
@@ -4322,7 +4361,7 @@ And print value in the echo area.
   (let ((warns (gosh-refactor--highlight-bound-region new region region-1)))
     (when warns
       ;;TODO
-      (unless (gosh-refactor--confirm-with-popup 
+      (unless (gosh-refactor--confirm-with-popup
                (format "New text is already bound. Continue? " new) warns)
         ;;TODO
         (signal 'quit nil)))))
@@ -4500,7 +4539,7 @@ CHECK is function that accept no arg and return boolean."
         (recenter)
         (let ((next (gosh-refactor--rotate-next-overlay ov overlays)))
           (setq gosh-refactor--rotate-timer
-                (run-with-timer 
+                (run-with-timer
                  1 nil
                  'gosh-refactor--rotate-overlays
                  (or next (car overlays)) overlays)))))))
