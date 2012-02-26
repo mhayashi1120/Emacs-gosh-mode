@@ -1,3 +1,3 @@
-(define-package "gosh-mode" "0.2.0"
+(define-package "gosh-mode" "0.2.1"
   ""
   '())
