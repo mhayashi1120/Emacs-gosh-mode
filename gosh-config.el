@@ -134,16 +134,6 @@
 
 (add-to-list 'interpreter-mode-alist '("gosh" . gosh-mode))
 
-;; font lock user customizable
-(font-lock-add-keywords
- 'gosh-mode
- `(("\\`#.+" 0 font-lock-comment-delimiter-face)
-   (gosh-font-lock-procedure-keywords 1 font-lock-keyword-face)
-   (gosh-font-lock-syntax-keywords 1 font-lock-constant-face)
-   (gosh-font-lock-basic-syntax
-    (1 font-lock-keyword-face)
-    (2 font-lock-constant-face nil t))))
-
 (add-to-list 'auto-mode-alist
              '("\\.scm\\(?:\\.[0-9]+\\)?$" . gosh-mode))
 

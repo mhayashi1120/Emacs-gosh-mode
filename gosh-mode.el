@@ -1174,7 +1174,6 @@ Evaluate s-expression, syntax check, test-module, etc."
 
 (defvar gosh-mode-hook nil)
 
-;;TODO autoload works?
 ;;;###autoload
 (define-derived-mode gosh-mode scheme-mode "Gosh"
   "Major mode for Gauche programming."
@@ -1190,13 +1189,7 @@ Evaluate s-expression, syntax check, test-module, etc."
   (add-to-list (make-local-variable 'mode-line-process)
                'gosh-mode-line-process
                'append)
-  ;; clone font lock settings
-  ;; for preserving scheme original settings.
-  (setq font-lock-defaults
-        (gosh-font-lock--clone-keywords font-lock-defaults))
-  (setcar font-lock-defaults
-          '(gosh-font-lock--keywords
-            gosh-font-lock--keywords-2))
+  (gosh-font-lock-initialize)
   (setq gosh-buffer-change-time (float-time))
   (gosh-eldoc-config)
   (gosh-ac-mode-initialize)
@@ -1206,6 +1199,25 @@ Evaluate s-expression, syntax check, test-module, etc."
 ;;
 ;; font-lock
 ;;
+
+(defun gosh-font-lock-initialize ()
+  ;; clone font lock settings with preserving scheme
+  ;; original settings.
+  (setq font-lock-defaults
+        (gosh-font-lock--clone-keywords font-lock-defaults))
+  (setcar font-lock-defaults
+          '(gosh-font-lock--keywords
+            gosh-font-lock--keywords-2)))
+
+;; font lock user customizable
+(font-lock-add-keywords
+ 'gosh-mode
+ `(("\\`#.+" 0 font-lock-comment-delimiter-face)
+   (gosh-font-lock-procedure-keywords 1 font-lock-keyword-face)
+   (gosh-font-lock-syntax-keywords 1 font-lock-constant-face)
+   (gosh-font-lock-basic-syntax
+    (1 font-lock-keyword-face)
+    (2 font-lock-constant-face nil t))))
 
 (defun gosh-font-lock-procedure-keywords (bound)
   ;; ignore if quack is activated
@@ -1261,7 +1273,8 @@ Evaluate s-expression, syntax check, test-module, etc."
              (3 (cond
                  ((match-beginning 2) font-lock-variable-name-face)
                  (t font-lock-type-face)) nil t))
-           keywords))    (gosh-font-lock--modify-scheme-keywords keywords)
+           keywords))
+    (gosh-font-lock--modify-scheme-keywords keywords)
     keywords))
 
 (defvar gosh-font-lock--keywords
@@ -3440,6 +3453,7 @@ d:/home == /cygdrive/d/home
        (gosh-filter
         (lambda (x)
           (or (null (cdr x))
+              (and (cadr x) (atom (cadr x)))
               (memq (cadr x) '(procedure object nil))
               (and (consp (cadr x))
                    (memq (caadr x) '(lambda syntax special)))))
