@@ -4199,7 +4199,7 @@ And print value in the echo area.
            (cond
             ((string-match "^(\\([^)]+\\))$" x)
              (list msg (match-string 1 x) nil))
-            ((string-match "^\\([^(]+\\)(\\([^)]+\\))$" x)
+            ((string-match "^\\([^(]+\\)(+\\([^)]+\\))?$" x)
              (list msg (match-string 2 x) (match-string 1 x)))
             (t nil)))
          symbols)))
@@ -4211,12 +4211,15 @@ And print value in the echo area.
           do (progn
                ;; search backward. last definition is the test result. maybe...
                (goto-char (point-max))
-               (when (re-search-backward (format "^(def.+?\\_<%s\\_>" gsym) nil t)
-                 (when lsym
-                   (re-search-forward (format "\\_<%s\\_>" lsym) nil t))
-                 (flymake-make-overlay
-                  (line-beginning-position) (line-end-position)
-                  msg 'flymake-errline 'flymake-errline))))))
+               (when (re-search-backward (format "^(def.+?\\_<\\(%s\\)\\_>" gsym) nil t)
+                 (let ((beg (match-beginning 1))
+                       (fin (match-end 1)))
+                   (when (and lsym
+                              (re-search-forward (format "\\_<\\(%s\\)\\_>" lsym) nil t))
+                     (setq beg (match-beginning 1))
+                     (setq fin (match-end 1)))
+                   (flymake-make-overlay
+                    beg fin msg 'flymake-errline 'flymake-errline)))))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
