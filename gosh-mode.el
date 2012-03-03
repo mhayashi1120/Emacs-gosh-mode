@@ -437,7 +437,7 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
              (setq imports (delq import-as imports)))
             ((member prefix names)
              (push file 2nd))
-            ((intersection words names :test 'string=)
+            ((gosh-intersection words names)
              (push file 2nd)))))
        (gosh-available-modules)))
     (mapc
@@ -1867,7 +1867,34 @@ This function come from apel"
   (mapcar 'car
           (apply 'concatenate
                  'list
-                 (mapcar (lambda (e) (remove-if-not pred e)) env))))
+                 (mapcar (lambda (e) (gosh-filter pred e)) env))))
+
+(defun gosh-filter (pred list)
+  (loop for l in list
+        if (funcall pred l)
+        collect l))
+
+(defun gosh-remove (pred list)
+  (loop for l in list
+        unless (funcall pred l)
+        collect l))
+
+(defun gosh-find (pred list)
+  (loop for l in list
+        if (funcall pred l)
+        return l))
+
+(defun gosh-intersection (list1 list2)
+  (loop for l in list1
+        if (member l list2)
+        collect l))
+
+(defun gosh-union (list1 list2)
+  (loop with res = list1
+        for l in list2
+        unless (member l res)
+        do (setq res (cons l res))
+        finally return res))
 
 (defun gosh-append-map (proc init-ls)
   (if (null init-ls)
@@ -1914,7 +1941,7 @@ This function come from apel"
 ;; file utilities
 
 (defun gosh-any-file-in-path (file path)
-  (car (remove-if-not
+  (car (gosh-filter
         (lambda (dir) (file-exists-p (concat dir "/" file)))
         path)))
 
@@ -2299,8 +2326,9 @@ referenced mew-complete.el"
       ((quote) '())
       ((quasiquote) '())                ; XXXX
       (t
-       (union (gosh-parse-extract-match-clause-vars (car x))
-              (gosh-parse-extract-match-clause-vars (cdr x))))))
+       (gosh-union 
+        (gosh-parse-extract-match-clause-vars (car x))
+        (gosh-parse-extract-match-clause-vars (cdr x))))))
    ((vectorp x)
     (gosh-parse-extract-match-clause-vars (concatenate 'list x)))
    (t
@@ -2481,7 +2509,7 @@ referenced mew-complete.el"
                               'list
                               (gosh-append-map
                                'gosh-flatten
-                               (remove-if-not 'consp
+                               (gosh-filter 'consp
                                               (gosh-nth-sexp-at-point 1))))
                              vars)))
               ((receive defun defmacro)
@@ -2957,9 +2985,9 @@ TODO key should be module-file?? multiple executable make complex.
         res))))
 
 (defun gosh-cache-find-by-file (file cache-var)
-  (let* ((predicate (lambda (item)
-                      (equal (nth 0 item) file)))
-         (cached (find-if predicate (symbol-value cache-var))))
+  (let* ((pred (lambda (item)
+                 (equal (nth 0 item) file)))
+         (cached (gosh-find pred (symbol-value cache-var))))
     (when (and cached
                (stringp (nth 0 cached))
                (ignore-errors
@@ -2967,7 +2995,7 @@ TODO key should be module-file?? multiple executable make complex.
                        (ctime (nth 2 cached)))
                    (not (or (equal mtime ctime)
                             (time-less-p mtime ctime))))))
-      (set cache-var (delete-if predicate (symbol-value cache-var)))
+      (set cache-var (gosh-remove pred (symbol-value cache-var)))
       (setq cached nil))
     cached))
 
@@ -3241,7 +3269,7 @@ d:/home == /cygdrive/d/home
                     (consp b1)
                     (if (eq 'or (car b1))
                         ;; type unions
-                        (find-if
+                        (gosh-find
                          (lambda (x)
                            (gosh-type-match-p
                             a1 (gosh-scheme-translate-type x)))
@@ -3253,7 +3281,7 @@ d:/home == /cygdrive/d/home
                     (case (car a1)
                       ((or)
                        ;; type unions
-                       (find-if
+                       (gosh-find
                         (lambda (x)
                           (gosh-type-match-p (gosh-scheme-translate-type x) b1))
                         (cdr a1)))
@@ -3305,7 +3333,7 @@ d:/home == /cygdrive/d/home
          (dir (file-name-directory sym))
          (res (file-name-all-completions file (or dir ".")))
          (res2 (if dir (mapcar (lambda (f) (concat dir f)) res) res)))
-    (remove-if-not 'file-directory-p res2)))
+    (gosh-filter 'file-directory-p res2)))
 
 (defun gosh-string-completer (type)
   (case type
@@ -4343,13 +4371,13 @@ And print value in the echo area.
         return 'all-of-buffer))
 
 (defun gosh-refactor--overlays-in (start end)
-  (remove-if-not
+  (gosh-filter
    (lambda (ov) (overlay-get ov 'gosh-refactor-overlay-p))
    (overlays-in start end)))
 
 (defun gosh-refactor--scheduled-overlays (start end)
   (gosh-refactor--sort-overlays
-   (remove-if
+   (gosh-remove
     (lambda (ov) (overlay-get ov 'gosh-refactor-done))
     (gosh-refactor--overlays-in start end))))
 
