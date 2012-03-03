@@ -1863,7 +1863,7 @@ This function come from apel"
       (set symbol nil))
   (set symbol (gosh-put-alist key value (symbol-value symbol))))
 
-(defun gosh-filter (pred env)
+(defun gosh-env-filter (pred env)
   (mapcar 'car
           (apply 'concatenate
                  'list
@@ -3346,7 +3346,7 @@ d:/home == /cygdrive/d/home
     (cond
      ;; return all env symbols when a prefix arg is given
      (arg
-      (gosh-scheme-do-completion sym (gosh-filter (lambda (x) t) env)))
+      (gosh-scheme-do-completion sym (gosh-env-filter (lambda (x) t) env)))
      ;; allow different types of strings
      (in-str-p
       (let* ((param-type
@@ -3388,7 +3388,7 @@ d:/home == /cygdrive/d/home
       (let ((want-type (gosh-lookup-type (cadr outer-type) outer-pos)))
         (gosh-scheme-do-completion
          sym
-         (gosh-filter
+         (gosh-env-filter
           (lambda (x)
             (let ((type (cadr x)))
               (or (memq type '(procedure object nil))
@@ -3432,7 +3432,7 @@ d:/home == /cygdrive/d/home
                               'integer)
                           param-type))
              (base-completions
-              (gosh-filter
+              (gosh-env-filter
                (lambda (x)
                  (and (not (and (consp (cadr x)) (eq 'syntax (caadr x))))
                       (gosh-type-match-p (cadr x) base-type)))
@@ -3450,7 +3450,7 @@ d:/home == /cygdrive/d/home
      ((zerop inner-pos)
       (gosh-scheme-do-completion
        sym
-       (gosh-filter
+       (gosh-env-filter
         (lambda (x)
           (or (null (cdr x))
               (and (cadr x) (atom (cadr x)))
@@ -3460,7 +3460,7 @@ d:/home == /cygdrive/d/home
         env)))
      ;; complete everything
      (t
-      (gosh-scheme-do-completion sym (gosh-filter (lambda (x) t) env))))))
+      (gosh-scheme-do-completion sym (gosh-env-filter (lambda (x) t) env))))))
 
 (defun gosh-complete-or-indent (&optional arg)
   (interactive "P")
