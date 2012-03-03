@@ -1944,9 +1944,9 @@ This function come from apel"
 
 (defmacro gosh-with-find-file (path-expr &rest body)
   (declare (indent 1))
-  (let ((path (gensym "path"))
-        (buf (gensym "buf"))
-        (res (gensym "res")))
+  (let ((path (make-symbol "path"))
+        (buf (make-symbol "buf"))
+        (res (make-symbol "res")))
     `(let* ((,path (file-truename ,path-expr))
             (,buf (get-file-buffer ,path)))
        (with-current-buffer (or ,buf (gosh--find-file-noselect ,path t))
@@ -2781,9 +2781,9 @@ referenced mew-complete.el"
     (nreverse modules)))
 
 (defun gosh-parse-exported-symbols ()
-  (let ((env (gosh-parse-current-globals))
-        (exports (gosh-parse-current-exports t env))
-        (res '()))
+  (let* ((env (gosh-parse-current-globals))
+         (exports (gosh-parse-current-exports t env))
+         (res '()))
     ;; if source file execute dynamic load.
     ;; global definition (env) will be null.
     (mapc
@@ -4379,7 +4379,7 @@ And print value in the echo area.
     (when warns
       ;;TODO
       (unless (gosh-refactor--confirm-with-popup
-               (format "New text is already bound. Continue? " new) warns)
+               (format "New text `%s' is already bound. Continue? " new) warns)
         ;;TODO
         (signal 'quit nil)))))
 
