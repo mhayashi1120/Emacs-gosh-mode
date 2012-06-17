@@ -4,7 +4,7 @@
 ;; Keywords: lisp gauche scheme edit
 ;; URL: https://github.com/mhayashi1120/Emacs-gosh-mode/raw/master/gosh-mode.el
 ;; Emacs: GNU Emacs 22 or later
-;; Version: 0.2.0
+;; Version: 0.2.1
 
 ;; This program is free software; you can redistribute it and/or
 ;; modify it under the terms of the GNU General Public License as
@@ -73,7 +73,7 @@
   :group 'lisp
   :prefix "gosh-")
 
-(defvar gosh-mode-version "0.2.0")
+(defvar gosh-mode-version "0.2.1")
 
 
 
@@ -437,7 +437,7 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
              (setq imports (delq import-as imports)))
             ((member prefix names)
              (push file 2nd))
-            ((intersection words names :test 'string=)
+            ((gosh-intersection words names)
              (push file 2nd)))))
        (gosh-available-modules)))
     (mapc
@@ -1863,11 +1863,38 @@ This function come from apel"
       (set symbol nil))
   (set symbol (gosh-put-alist key value (symbol-value symbol))))
 
-(defun gosh-filter (pred env)
+(defun gosh-env-filter (pred env)
   (mapcar 'car
           (apply 'concatenate
                  'list
-                 (mapcar (lambda (e) (remove-if-not pred e)) env))))
+                 (mapcar (lambda (e) (gosh-filter pred e)) env))))
+
+(defun gosh-filter (pred list)
+  (loop for l in list
+        if (funcall pred l)
+        collect l))
+
+(defun gosh-remove (pred list)
+  (loop for l in list
+        unless (funcall pred l)
+        collect l))
+
+(defun gosh-find (pred list)
+  (loop for l in list
+        if (funcall pred l)
+        return l))
+
+(defun gosh-intersection (list1 list2)
+  (loop for l in list1
+        if (member l list2)
+        collect l))
+
+(defun gosh-union (list1 list2)
+  (loop with res = list1
+        for l in list2
+        unless (member l res)
+        do (setq res (cons l res))
+        finally return res))
 
 (defun gosh-append-map (proc init-ls)
   (if (null init-ls)
@@ -1914,7 +1941,7 @@ This function come from apel"
 ;; file utilities
 
 (defun gosh-any-file-in-path (file path)
-  (car (remove-if-not
+  (car (gosh-filter
         (lambda (dir) (file-exists-p (concat dir "/" file)))
         path)))
 
@@ -1944,9 +1971,9 @@ This function come from apel"
 
 (defmacro gosh-with-find-file (path-expr &rest body)
   (declare (indent 1))
-  (let ((path (gensym "path"))
-        (buf (gensym "buf"))
-        (res (gensym "res")))
+  (let ((path (make-symbol "path"))
+        (buf (make-symbol "buf"))
+        (res (make-symbol "res")))
     `(let* ((,path (file-truename ,path-expr))
             (,buf (get-file-buffer ,path)))
        (with-current-buffer (or ,buf (gosh--find-file-noselect ,path t))
@@ -2299,8 +2326,9 @@ referenced mew-complete.el"
       ((quote) '())
       ((quasiquote) '())                ; XXXX
       (t
-       (union (gosh-parse-extract-match-clause-vars (car x))
-              (gosh-parse-extract-match-clause-vars (cdr x))))))
+       (gosh-union 
+        (gosh-parse-extract-match-clause-vars (car x))
+        (gosh-parse-extract-match-clause-vars (cdr x))))))
    ((vectorp x)
     (gosh-parse-extract-match-clause-vars (concatenate 'list x)))
    (t
@@ -2481,7 +2509,7 @@ referenced mew-complete.el"
                               'list
                               (gosh-append-map
                                'gosh-flatten
-                               (remove-if-not 'consp
+                               (gosh-filter 'consp
                                               (gosh-nth-sexp-at-point 1))))
                              vars)))
               ((receive defun defmacro)
@@ -2781,9 +2809,9 @@ referenced mew-complete.el"
     (nreverse modules)))
 
 (defun gosh-parse-exported-symbols ()
-  (let ((env (gosh-parse-current-globals))
-        (exports (gosh-parse-current-exports t env))
-        (res '()))
+  (let* ((env (gosh-parse-current-globals))
+         (exports (gosh-parse-current-exports t env))
+         (res '()))
     ;; if source file execute dynamic load.
     ;; global definition (env) will be null.
     (mapc
@@ -2957,9 +2985,9 @@ TODO key should be module-file?? multiple executable make complex.
         res))))
 
 (defun gosh-cache-find-by-file (file cache-var)
-  (let* ((predicate (lambda (item)
-                      (equal (nth 0 item) file)))
-         (cached (find-if predicate (symbol-value cache-var))))
+  (let* ((pred (lambda (item)
+                 (equal (nth 0 item) file)))
+         (cached (gosh-find pred (symbol-value cache-var))))
     (when (and cached
                (stringp (nth 0 cached))
                (ignore-errors
@@ -2967,7 +2995,7 @@ TODO key should be module-file?? multiple executable make complex.
                        (ctime (nth 2 cached)))
                    (not (or (equal mtime ctime)
                             (time-less-p mtime ctime))))))
-      (set cache-var (delete-if predicate (symbol-value cache-var)))
+      (set cache-var (gosh-remove pred (symbol-value cache-var)))
       (setq cached nil))
     cached))
 
@@ -3241,7 +3269,7 @@ d:/home == /cygdrive/d/home
                     (consp b1)
                     (if (eq 'or (car b1))
                         ;; type unions
-                        (find-if
+                        (gosh-find
                          (lambda (x)
                            (gosh-type-match-p
                             a1 (gosh-scheme-translate-type x)))
@@ -3253,7 +3281,7 @@ d:/home == /cygdrive/d/home
                     (case (car a1)
                       ((or)
                        ;; type unions
-                       (find-if
+                       (gosh-find
                         (lambda (x)
                           (gosh-type-match-p (gosh-scheme-translate-type x) b1))
                         (cdr a1)))
@@ -3305,7 +3333,7 @@ d:/home == /cygdrive/d/home
          (dir (file-name-directory sym))
          (res (file-name-all-completions file (or dir ".")))
          (res2 (if dir (mapcar (lambda (f) (concat dir f)) res) res)))
-    (remove-if-not 'file-directory-p res2)))
+    (gosh-filter 'file-directory-p res2)))
 
 (defun gosh-string-completer (type)
   (case type
@@ -3346,7 +3374,7 @@ d:/home == /cygdrive/d/home
     (cond
      ;; return all env symbols when a prefix arg is given
      (arg
-      (gosh-scheme-do-completion sym (gosh-filter (lambda (x) t) env)))
+      (gosh-scheme-do-completion sym (gosh-env-filter (lambda (x) t) env)))
      ;; allow different types of strings
      (in-str-p
       (let* ((param-type
@@ -3388,7 +3416,7 @@ d:/home == /cygdrive/d/home
       (let ((want-type (gosh-lookup-type (cadr outer-type) outer-pos)))
         (gosh-scheme-do-completion
          sym
-         (gosh-filter
+         (gosh-env-filter
           (lambda (x)
             (let ((type (cadr x)))
               (or (memq type '(procedure object nil))
@@ -3432,7 +3460,7 @@ d:/home == /cygdrive/d/home
                               'integer)
                           param-type))
              (base-completions
-              (gosh-filter
+              (gosh-env-filter
                (lambda (x)
                  (and (not (and (consp (cadr x)) (eq 'syntax (caadr x))))
                       (gosh-type-match-p (cadr x) base-type)))
@@ -3450,7 +3478,7 @@ d:/home == /cygdrive/d/home
      ((zerop inner-pos)
       (gosh-scheme-do-completion
        sym
-       (gosh-filter
+       (gosh-env-filter
         (lambda (x)
           (or (null (cdr x))
               (and (cadr x) (atom (cadr x)))
@@ -3460,7 +3488,7 @@ d:/home == /cygdrive/d/home
         env)))
      ;; complete everything
      (t
-      (gosh-scheme-do-completion sym (gosh-filter (lambda (x) t) env))))))
+      (gosh-scheme-do-completion sym (gosh-env-filter (lambda (x) t) env))))))
 
 (defun gosh-complete-or-indent (&optional arg)
   (interactive "P")
@@ -3677,8 +3705,7 @@ d:/home == /cygdrive/d/home
           (funcall method state indent-point normal-indent)))))))
 
 (defvar gosh--smart-indent-alist nil
-  "
-Pseudo EBNF is below.
+  "Pseudo EBNF is below.
 
 ALIST ::= { MODULE | PROCEDURE }
 MODULE ::= MODULE-SYMBOL , { PROCEDURE }
@@ -4199,7 +4226,7 @@ And print value in the echo area.
            (cond
             ((string-match "^(\\([^)]+\\))$" x)
              (list msg (match-string 1 x) nil))
-            ((string-match "^\\([^(]+\\)(\\([^)]+\\))$" x)
+            ((string-match "^\\([^(]+\\)(+\\([^)]+\\))?$" x)
              (list msg (match-string 2 x) (match-string 1 x)))
             (t nil)))
          symbols)))
@@ -4211,12 +4238,15 @@ And print value in the echo area.
           do (progn
                ;; search backward. last definition is the test result. maybe...
                (goto-char (point-max))
-               (when (re-search-backward (format "^(def.+?\\_<%s\\_>" gsym) nil t)
-                 (when lsym
-                   (re-search-forward (format "\\_<%s\\_>" lsym) nil t))
-                 (flymake-make-overlay
-                  (line-beginning-position) (line-end-position)
-                  msg 'flymake-errline 'flymake-errline))))))
+               (when (re-search-backward (format "^(def.+?\\_<\\(%s\\)\\_>" gsym) nil t)
+                 (let ((beg (match-beginning 1))
+                       (fin (match-end 1)))
+                   (when (and lsym
+                              (re-search-forward (format "\\_<\\(%s\\)\\_>" lsym) nil t))
+                     (setq beg (match-beginning 1))
+                     (setq fin (match-end 1)))
+                   (flymake-make-overlay
+                    beg fin msg 'flymake-errline 'flymake-errline)))))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -4340,13 +4370,13 @@ And print value in the echo area.
         return 'all-of-buffer))
 
 (defun gosh-refactor--overlays-in (start end)
-  (remove-if-not
+  (gosh-filter
    (lambda (ov) (overlay-get ov 'gosh-refactor-overlay-p))
    (overlays-in start end)))
 
 (defun gosh-refactor--scheduled-overlays (start end)
   (gosh-refactor--sort-overlays
-   (remove-if
+   (gosh-remove
     (lambda (ov) (overlay-get ov 'gosh-refactor-done))
     (gosh-refactor--overlays-in start end))))
 
@@ -4376,7 +4406,7 @@ And print value in the echo area.
     (when warns
       ;;TODO
       (unless (gosh-refactor--confirm-with-popup
-               (format "New text is already bound. Continue? " new) warns)
+               (format "New text `%s' is already bound. Continue? " new) warns)
         ;;TODO
         (signal 'quit nil)))))
 
