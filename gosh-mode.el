@@ -2784,9 +2784,9 @@ referenced mew-complete.el"
            info))))
 
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Parsed cache
-
+;;;
+;;; Parsed cache
+;;;
 
 ;;TODO to have extend relation
 (defvar gosh-cache-module-exports '()
@@ -2849,8 +2849,10 @@ TODO key should be module-file?? multiple executable make complex.
       (setq cached nil))
     cached))
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; For cygwin path
+
+;;;
+;;; For cygwin path
+;;;
 
 (defcustom gosh-cygwin-cygdrive "/cygdrive/"
   "Path alias of Windows drive prefixed path in Cygwin.
@@ -2990,9 +2992,10 @@ d:/home == /cygdrive/d/home
            (gosh-scheme-translate-type
             (intern (substring str 0 (- (length str) 1))))
          'object)))))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; completion
+
+;;;
+;;; Completion
+;;;
 
 (defun gosh-scheme-do-completion (str coll &optional strs pred)
   (let* ((coll (mapcar (lambda (x)
@@ -3351,9 +3354,10 @@ d:/home == /cygdrive/d/home
               'lisp-indent-line))))
     (funcall func arg)))
 
-;;
-;; auto-complete
-;;
+
+;;;
+;;; auto-complete
+;;;
 
 ;; Generic initialize function for auto-complete
 (defun gosh-ac-initialize ()
@@ -3506,8 +3510,9 @@ d:/home == /cygdrive/d/home
   (gosh-available-modules))
 
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;:
-;; indentation handling
+;;;
+;;; indentation handling
+;;;
 
 (defvar calculate-lisp-indent-last-sexp)
 
@@ -3651,8 +3656,9 @@ PROCEDURE-SYMBOL ::= symbol
       nil)))
 
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Backend
+;;;
+;;; Backend
+;;;
 
 (defun gosh-backend-kill ()
   ;;TODO create ui
