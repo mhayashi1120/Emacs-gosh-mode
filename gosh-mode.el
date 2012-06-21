@@ -939,7 +939,7 @@ Evaluate s-expression, syntax check, test-module, etc."
   (setq gosh-mode-line-process
         (and gosh-sticky-mode
              'gosh-sticky-modeline-format))
-  (gosh-sticky-reset-test)
+  (gosh-test--reset-result)
   (gosh-sticky-backend-switch-context))
 
 (defun gosh-sticky-mode-on ()
@@ -962,13 +962,14 @@ Evaluate s-expression, syntax check, test-module, etc."
   (unless (gosh-backend-active-process)
     (gosh-sticky-backend-switch-context)))
 
+;;TODO rename gosh-test-*
 (defun gosh-sticky-modeline-update ()
   (let* ((prev-module gosh-sticky-which-module-current)
          (module (gosh-sticky-which-module-update)))
     (when (or (gosh-sticky-buffer-was-changed-p)
               (not (equal prev-module module)))
-      ;;TODO
-      (gosh-sticky-reset-test)))
+      ;;TODO clear result if changed previous testing module.
+      (gosh-test--reset-result)))
   (force-mode-line-update))
 
 (defun gosh-sticky-buffer-was-changed-p ()
@@ -984,79 +985,83 @@ Evaluate s-expression, syntax check, test-module, etc."
         (ignore-errors
           (gosh-parse-context-module))))
 
-(defun gosh-sticky-validating-p ()
-  (catch 'found
-    (mapc
-     (lambda (p)
-       (when (eq (process-get p 'gosh-sticky-test-buffer) (current-buffer))
-         (throw 'found t)))
-     (process-list))
-    nil))
+;;TODO rename gosh-test-*
+(defun gosh-sticky-after-save ()
+  (gosh-sticky-modeline-update))
 
-(defun gosh-sticky-reset-test ()
+(defun gosh-run (cmd)
+  "Wrapper of `run-scheme' command."
+  (interactive
+   (let ((command
+          (if current-prefix-arg
+              (completing-read "Run Gosh: "
+                               (mapcar
+                                (lambda (c) (list (car c)))
+                                gosh-command-alist)
+                               nil nil gosh-default-command)
+            gosh-default-command-internal)))
+     (list (combine-and-quote-strings (list command "-i")))))
+  (run-scheme cmd)
+  (unless (eq major-mode 'gosh-inferior-mode)
+    (gosh-inferior-mode)))
+
+
+;;;
+;;; Test module bindings
+;;;
+
+(defun gosh-test--reset-result ()
   (setq gosh-sticky-test-result
         '(:propertize "Unknown" face gosh-modeline-lightdown-face)))
 
 ;; Execute subprocess that have sentinel and filter
-;;  subprocess load current file
-;;  -> that filter make process execute test-module
+;;  subprocess load current file and evaluate `(test-module some-module)'
 ;;  -> sentinel read test-module result
-(defun gosh-sticky-validate-async (module)
+(defun gosh-test--invoke-process (module)
   (let ((test-buffer (current-buffer))
         (file (gosh-sticky-backend-loading-file))
         (result-buf (generate-new-buffer " *gosh-mode-test* "))
         proc)
-    (setq gosh-sticky-modeline-validate
-          `(:propertize "Loading"
+    ;; clear overlay
+    (gosh-test--clear-errors)
+    (setq gosh-sticky-test-result
+          `(:propertize "Checking"
                         face gosh-modeline-working-face))
-    (gosh-sticky-reset-test)
+    (setq gosh-sticky-modeline-validate
+          '(:propertize "Valid" face gosh-modeline-normal-face))
     (setq gosh-sticky-validated-time (float-time))
     (setq proc (start-process "Gosh test" result-buf
                               gosh-default-command-internal
                               "-i" "-u" "gauche.test"
-                              "-l" file))
-    (set-process-sentinel proc 'gosh-sticky-validate-sentinel)
-    (set-process-filter proc 'gosh-sticky-validate-filter)
+                              "-l" file
+                              "-e" (format "(test-module '%s)" module)))
+    (set-process-sentinel proc 'gosh-test--process-sentinel)
+    (set-process-filter proc 'gosh-test--process-filter)
     (process-put proc 'gosh-sticky-test-buffer test-buffer)
-    (process-put proc 'gosh-sticky-test-module module)
+    ;; to terminate gosh process
+    (process-send-eof proc)
     proc))
 
-(defun gosh-sticky-validate-filter (proc event)
+(defun gosh-test--process-filter (proc event)
   (with-current-buffer (process-buffer proc)
     (save-excursion
-      (let ((buffer (process-get proc 'gosh-sticky-test-buffer))
-            (module (process-get proc 'gosh-sticky-test-module)))
+      (let ((buffer (process-get proc 'gosh-sticky-test-buffer)))
         (if (not (buffer-live-p buffer))
-            (gosh-sticky-close-process proc)
+            (gosh-test--close-process proc)
           (goto-char (point-max))
           (insert event)
           (goto-char (point-min))
-          (cond
-           ((gosh-backend-prompt-match)
-            ;; remove this filter
-            (set-process-filter proc nil)
-            (with-current-buffer buffer
-              (setq gosh-sticky-test-result
-                    `(:propertize "Checking"
-                                  face gosh-modeline-working-face))
-              ;; clear overlay
-              (gosh-sticky-validate-remove-error)
-              (setq gosh-sticky-modeline-validate
-                    '(:propertize "Valid" face gosh-modeline-normal-face)))
-            (process-send-string proc (format "(test-module '%s)\n" module))
-            ;; to terminate gosh process
-            (process-send-eof proc))
-           ((re-search-forward "^gosh: \\(.*\\)\n" nil t)
+          (when (re-search-forward "^gosh: \\(.*\\)\n" nil t)
             (let ((message (match-string 1)))
               (with-current-buffer buffer
-                (gosh-sticky-validate-parse-error-message message)
+                (gosh-test--parse-error-message message)
                 (setq gosh-sticky-modeline-validate
                       `(:propertize "Invalid"
                                     face gosh-modeline-error-face
                                     help-echo ,(concat "Gosh error: " message)
-                                    mouse-face mode-line-highlight)))))))))))
+                                    mouse-face mode-line-highlight))))))))))
 
-(defun gosh-sticky-validate-parse-error-message (message)
+(defun gosh-test--parse-error-message (message)
   (save-excursion
     (cond
      ((string-match ":line \\([0-9]+\\):\\(.*\\)" message)
@@ -1071,16 +1076,7 @@ Evaluate s-expression, syntax check, test-module, etc."
          (point) (line-end-position)
          text 'flymake-errline 'flymake-errline))))))
 
-(defun gosh-sticky-error-overlays ()
-  (delq
-   nil
-   (mapcar
-    (lambda (o)
-      (and (overlay-get o 'flymake-overlay)
-           o))
-    (overlays-in (point-min) (point-max)))))
-
-(defun gosh-sticky-validate-remove-error ()
+(defun gosh-test--clear-errors ()
   (save-restriction
     (widen)
     (mapc
@@ -1089,12 +1085,12 @@ Evaluate s-expression, syntax check, test-module, etc."
          (delete-overlay ov)))
      (overlays-in (point-min) (point-max)))))
 
-(defun gosh-sticky-validate-sentinel (proc event)
+(defun gosh-test--process-sentinel (proc event)
   (unless (eq (process-status proc) 'run)
     (let ((buffer (process-get proc 'gosh-sticky-test-buffer))
           (errors))
       (if (not (buffer-live-p buffer))
-          (gosh-sticky-close-process proc)
+          (gosh-test--close-process proc)
         (with-current-buffer buffer
           (setq gosh-sticky-test-result
                 (unwind-protect
@@ -1120,35 +1116,17 @@ Evaluate s-expression, syntax check, test-module, etc."
                                    mouse-face mode-line-highlight)))
                         `(:propertize "OK"
                                       face gosh-modeline-normal-face)))
-                  (gosh-sticky-close-process proc)))
+                  (gosh-test--close-process proc)))
           (gosh-test--highilght-errors-if-possible errors))))))
 
-(defun gosh-sticky-close-process (proc)
+(defun gosh-test--close-process (proc)
   (delete-process proc)
   (kill-buffer (process-buffer proc)))
 
-(defun gosh-sticky-after-save ()
-  (gosh-sticky-modeline-update))
-
-(defun gosh-run (cmd)
-  "Wrapper of `run-scheme' command."
-  (interactive
-   (let ((command
-          (if current-prefix-arg
-              (completing-read "Run Gosh: "
-                               (mapcar
-                                (lambda (c) (list (car c)))
-                                gosh-command-alist)
-                               nil nil gosh-default-command)
-            gosh-default-command-internal)))
-     (list (combine-and-quote-strings (list command "-i")))))
-  (run-scheme cmd)
-  (unless (eq major-mode 'gosh-inferior-mode)
-    (gosh-inferior-mode)))
-
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Major mode definitions
+;;;
+;;; Major mode definitions
+;;;
 
 (defvar gosh-mode-map nil)
 
@@ -4136,7 +4114,7 @@ And print value in the echo area.
   "Execute test for module which is cursor indicated to."
   (interactive)
   (let ((mod (gosh-parse-context-module)))
-    (gosh-sticky-validate-async mod)))
+    (gosh-test--invoke-process mod)))
 
 (defun gosh-popup-test-result (&optional all)
   "Show test result if there is."
