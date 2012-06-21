@@ -758,7 +758,7 @@ Arg FORCE non-nil means forcely insert bracket."
                   ((plusp c)
                    (decf c)
                    (skip-chars-backward " \t\n(["))
-                  ((looking-at "\\w")
+                  ((looking-at "\\(?:\\sw\\|\\s_\\)")
                    nil)
                   (t
                    (backward-char)
@@ -4138,16 +4138,30 @@ And print value in the echo area.
   (let ((mod (gosh-parse-context-module)))
     (gosh-sticky-validate-async mod)))
 
-(defun gosh-popup-test-result ()
+(defun gosh-popup-test-result (&optional all)
   "Show test result if there is."
-  (interactive)
+  (interactive "P")
   (cond
    ((null gosh-sticky-test-result)
     (message "Current module is not tested yet."))
+   ((not all)
+    (let ((msgs (loop for o in (overlays-at (point))
+                      if (overlay-get o 'flymake-overlay)
+                      collect (overlay-get o 'help-echo))))
+      (cond
+       (msgs
+        (ding)
+        (message "Test Error: %s %s"
+                 (mapconcat 'identity msgs ", ")
+                 (propertize "(This mark possiblly point to the wrong place.)"
+                             'face 'font-lock-warning-face)))
+       (t
+        (message "No error at point.")))))
    (t
     (let ((msg (cadr (memq 'help-echo gosh-sticky-test-result))))
       (cond
        (msg
+        (ding)
         (message "%s" msg))
        (t
         (message "No error.")))))))
@@ -4198,26 +4212,22 @@ And print value in the echo area.
 
 (defconst gosh-test--message-alist
   '(
-    "found dangling autoloads:"
-    "symbols exported but not defined:"
-    "symbols referenced but not defined:"
-    "procedures received wrong number of argument:"
+    ("found dangling autoloads:" "Dangling autoloads")
+    ("symbols exported but not defined:" "Exported but not defined")
+    ("symbols referenced but not defined:" "Not defined")
+    ("procedures received wrong number of argument:" "Wrong number of arguments")
     ))
 
 (defun gosh-test--parse-results (errors)
   ;; not exactly correct
-  (let (res)
-    (mapc
-     (lambda (msg)
-       (mapc
-        (lambda (err)
-          (when (string-match (format "%s \\(.+?\\)\\(?: AND \\|$\\)" msg) err)
-            (let* ((line (match-string 1 err))
-                   (syms (split-string line "[, ]" t)))
-              (setq res (append (gosh-test--parse-symbols msg syms) res)))))
-        errors))
-     gosh-test--message-alist)
-    res))
+  (loop with res = nil
+        for (msg show) in gosh-test--message-alist
+        do (loop for err in errors
+                 if (string-match (format "%s \\(.+?\\)\\(?: AND \\|$\\)" msg) err)
+                 do (let* ((line (match-string 1 err))
+                           (syms (split-string line "[, ]" t)))
+                      (setq res (append (gosh-test--parse-symbols show syms) res))))
+        finally return res))
 
 (defun gosh-test--parse-symbols (msg symbols)
   (delq nil
@@ -4235,14 +4245,15 @@ And print value in the echo area.
   "Highlight ERRORS as much as possible."
   (save-excursion
     (loop for (msg gsym lsym) in (gosh-test--parse-results errors)
-          do (progn
+          do (let ((greg (regexp-quote gsym))
+                   (lreg (and lsym (regexp-quote lsym))))
                ;; search backward. last definition is the test result. maybe...
                (goto-char (point-max))
-               (when (re-search-backward (format "^(def.+?\\_<\\(%s\\)\\_>" gsym) nil t)
+               (when (re-search-backward (format "^(def.+?\\_<\\(%s\\)\\_>" greg) nil t)
                  (let ((beg (match-beginning 1))
                        (fin (match-end 1)))
-                   (when (and lsym
-                              (re-search-forward (format "\\_<\\(%s\\)\\_>" lsym) nil t))
+                   (when (and lreg
+                              (re-search-forward (format "\\_<\\(%s\\)\\_>" lreg) nil t))
                      (setq beg (match-beginning 1))
                      (setq fin (match-end 1)))
                    (flymake-make-overlay
@@ -4400,13 +4411,13 @@ And print value in the echo area.
         (setq end (point-marker))
         (cons start end))))))
 
-(defun gosh-refactor--check-bound-region (new region &optional region-1)
+(defun gosh-refactor--check-bound-region (new text region &optional region-1)
   "Highlight NEW regexp as warning face."
   (let ((warns (gosh-refactor--highlight-bound-region new region region-1)))
     (when warns
       ;;TODO
       (unless (gosh-refactor--confirm-with-popup
-               (format "New text `%s' is already bound. Continue? " new) warns)
+               (format "New text `%s' is already bound. Continue? " text) warns)
         ;;TODO
         (signal 'quit nil)))))
 
@@ -4445,7 +4456,7 @@ HIGHLIGHT is a marker to make be explicitly the target is."
                (ovs (gosh-refactor--scheduled-overlays start end)))
           (loop initially (progn
                             (gosh-refactor--check-bound-region
-                             new region prev-region)
+                             new new-string region prev-region)
                             (move-overlay highlight start end)
                             (unless (memq no-confirm '(all-of-buffer))
                               (setq no-confirm nil)))
