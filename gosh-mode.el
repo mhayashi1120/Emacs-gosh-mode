@@ -956,21 +956,11 @@ Evaluate s-expression, syntax check, test-module, etc."
                  (eq major-mode 'gosh-mode)
                  (not (minibufferp (current-buffer))))
         (gosh-sticky-backend-watcher)
-        (gosh-sticky-modeline-update)))))
+        (gosh-test--update-modeline)))))
 
 (defun gosh-sticky-backend-watcher ()
   (unless (gosh-backend-active-process)
     (gosh-sticky-backend-switch-context)))
-
-;;TODO rename gosh-test-*
-(defun gosh-sticky-modeline-update ()
-  (let* ((prev-module gosh-sticky-which-module-current)
-         (module (gosh-sticky-which-module-update)))
-    (when (or (gosh-sticky-buffer-was-changed-p)
-              (not (equal prev-module module)))
-      ;;TODO clear result if changed previous testing module.
-      (gosh-test--reset-result)))
-  (force-mode-line-update))
 
 (defun gosh-sticky-buffer-was-changed-p ()
   "Return non-nil if current-buffer was changed after validated"
@@ -987,7 +977,7 @@ Evaluate s-expression, syntax check, test-module, etc."
 
 ;;TODO rename gosh-test-*
 (defun gosh-sticky-after-save ()
-  (gosh-sticky-modeline-update))
+  (gosh-test--update-modeline))
 
 (defun gosh-run (cmd)
   "Wrapper of `run-scheme' command."
@@ -1004,124 +994,6 @@ Evaluate s-expression, syntax check, test-module, etc."
   (run-scheme cmd)
   (unless (eq major-mode 'gosh-inferior-mode)
     (gosh-inferior-mode)))
-
-
-;;;
-;;; Test module bindings
-;;;
-
-(defun gosh-test--reset-result ()
-  (setq gosh-sticky-test-result
-        '(:propertize "Unknown" face gosh-modeline-lightdown-face)))
-
-;; Execute subprocess that have sentinel and filter
-;;  subprocess load current file and evaluate `(test-module some-module)'
-;;  -> sentinel read test-module result
-(defun gosh-test--invoke-process (module)
-  (let ((test-buffer (current-buffer))
-        (file (gosh-sticky-backend-loading-file))
-        (result-buf (generate-new-buffer " *gosh-mode-test* "))
-        proc)
-    ;; clear overlay
-    (gosh-test--clear-errors)
-    (setq gosh-sticky-test-result
-          `(:propertize "Checking"
-                        face gosh-modeline-working-face))
-    (setq gosh-sticky-modeline-validate
-          '(:propertize "Valid" face gosh-modeline-normal-face))
-    (setq gosh-sticky-validated-time (float-time))
-    (setq proc (start-process "Gosh test" result-buf
-                              gosh-default-command-internal
-                              "-i" "-u" "gauche.test"
-                              "-l" file
-                              "-e" (format "(test-module '%s)" module)))
-    (set-process-sentinel proc 'gosh-test--process-sentinel)
-    (set-process-filter proc 'gosh-test--process-filter)
-    (process-put proc 'gosh-sticky-test-buffer test-buffer)
-    ;; to terminate gosh process
-    (process-send-eof proc)
-    proc))
-
-(defun gosh-test--process-filter (proc event)
-  (with-current-buffer (process-buffer proc)
-    (save-excursion
-      (let ((buffer (process-get proc 'gosh-sticky-test-buffer)))
-        (if (not (buffer-live-p buffer))
-            (gosh-test--close-process proc)
-          (goto-char (point-max))
-          (insert event)
-          (goto-char (point-min))
-          (when (re-search-forward "^gosh: \\(.*\\)\n" nil t)
-            (let ((message (match-string 1)))
-              (with-current-buffer buffer
-                (gosh-test--parse-error-message message)
-                (setq gosh-sticky-modeline-validate
-                      `(:propertize "Invalid"
-                                    face gosh-modeline-error-face
-                                    help-echo ,(concat "Gosh error: " message)
-                                    mouse-face mode-line-highlight))))))))))
-
-(defun gosh-test--parse-error-message (message)
-  (save-excursion
-    (cond
-     ((string-match ":line \\([0-9]+\\):\\(.*\\)" message)
-      (let ((line (string-to-number (match-string 1 message)))
-            (text (match-string 2 message)))
-        (gosh-goto-line line)
-        ;; move backward until line is not empty.
-        (while (and (not (bobp))
-                    (= (point) (line-end-position)))
-          (forward-line -1))
-        (flymake-make-overlay
-         (point) (line-end-position)
-         text 'flymake-errline 'flymake-errline))))))
-
-(defun gosh-test--clear-errors ()
-  (save-restriction
-    (widen)
-    (mapc
-     (lambda (ov)
-       (when (flymake-overlay-p ov)
-         (delete-overlay ov)))
-     (overlays-in (point-min) (point-max)))))
-
-(defun gosh-test--process-sentinel (proc event)
-  (unless (eq (process-status proc) 'run)
-    (let ((buffer (process-get proc 'gosh-sticky-test-buffer))
-          (errors))
-      (if (not (buffer-live-p buffer))
-          (gosh-test--close-process proc)
-        (with-current-buffer buffer
-          (setq gosh-sticky-test-result
-                (unwind-protect
-                    (with-current-buffer (process-buffer proc)
-                      (catch 'done
-                        (unless (= (process-exit-status proc) 0)
-                          (throw 'done
-                                 `(:propertize
-                                   "NG"
-                                   face gosh-modeline-error-face
-                                   help-echo "Gosh test error: Unable to load this file"
-                                   mouse-face mode-line-highlight)))
-                        (goto-char (point-min))
-                        (while (re-search-forward "ERROR:[ \t]*\\(.*\\)" nil t)
-                          (setq errors (cons (match-string 1) errors)))
-                        (when errors
-                          (throw 'done
-                                 `(:propertize
-                                   "NG"
-                                   face gosh-modeline-error-face
-                                   help-echo ,(concat "Gosh test error: "
-                                                      (prin1-to-string errors))
-                                   mouse-face mode-line-highlight)))
-                        `(:propertize "OK"
-                                      face gosh-modeline-normal-face)))
-                  (gosh-test--close-process proc)))
-          (gosh-test--highilght-errors-if-possible errors))))))
-
-(defun gosh-test--close-process (proc)
-  (delete-process proc)
-  (kill-buffer (process-buffer proc)))
 
 
 ;;;
@@ -4186,7 +4058,9 @@ And print value in the echo area.
   (setq gosh-buffer-change-time (float-time)))
 
 
-;; handling gauche.test
+;;;
+;;; test functions
+;;;
 
 (defconst gosh-test--message-alist
   '(
@@ -4237,9 +4111,132 @@ And print value in the echo area.
                    (flymake-make-overlay
                     beg fin msg 'flymake-errline 'flymake-errline)))))))
 
+(defun gosh-test--update-modeline ()
+  (let* ((prev-module gosh-sticky-which-module-current)
+         (module (gosh-sticky-which-module-update)))
+    (when (or (gosh-sticky-buffer-was-changed-p)
+              (not (equal prev-module module)))
+      ;;TODO clear result if changed previous testing module. OK?
+      (gosh-test--reset-result)))
+  (force-mode-line-update))
+
+(defun gosh-test--reset-result ()
+  (setq gosh-sticky-test-result
+        '(:propertize "Unknown" face gosh-modeline-lightdown-face)))
+
+;; Execute subprocess that have sentinel and filter
+;;  subprocess load current file and evaluate `(test-module some-module)'
+;;  -> sentinel read test-module result
+(defun gosh-test--invoke-process (module)
+  (let ((test-buffer (current-buffer))
+        (file (gosh-sticky-backend-loading-file))
+        (result-buf (generate-new-buffer " *gosh-mode-test* "))
+        proc)
+    ;; clear overlay
+    (gosh-test--clear-errors)
+    (setq gosh-sticky-test-result
+          `(:propertize "Checking"
+                        face gosh-modeline-working-face))
+    (setq gosh-sticky-modeline-validate
+          '(:propertize "Valid" face gosh-modeline-normal-face))
+    (setq gosh-sticky-validated-time (float-time))
+    (setq proc (start-process "Gosh test" result-buf
+                              gosh-default-command-internal
+                              "-i" "-u" "gauche.test"
+                              "-l" file
+                              "-e" (format "(test-module '%s)" module)))
+    (set-process-sentinel proc 'gosh-test--process-sentinel)
+    (set-process-filter proc 'gosh-test--process-filter)
+    (process-put proc 'gosh-sticky-test-buffer test-buffer)
+    ;; to terminate gosh process
+    (process-send-eof proc)
+    proc))
+
+(defun gosh-test--process-filter (proc event)
+  (with-current-buffer (process-buffer proc)
+    (save-excursion
+      (let ((buffer (process-get proc 'gosh-sticky-test-buffer)))
+        (if (not (buffer-live-p buffer))
+            (gosh-test--close-process proc)
+          (goto-char (point-max))
+          (insert event)
+          (goto-char (point-min))
+          (when (re-search-forward "^gosh: \\(.*\\)\n" nil t)
+            (let ((message (match-string 1)))
+              (with-current-buffer buffer
+                (gosh-test--parse-error-message message)
+                (setq gosh-sticky-modeline-validate
+                      `(:propertize "Invalid"
+                                    face gosh-modeline-error-face
+                                    help-echo ,(concat "Gosh error: " message)
+                                    mouse-face mode-line-highlight))))))))))
+
+(defun gosh-test--parse-error-message (message)
+  (save-excursion
+    (cond
+     ((string-match ":line \\([0-9]+\\):\\(.*\\)" message)
+      (let ((line (string-to-number (match-string 1 message)))
+            (text (match-string 2 message)))
+        (gosh-goto-line line)
+        ;; move backward until line is not empty.
+        (while (and (not (bobp))
+                    (= (point) (line-end-position)))
+          (forward-line -1))
+        (flymake-make-overlay
+         (point) (line-end-position)
+         text 'flymake-errline 'flymake-errline))))))
+
+(defun gosh-test--clear-errors ()
+  (save-restriction
+    (widen)
+    (mapc
+     (lambda (ov)
+       (when (flymake-overlay-p ov)
+         (delete-overlay ov)))
+     (overlays-in (point-min) (point-max)))))
+
+(defun gosh-test--process-sentinel (proc event)
+  (unless (eq (process-status proc) 'run)
+    (let ((buffer (process-get proc 'gosh-sticky-test-buffer))
+          (errors))
+      (if (not (buffer-live-p buffer))
+          (gosh-test--close-process proc)
+        (with-current-buffer buffer
+          (setq gosh-sticky-test-result
+                (unwind-protect
+                    (with-current-buffer (process-buffer proc)
+                      (catch 'done
+                        (unless (= (process-exit-status proc) 0)
+                          (throw 'done
+                                 `(:propertize
+                                   "NG"
+                                   face gosh-modeline-error-face
+                                   help-echo "Gosh test error: Unable to load this file"
+                                   mouse-face mode-line-highlight)))
+                        (goto-char (point-min))
+                        (while (re-search-forward "ERROR:[ \t]*\\(.*\\)" nil t)
+                          (setq errors (cons (match-string 1) errors)))
+                        (when errors
+                          (throw 'done
+                                 `(:propertize
+                                   "NG"
+                                   face gosh-modeline-error-face
+                                   help-echo ,(concat "Gosh test error: "
+                                                      (prin1-to-string errors))
+                                   mouse-face mode-line-highlight)))
+                        `(:propertize "OK"
+                                      face gosh-modeline-normal-face)))
+                  (gosh-test--close-process proc)))
+          (gosh-test--highilght-errors-if-possible errors))))))
+
+(defun gosh-test--close-process (proc)
+  (delete-process proc)
+  (kill-buffer (process-buffer proc)))
+
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Refactor
+;;;
+;;; Refactor
+;;;
 
 (defvar gosh-refactor-read-symbol-history nil)
 
