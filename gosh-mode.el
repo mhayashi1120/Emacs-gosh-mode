@@ -876,42 +876,6 @@ Arg FORCE non-nil means forcely insert bracket."
   "Face used to momentary message."
   :group 'gosh-mode)
 
-(defvar gosh-sticky-mode-update-timer nil)
-
-(defvar gosh-sticky-modeline-format
-  `(
-    " "
-    (:eval gosh-sticky-modeline-validate)
-    " "
-    (:propertize gosh-sticky-which-module-current
-                 face gosh-modeline-normal-face)
-    "=>"
-    (:eval gosh-sticky-test-result))
-  "Format for displaying the function in the mode line.")
-(put 'gosh-sticky-modeline-format 'risky-local-variable t)
-
-(defvar gosh-sticky-validated-time nil)
-(make-variable-buffer-local 'gosh-sticky-validated-time)
-
-(defvar gosh-sticky-which-module-current nil)
-(make-variable-buffer-local 'gosh-sticky-which-module-current)
-(put 'gosh-sticky-which-module-current 'risky-local-variable t)
-
-(defvar gosh-sticky-modeline-validate nil)
-(make-variable-buffer-local 'gosh-sticky-modeline-validate)
-(put 'gosh-sticky-modeline-validate 'risky-local-variable t)
-
-(defvar gosh-sticky-test-result nil)
-(make-variable-buffer-local 'gosh-sticky-test-result)
-(put 'gosh-sticky-test-result 'risky-local-variable t)
-
-(defvar gosh-mode-line-process nil)
-(make-variable-buffer-local 'gosh-mode-line-process)
-(put 'gosh-mode-line-process 'risky-local-variable t)
-
-(defvar gosh-sticky-mode-update-delay 1
-  "Idle delay seconds to validate current buffer.")
-
 (defvar gosh-sticky-mode-map nil)
 
 (let ((map (or gosh-sticky-mode-map (make-sparse-keymap))))
@@ -928,18 +892,7 @@ Arg FORCE non-nil means forcely insert bracket."
   "Gosh sticky process mode.
 Evaluate s-expression, syntax check, test-module, etc."
   nil nil gosh-sticky-mode-map
-  (if gosh-sticky-mode
-      (add-hook 'after-save-hook 'gosh-sticky-after-save nil t)
-    (remove-hook 'after-save-hook 'gosh-sticky-after-save t))
-  (when (timerp gosh-sticky-mode-update-timer)
-    (cancel-timer gosh-sticky-mode-update-timer))
-  (setq gosh-sticky-mode-update-timer
-        (run-with-idle-timer gosh-sticky-mode-update-delay t
-                             'gosh-sticky-timer-process))
-  (setq gosh-mode-line-process
-        (and gosh-sticky-mode
-             'gosh-sticky-modeline-format))
-  (gosh-test--reset-result)
+  (add-hook 'gosh-mode-timer-hook 'gosh-sticky-backend-watcher nil t)
   (gosh-sticky-backend-switch-context))
 
 (defun gosh-sticky-mode-on ()
@@ -948,36 +901,15 @@ Evaluate s-expression, syntax check, test-module, etc."
 (defun gosh-sticky-mode-off ()
   (gosh-sticky-mode -1))
 
-(defun gosh-sticky-timer-process ()
-  ;; check buffer mode to avoid endless freeze
-  (save-match-data
-    (with-local-quit
-      (when (and gosh-sticky-mode
-                 (eq major-mode 'gosh-mode)
-                 (not (minibufferp (current-buffer))))
-        (gosh-sticky-backend-watcher)
-        (gosh-test--update-modeline)))))
-
 (defun gosh-sticky-backend-watcher ()
   (unless (gosh-backend-active-process)
     (gosh-sticky-backend-switch-context)))
 
-(defun gosh-sticky-buffer-was-changed-p ()
-  "Return non-nil if current-buffer was changed after validated"
-  (or (null gosh-buffer-change-time)
-      (null gosh-sticky-validated-time)
-      (> gosh-buffer-change-time
-         gosh-sticky-validated-time)))
-
 (defun gosh-sticky-which-module-update ()
-  "Refresh `gosh-sticky-which-module-current' and return that new value."
-  (setq gosh-sticky-which-module-current
+  "Refresh `gosh-test-current-module' and return that new value."
+  (setq gosh-test-current-module
         (ignore-errors
           (gosh-parse-context-module))))
-
-;;TODO rename gosh-test-*
-(defun gosh-sticky-after-save ()
-  (gosh-test--update-modeline))
 
 (defun gosh-run (cmd)
   "Wrapper of `run-scheme' command."
@@ -1024,9 +956,30 @@ Evaluate s-expression, syntax check, test-module, etc."
 
 (defvar gosh-mode-hook nil)
 
+(defvar gosh-mode--timer nil)
+
+(defvar gosh-mode--timer-delay 1
+  "Idle delay seconds to validate current buffer.")
+
+(defvar gosh-mode-line-process nil)
+(make-variable-buffer-local 'gosh-mode-line-process)
+(put 'gosh-mode-line-process 'risky-local-variable t)
+
+(defvar gosh-mode-timer-hook nil)
+
+(defun gosh-mode-watcher ()
+  ;; check buffer mode to avoid endless freeze
+  (save-match-data
+    (with-local-quit
+      (when (and gosh-sticky-mode
+                 (eq major-mode 'gosh-mode)
+                 (not (minibufferp (current-buffer))))
+        (run-hooks 'gosh-mode-timer-hook)))))
+
 ;;;###autoload
 (define-derived-mode gosh-mode scheme-mode "Gosh"
   "Major mode for Gauche programming."
+  ;; for emacs 24
   (if (boundp 'syntax-propertize-function)
       (set (make-local-variable 'syntax-propertize-function)
            'gosh-syntax-table-apply-region)
@@ -1036,6 +989,10 @@ Evaluate s-expression, syntax check, test-module, etc."
           gosh-font-lock-syntactic-keywords)))
   (set (make-local-variable 'after-change-functions)
        'gosh-after-change-function)
+  (unless gosh-mode--timer
+    (setq gosh-mode--timer
+          (run-with-idle-timer gosh-mode--timer-delay t
+                               'gosh-mode-watcher)))
   (add-to-list (make-local-variable 'mode-line-process)
                'gosh-mode-line-process
                'append)
@@ -3998,7 +3955,7 @@ And print value in the echo area.
   "Show test result if there is."
   (interactive "P")
   (cond
-   ((null gosh-sticky-test-result)
+   ((null gosh-test-result)
     (message "Current module is not tested yet."))
    ((not all)
     (let ((msgs (loop for o in (overlays-at (point))
@@ -4014,7 +3971,7 @@ And print value in the echo area.
        (t
         (message "No error at point.")))))
    (t
-    (let ((msg (cadr (memq 'help-echo gosh-sticky-test-result))))
+    (let ((msg (cadr (memq 'help-echo gosh-test-result))))
       (cond
        (msg
         (ding)
@@ -4068,6 +4025,33 @@ And print value in the echo area.
 ;;; test functions
 ;;;
 
+(defvar gosh-test-load-status nil)
+(make-variable-buffer-local 'gosh-test-load-status)
+(put 'gosh-test-load-status 'risky-local-variable t)
+
+(defvar gosh-test-result nil)
+(make-variable-buffer-local 'gosh-test-result)
+(put 'gosh-test-result 'risky-local-variable t)
+
+(defvar gosh-test--modeline-format
+  `(
+    " "
+    (:eval gosh-test-load-status)
+    " "
+    (:propertize gosh-test-current-module
+                 face gosh-modeline-normal-face)
+    "=>"
+    (:eval gosh-test-result))
+  "Format for displaying the function in the mode line.")
+(put 'gosh-test--modeline-format 'risky-local-variable t)
+
+(defvar gosh-test-validated-time nil)
+(make-variable-buffer-local 'gosh-test-validated-time)
+
+(defvar gosh-test-current-module nil)
+(make-variable-buffer-local 'gosh-test-current-module)
+(put 'gosh-test-current-module 'risky-local-variable t)
+
 (defconst gosh-test--message-alist
   '(
     ("found dangling autoloads:" "Dangling autoloads")
@@ -4075,6 +4059,13 @@ And print value in the echo area.
     ("symbols referenced but not defined:" "Not defined")
     ("procedures received wrong number of argument:" "Wrong number of arguments")
     ))
+
+(defun gosh-test--buffer-was-changed-p ()
+  "Return non-nil if current-buffer was changed after validated"
+  (or (null gosh-buffer-change-time)
+      (null gosh-test-validated-time)
+      (> gosh-buffer-change-time
+         gosh-test-validated-time)))
 
 (defun gosh-test--parse-results (errors)
   ;; not exactly correct
@@ -4118,16 +4109,16 @@ And print value in the echo area.
                     beg fin msg 'flymake-errline 'flymake-errline)))))))
 
 (defun gosh-test--update-modeline ()
-  (let* ((prev-module gosh-sticky-which-module-current)
+  (let* ((prev-module gosh-test-current-module)
          (module (gosh-sticky-which-module-update)))
-    (when (or (gosh-sticky-buffer-was-changed-p)
+    (when (or (gosh-test--buffer-was-changed-p)
               (not (equal prev-module module)))
       ;;TODO clear result if changed previous testing module. OK?
       (gosh-test--reset-result)))
   (force-mode-line-update))
 
 (defun gosh-test--reset-result ()
-  (setq gosh-sticky-test-result
+  (setq gosh-test-result
         '(:propertize "Unknown" face gosh-modeline-lightdown-face)))
 
 ;; Execute subprocess that have sentinel and filter
@@ -4140,12 +4131,12 @@ And print value in the echo area.
         proc)
     ;; clear overlay
     (gosh-test--clear-errors)
-    (setq gosh-sticky-test-result
+    (setq gosh-test-result
           `(:propertize "Checking"
                         face gosh-modeline-working-face))
-    (setq gosh-sticky-modeline-validate
+    (setq gosh-test-load-status
           '(:propertize "Valid" face gosh-modeline-normal-face))
-    (setq gosh-sticky-validated-time (float-time))
+    (setq gosh-test-validated-time (float-time))
     (setq proc (start-process "Gosh test" result-buf
                               gosh-default-command-internal
                               "-i" "-u" "gauche.test"
@@ -4153,7 +4144,7 @@ And print value in the echo area.
                               "-e" (format "(test-module '%s)" module)))
     (set-process-sentinel proc 'gosh-test--process-sentinel)
     (set-process-filter proc 'gosh-test--process-filter)
-    (process-put proc 'gosh-sticky-test-buffer test-buffer)
+    (process-put proc 'gosh-test-source-buffer test-buffer)
     ;; to terminate gosh process
     (process-send-eof proc)
     proc))
@@ -4161,7 +4152,7 @@ And print value in the echo area.
 (defun gosh-test--process-filter (proc event)
   (with-current-buffer (process-buffer proc)
     (save-excursion
-      (let ((buffer (process-get proc 'gosh-sticky-test-buffer)))
+      (let ((buffer (process-get proc 'gosh-test-source-buffer)))
         (if (not (buffer-live-p buffer))
             (gosh-test--close-process proc)
           (goto-char (point-max))
@@ -4171,7 +4162,7 @@ And print value in the echo area.
             (let ((message (match-string 1)))
               (with-current-buffer buffer
                 (gosh-test--parse-error-message message)
-                (setq gosh-sticky-modeline-validate
+                (setq gosh-test-load-status
                       `(:propertize "Invalid"
                                     face gosh-modeline-error-face
                                     help-echo ,(concat "Gosh error: " message)
@@ -4203,12 +4194,12 @@ And print value in the echo area.
 
 (defun gosh-test--process-sentinel (proc event)
   (unless (eq (process-status proc) 'run)
-    (let ((buffer (process-get proc 'gosh-sticky-test-buffer))
+    (let ((buffer (process-get proc 'gosh-test-source-buffer))
           (errors))
       (if (not (buffer-live-p buffer))
           (gosh-test--close-process proc)
         (with-current-buffer buffer
-          (setq gosh-sticky-test-result
+          (setq gosh-test-result
                 (unwind-protect
                     (with-current-buffer (process-buffer proc)
                       (catch 'done
@@ -4238,6 +4229,14 @@ And print value in the echo area.
 (defun gosh-test--close-process (proc)
   (delete-process proc)
   (kill-buffer (process-buffer proc)))
+
+(defun gosh-test--initialize ()
+  ;;TODO
+  (setq gosh-mode-line-process
+        'gosh-test--modeline-format)
+  (gosh-test--reset-result)
+  (add-hook 'gosh-mode-timer-hook 'gosh-test--update-modeline nil t)
+  (add-hook 'after-save-hook 'gosh-test--update-modeline nil t))
 
 
 ;;;
