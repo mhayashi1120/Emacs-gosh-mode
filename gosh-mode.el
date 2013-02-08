@@ -190,30 +190,30 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
    ))
 
 ;; bound only `let' form
-(defvar gosh-delegate-command)
-(defun gosh-delegate-command-get (index)
-  ;; When debugging gosh-mode, execute function (ex: `eval-expression')
-  ;; make unbound variable error.
-  (let ((command (if (and gosh-debug
-                          (not (boundp 'gosh-delegate-command)))
-                     (gosh-current-executable)
-                   gosh-delegate-command)))
-    (nth index (assoc command gosh-command-alist))))
+;; (defvar gosh-delegate-command)
+;; (defun gosh-delegate-command-get (index)
+;;   ;; When debugging gosh-mode, execute function (ex: `eval-expression')
+;;   ;; make unbound variable error.
+;;   (let ((command (if (and gosh-debug
+;;                           (not (boundp 'gosh-delegate-command)))
+;;                      (gosh-current-executable)
+;;                    gosh-delegate-command)))
+;;     (nth index (assoc command gosh-command-alist))))
 
-(defun gosh-delegate-version ()
-  (gosh-delegate-command-get 1))
-(defun gosh-delegate-repo-path ()
-  (gosh-delegate-command-get 2))
-(defun gosh-delegate-load-path ()
-  (gosh-delegate-command-get 3))
-(defun gosh-delegate-command-type ()
-  (gosh-delegate-command-get 4))
-(defun gosh-delegate-path-separator ()
-  (gosh-delegate-command-get 5))
-(defun gosh-delegate-path-g2e ()
-  (gosh-delegate-command-get 6))
-(defun gosh-delegate-path-e2g ()
-  (gosh-delegate-command-get 7))
+;; (defun gosh-delegate-version ()
+;;   (gosh-delegate-command-get 1))
+;; (defun gosh-delegate-repo-path ()
+;;   (gosh-delegate-command-get 2))
+;; (defun gosh-delegate-load-path ()
+;;   (gosh-delegate-command-get 3))
+;; (defun gosh-delegate-command-type ()
+;;   (gosh-delegate-command-get 4))
+;; (defun gosh-delegate-path-separator ()
+;;   (gosh-delegate-command-get 5))
+;; (defun gosh-delegate-path-g2e ()
+;;   (gosh-delegate-command-get 6))
+;; (defun gosh-delegate-path-e2g ()
+;;   (gosh-delegate-command-get 7))
 
 (defun gosh-register-command (command)
   (let* ((full (gosh--check-command command)))
@@ -246,7 +246,8 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
   "Switch gosh command (ex: trunk <-> release)"
   (interactive
    (let ((command (completing-read
-                   "Command: " gosh-command-alist nil nil
+                   (format "Command %s -> " gosh-default-command-internal)
+                   gosh-command-alist nil nil
                    gosh-default-command-internal)))
      (list command)))
   (gosh-default-initialize command))
@@ -482,7 +483,8 @@ else insert top level of the script.
        ((re-search-forward "^ *\\((use\\_>\\)" nil t) ; first `use' statements
         (goto-char (match-beginning 1))
         (gosh--insert-import-statement module))
-       ((re-search-forward (format "^ *(define-module %s\\_>" cm) nil t)
+       ((let ((regexp (format "^ *(define-module[ \t]+%s[ \n\t]" (regexp-quote cm))))
+          (re-search-forward regexp nil t))
         (forward-line 1)
         (gosh--insert-import-statement module))
        ((re-search-forward "^ *(" nil t) ; first statement
@@ -702,6 +704,7 @@ Arg FORCE non-nil means forcely insert bracket."
     (cond *)
     (cond-list *)
     (guard (gosh-symbol-p *))
+    (syntax-rules t *)
 
     (match t *)
     (match-lambda *)
@@ -948,10 +951,11 @@ Evaluate s-expression, syntax check, test-module, etc."
 
 (defvar gosh-mode-hook nil)
 
-(defvar gosh-mode--timer nil)
+(defvar gosh-mode--timer nil
+  "Watcher process for `gosh-mode'")
 
 (defvar gosh-mode--timer-delay 1
-  "Idle delay seconds to validate current buffer.")
+  "Idle delay seconds of `gosh-mode--timer'.")
 
 (defvar gosh-mode-line-process nil)
 (make-variable-buffer-local 'gosh-mode-line-process)
@@ -966,14 +970,15 @@ Evaluate s-expression, syntax check, test-module, etc."
 ;;;###autoload
 (define-derived-mode gosh-mode scheme-mode "Gosh"
   "Major mode for Gauche programming."
-  ;; for emacs 24
-  (if (boundp 'syntax-propertize-function)
-      (set (make-local-variable 'syntax-propertize-function)
-           'gosh-syntax-table-apply-region)
-    (set (make-local-variable 'font-lock-syntactic-keywords)
-         (append
-          font-lock-syntactic-keywords
-          gosh-font-lock-syntactic-keywords)))
+  (if (boundp 'font-lock-syntactic-keywords)
+      (set (make-local-variable 'font-lock-syntactic-keywords)
+           (append
+            font-lock-syntactic-keywords
+            gosh-font-lock-syntactic-keywords))
+    ;; FIXME:
+    ;;  must change to use `syntax-propertize-function' after 24.1
+    (set (make-local-variable 'syntax-propertize-function)
+         'gosh-syntax-table-apply-region))
   (set (make-local-variable 'after-change-functions)
        'gosh-after-change-function)
   ;;TODO cancel-timer after kill all gosh-mode
@@ -985,7 +990,7 @@ Evaluate s-expression, syntax check, test-module, etc."
                'gosh-mode-line-process
                'append)
   (gosh-font-lock--initialize)
-  (setq gosh-buffer-change-time (float-time))
+  (gosh-mode-put :modtime (float-time))
   (gosh-eldoc--initialize)
   (gosh-ac--initialize)
   (gosh-test--initialize)
@@ -1003,14 +1008,40 @@ Evaluate s-expression, syntax check, test-module, etc."
 (defun gosh-mode-get (key)
   (plist-get gosh-mode--context key))
 
-(defun gosh-mode-put (key value)
-  (if gosh-mode--context
-      (plist-put gosh-mode--context key value)
-    (setq gosh-mode--context `(,key ,value))))
+(defmacro gosh-mode-put (key value)
+  (declare (indent 1))
+  (let ((val (make-symbol "val")))
+    `(let ((,val ,value))
+       (if gosh-mode--context
+           (plist-put gosh-mode--context ,key ,val)
+         (setq gosh-mode--context (list ,key ,val)))
+       ,val)))
 
-;;
-;; font-lock
-;;
+(defun gosh-after-change-function (start end old-len)
+  ;;check executable
+  (when (< end 255)
+    (gosh-mode-put :executable nil))
+  (gosh-mode-put :modtime (float-time))
+  (gosh-test--reset-status))
+
+(defun gosh-mode--temp-file ()
+  (let (file)
+    (if (and buffer-file-name
+             (not (buffer-modified-p (current-buffer)))
+             ;; in archive file
+             (file-exists-p buffer-file-name))
+        (setq file buffer-file-name)
+      (unless (gosh-mode-get :temp-file)
+        (gosh-mode-put :temp-file
+          (make-temp-file "gosh-mode-")))
+      (setq file (gosh-mode-get :temp-file))
+      (let ((coding-system-for-write buffer-file-coding-system))
+        (write-region (point-min) (point-max) file nil 'no-msg)))
+    file))
+
+;;;
+;;; font-lock
+;;;
 
 (defun gosh-font-lock--initialize ()
   ;; clone font lock settings with preserving scheme
@@ -1106,17 +1137,18 @@ Evaluate s-expression, syntax check, test-module, etc."
     ))
 
 (defun gosh-syntax-table-apply-region (start end)
-  (let ((modified (buffer-modified-p))
-        buffer-read-only)
-    (save-excursion
-      (save-restriction
-        (narrow-to-region start end)
-        (goto-char (point-min))
-        (while (re-search-forward "#/" nil t)
-          (let ((beg (match-beginning 0)))
-            (when (gosh-context-code-p beg)
-              (gosh-syntax-table-set-properties beg))))))
-    (set-buffer-modified-p modified)))
+  (let ((modified (buffer-modified-p)))
+    (unwind-protect
+        (save-excursion
+          (save-restriction
+            (narrow-to-region start end)
+            (goto-char (point-min))
+            (let ((inhibit-read-only t))
+              (while (re-search-forward "#/" nil t)
+                (let ((beg (match-beginning 0)))
+                  (when (gosh-context-code-p beg)
+                    (gosh-syntax-table-set-properties beg)))))))
+      (set-buffer-modified-p modified))))
 
 (defun gosh-syntax-table-put-property (beg end value)
   (put-text-property beg end 'syntax-table value (current-buffer)))
@@ -1277,8 +1309,9 @@ TODO but not supported with-module context."
      (setq gosh-snatch-filter-candidates t))))
 
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; eldoc
+;;;
+;;; eldoc
+;;;
 
 (defconst gosh-eldoc--cached-data (make-vector 3 nil))
 
@@ -1345,8 +1378,8 @@ Set this variable before open by `gosh-mode'."
     ;; * (lambda args)
     ;; * (lambda (:rest args))
     (unless target-exp
-      (gosh-aif (gosh-eldoc--sexp-rest-arg real-sexp)
-          (setq target-exp it)))
+      (gosh-if-let1 it (gosh-eldoc--sexp-rest-arg real-sexp)
+        (setq target-exp it)))
     (concat "("
             (mapconcat
              'identity
@@ -1588,14 +1621,15 @@ Set this variable before open by `gosh-mode'."
     "Some of ( Parameter | Alias | Dynamic loaded procedure )")))
 
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; utilities
+;;;
+;;; utilities
+;;;
 
-(defmacro gosh-aif (test-form then-form &rest else-forms)
+(defmacro gosh-if-let1 (var expr then &rest else)
   "Anaphoric if. Temporary variable `it' is the result of test-form."
   (declare (indent 2))
-  `(let ((it ,test-form))
-     (if it ,then-form ,@else-forms)))
+  `(let ((,var ,expr))
+     (if ,var ,then ,@else)))
 
 (defun gosh-goto-line (line)
   (save-restriction
@@ -1650,8 +1684,9 @@ Set this variable before open by `gosh-mode'."
 
 
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; alist, list utilities
+;;;
+;;; alist, list utilities
+;;;
 
 (defun gosh-put-alist (key value alist)
   "Set cdr of an element (KEY . ...) in ALIST to VALUE and return ALIST.
@@ -1738,8 +1773,9 @@ This function come from apel"
   (and (consp ls) (car ls)))
 
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; string utilities
+;;;
+;;; string utilities
+;;;
 
 (defun gosh-string-starts-with (pref str)
   (let ((p-len (length pref))
@@ -1748,8 +1784,9 @@ This function come from apel"
          (equal pref (substring str 0 p-len)))))
 
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; file utilities
+;;;
+;;; file utilities
+;;;
 
 (defun gosh-any-file-in-path (file path)
   (car (gosh-filter
@@ -1849,14 +1886,23 @@ referenced mew-complete.el"
     (setq gosh-momentary-message-overlay ov)))
 
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Parse buffer
+;;;
+;;; Parse buffer
+;;;
 
 (defun gosh-context-string-p (&optional point)
   (save-excursion
     (let ((context (parse-partial-sexp (point-min) (or point (point)))))
-      (when (and context (nth 3 context))
-        (cons (nth 3 context) (nth 8 context))))))
+      (cond
+       ((and context (nth 3 context))
+        ;; handling gauche extend definition
+        (let ((beg (nth 8 context)))
+          (goto-char beg)
+          (when (looking-back "#`?")
+            (setq beg (match-beginning 0)))
+          (cons (nth 3 context) beg)))
+       ((looking-back "#`?")
+        (cons ?\" (match-beginning 0)))))))
 
 (defun gosh-context-comment-p (&optional point)
   (save-excursion
@@ -2137,7 +2183,7 @@ referenced mew-complete.el"
       ((quote) '())
       ((quasiquote) '())                ; XXXX
       (t
-       (gosh-union 
+       (gosh-union
         (gosh-parse-extract-match-clause-vars (car x))
         (gosh-parse-extract-match-clause-vars (cdr x))))))
    ((vectorp x)
@@ -2321,7 +2367,7 @@ referenced mew-complete.el"
                               (gosh-append-map
                                'gosh-flatten
                                (gosh-filter 'consp
-                                              (gosh-nth-sexp-at-point 1))))
+                                            (gosh-nth-sexp-at-point 1))))
                              vars)))
               ((receive defun defmacro)
                (setq vars
@@ -3740,8 +3786,11 @@ PROCEDURE-SYMBOL ::= symbol
   (let* ((command gosh-default-command-internal)
          (proc (gosh-backend-active-process command)))
     (unless proc
-      (let* ((buffer (gosh-backend-process-buffer command)))
+      (let* ((buffer (gosh-backend-process-buffer command))
+             (dir default-directory))
         (with-current-buffer buffer
+          (unless (file-directory-p default-directory)
+            (cd dir))
           (setq proc (start-process "Gosh backend" buffer command "-i"))
           (set-process-filter proc 'gosh-backend-process-filter)
           (gosh-set-alist 'gosh-backend-process-alist command proc)
@@ -3760,9 +3809,6 @@ PROCEDURE-SYMBOL ::= symbol
       (erase-buffer))
     buffer))
 
-(defvar gosh-sticky-backend-temp-file nil)
-(make-variable-buffer-local 'gosh-sticky-backend-temp-file)
-
 ;; TODO detect changing GAUCHE_LOAD_PATH, GAUCHE_DYNLOAD_PATH??
 ;;    but no way to remove from *load-path*
 ;; http://practical-scheme.net/wiliki/wiliki.cgi?Gauche%3aWishList&l=ja#H-1mx5tqr92ymmz
@@ -3772,7 +3818,7 @@ PROCEDURE-SYMBOL ::= symbol
 ;;    no sys-unsetenv ...
 (defun gosh-sticky-backend-switch-context ()
   (let* ((proc (gosh-backend-check-process))
-         (file (gosh-sticky-backend-loading-file))
+         (file (gosh-mode--temp-file))
          (directory (expand-file-name default-directory)))
     (unless (file-directory-p directory)
       (error "Directory is not exist"))
@@ -3781,8 +3827,8 @@ PROCEDURE-SYMBOL ::= symbol
                (or (not (eq (process-get proc 'gosh-backend-current-buffer)
                             (current-buffer)))
                    (null (process-get proc 'gosh-backend-switched-time))
-                   (null gosh-buffer-change-time)
-                   (>= gosh-buffer-change-time
+                   (null (gosh-mode-get :modtime))
+                   (>= (gosh-mode-get :modtime)
                        (process-get proc 'gosh-backend-switched-time))))
       (set-process-filter proc 'gosh-sticky-switch-context-filter)
       (process-put proc 'gosh-backend-current-buffer (current-buffer))
@@ -3807,24 +3853,9 @@ PROCEDURE-SYMBOL ::= symbol
       (set-process-filter proc 'gosh-backend-process-filter)
       (process-put proc 'gosh-backend-locking nil))))
 
-(defun gosh-sticky-backend-loading-file ()
-  (let (file)
-    (if (and buffer-file-name
-             (not (buffer-modified-p (current-buffer)))
-             ;; in archive file
-             (file-exists-p buffer-file-name))
-        (setq file buffer-file-name)
-      (unless gosh-sticky-backend-temp-file
-        (setq gosh-sticky-backend-temp-file
-              (make-temp-file "gosh-mode-")))
-      (setq file gosh-sticky-backend-temp-file)
-      (let ((coding-system-for-write buffer-file-coding-system))
-        (write-region (point-min) (point-max) file nil 'no-msg)))
-    file))
-
-;;
-;; sticky evaluation
-;;
+;;;
+;;; sticky evaluation
+;;;
 
 (defun gosh--temp-message (format-string &rest args)
   (let (message-log-max)
@@ -3875,7 +3906,7 @@ And print value in the echo area.
   (interactive)
   (gosh-eval--check-backend)
   (gosh--processing-message "Evaluating buffer..."
-    (let ((file (gosh-sticky-backend-loading-file)))
+    (let ((file (gosh-mode--temp-file)))
       (gosh-backend-eval (format "(load \"%s\")\n" file)))))
 
 (defun gosh-eval-region (start end)
@@ -3953,7 +3984,7 @@ And print value in the echo area.
   "Show test result if there is."
   (interactive "P")
   (cond
-   ((null gosh-test-result)
+   ((null (gosh-mode-get :modeline-test-result))
     (message "Current module is not tested yet."))
    ((not all)
     (let ((msgs (loop for o in (overlays-at (point))
@@ -3969,7 +4000,7 @@ And print value in the echo area.
        (t
         (message "No error at point.")))))
    (t
-    (let ((msg (cadr (memq 'help-echo gosh-test-result))))
+    (let ((msg (cadr (memq 'help-echo (gosh-mode-get :modeline-test-result)))))
       (cond
        (msg
         (ding)
@@ -3979,21 +4010,19 @@ And print value in the echo area.
 
 
 
-(defvar gosh-current-executable nil)
-(make-variable-buffer-local 'gosh-current-executable)
-
 (defun gosh-current-executable ()
-  (or gosh-current-executable
-      (setq gosh-current-executable
-            (or (save-excursion
-                  (goto-char (point-min))
-                  (when (looking-at auto-mode-interpreter-regexp)
-                    (let ((command (match-string-no-properties 2)))
-                      command)))
-                (and buffer-file-name
-                     (gosh-guessed-executable
-                      (expand-file-name buffer-file-name)))
-                gosh-default-command-internal))))
+  (or (gosh-mode-get :executable)
+      (let ((command
+             (or (save-excursion
+                   (goto-char (point-min))
+                   (when (looking-at auto-mode-interpreter-regexp)
+                     (let ((command (match-string-no-properties 2)))
+                       command)))
+                 (and buffer-file-name
+                      (gosh-guessed-executable
+                       (expand-file-name buffer-file-name)))
+                 gosh-default-command-internal)))
+        (gosh-mode-put :executable command))))
 
 (defun gosh-guessed-executable (file)
   (catch 'found
@@ -4008,47 +4037,24 @@ And print value in the echo area.
     gosh-default-command-internal))
 
 
-
-(defvar gosh-buffer-change-time nil)
-(make-variable-buffer-local 'gosh-buffer-change-time)
-
-(defun gosh-after-change-function (start end old-len)
-  ;;check executable
-  (when (< end 255)
-    (setq gosh-current-executable nil))
-  (setq gosh-buffer-change-time (float-time)))
-
-
 ;;;
 ;;; test functions
 ;;;
 
-(defvar gosh-test-load-status nil)
-(make-variable-buffer-local 'gosh-test-load-status)
-(put 'gosh-test-load-status 'risky-local-variable t)
-
-(defvar gosh-test-result nil)
-(make-variable-buffer-local 'gosh-test-result)
-(put 'gosh-test-result 'risky-local-variable t)
-
 (defvar gosh-test--modeline-format
   `(
     " "
-    (:eval gosh-test-load-status)
+    ;; load status before test-module
+    (:eval (gosh-mode-get :modeline-load-status))
     " "
-    (:propertize gosh-test--current-module
-                 face gosh-modeline-normal-face)
+    (:eval (or (gosh-mode-get :modeline-tested-module)
+               ;; show a current module
+               (gosh-mode-get :current-module)))
     "=>"
-    (:eval gosh-test-result))
+    ;; result of test-module
+    (:eval (gosh-mode-get :modeline-test-result)))
   "Format for displaying the function in the mode line.")
 (put 'gosh-test--modeline-format 'risky-local-variable t)
-
-(defvar gosh-test-validated-time nil)
-(make-variable-buffer-local 'gosh-test-validated-time)
-
-(defvar gosh-test--current-module nil)
-(make-variable-buffer-local 'gosh-test--current-module)
-(put 'gosh-test--current-module 'risky-local-variable t)
 
 (defconst gosh-test--message-alist
   '(
@@ -4060,10 +4066,10 @@ And print value in the echo area.
 
 (defun gosh-test--buffer-was-changed-p ()
   "Return non-nil if current-buffer was changed after validated"
-  (or (null gosh-buffer-change-time)
-      (null gosh-test-validated-time)
-      (> gosh-buffer-change-time
-         gosh-test-validated-time)))
+  (or (null (gosh-mode-get :modtime))
+      (null (gosh-mode-get :test-time))
+      (> (gosh-mode-get :modtime)
+         (gosh-mode-get :test-time))))
 
 (defun gosh-test--parse-results (errors)
   ;; not exactly correct
@@ -4107,42 +4113,48 @@ And print value in the echo area.
                     beg fin msg 'flymake-errline 'flymake-errline)))))))
 
 (defun gosh-test--update-modeline ()
-  (let* ((prev-module gosh-test--current-module)
+  (let* ((prev-module (gosh-mode-get :tested-module))
          (module (gosh-test--update-module)))
     (when (or (gosh-test--buffer-was-changed-p)
               (not (equal prev-module module)))
-      ;;TODO clear result if changed previous testing module. OK?
       (gosh-test--reset-result)))
   (force-mode-line-update))
 
 (defun gosh-test--update-module ()
-  "Refresh `gosh-test--current-module' and return that new value."
-  (setq gosh-test--current-module
-        (ignore-errors
-          (gosh-parse-context-module))))
+  "Refresh :current-module and return that new value."
+  (let ((module (ignore-errors (gosh-parse-context-module))))
+    (gosh-mode-put :current-module module)
+    module))
+
+(defun gosh-test--reset ()
+  (gosh-test--reset-result)
+  (gosh-test--reset-status))
+
+(defun gosh-test--reset-status ()
+  (gosh-mode-put :modeline-load-status
+    '(:propertize "Unknown" face gosh-modeline-lightdown-face)))
 
 (defun gosh-test--reset-result ()
-  (setq gosh-test-load-status
-        '(:propertize "Unknown" face gosh-modeline-lightdown-face))
-  (setq gosh-test-result
-        '(:propertize "Unknown" face gosh-modeline-lightdown-face)))
+  (gosh-mode-put :modeline-tested-module nil)
+  (gosh-mode-put :modeline-test-result
+    '(:propertize "Unknown" face gosh-modeline-lightdown-face)))
 
 ;; Execute subprocess that have sentinel and filter
 ;;  subprocess load current file and evaluate `(test-module some-module)'
 ;;  -> sentinel read test-module result
 (defun gosh-test--invoke-process (module)
   (let ((test-buffer (current-buffer))
-        (file (gosh-sticky-backend-loading-file))
+        (file (gosh-mode--temp-file))
         (result-buf (generate-new-buffer " *gosh-mode-test* "))
         proc)
     ;; clear overlay
     (gosh-test--clear-errors)
-    (setq gosh-test-result
-          `(:propertize "Checking"
-                        face gosh-modeline-working-face))
-    (setq gosh-test-load-status
-          '(:propertize "Checking" face gosh-modeline-working-face))
-    (setq gosh-test-validated-time (float-time))
+    (gosh-mode-put :modeline-test-result
+      `(:propertize "Checking"
+                    face gosh-modeline-working-face))
+    (gosh-mode-put :modeline-load-status
+      '(:propertize "Checking" face gosh-modeline-working-face))
+    (gosh-mode-put :test-time (float-time))
     (setq proc (start-process "Gosh test" result-buf
                               gosh-default-command-internal
                               "-i" "-u" "gauche.test"
@@ -4151,8 +4163,11 @@ And print value in the echo area.
     (set-process-sentinel proc 'gosh-test--process-sentinel)
     (set-process-filter proc 'gosh-test--process-filter)
     (process-put proc 'gosh-test-source-buffer test-buffer)
-    ;; to terminate gosh process
+    ;; to terminate gosh process after evaluate "-e"
     (process-send-eof proc)
+    (gosh-mode-put :modeline-tested-module
+      (and module `(:propertize ,module face gosh-modeline-normal-face)))
+    (gosh-mode-put :tested-module module)
     proc))
 
 (defun gosh-test--process-filter (proc event)
@@ -4170,15 +4185,15 @@ And print value in the echo area.
             (let ((message (match-string 1)))
               (with-current-buffer buffer
                 (gosh-test--parse-error-message message)
-                (setq gosh-test-load-status
-                      `(:propertize "Invalid"
-                                    face gosh-modeline-error-face
-                                    help-echo ,(concat "Gosh error: " message)
-                                    mouse-face mode-line-highlight)))))
+                (gosh-mode-put :modeline-load-status
+                  `(:propertize "Invalid"
+                                face gosh-modeline-error-face
+                                help-echo ,(concat "Gosh error: " message)
+                                mouse-face mode-line-highlight)))))
            (t
             (with-current-buffer buffer
-              (setq gosh-test-load-status
-                    '(:propertize "Valid" face gosh-modeline-normal-face))))))))))
+              (gosh-mode-put :modeline-load-status
+                '(:propertize "Valid" face gosh-modeline-normal-face))))))))))
 
 (defun gosh-test--parse-error-message (message)
   (save-excursion
@@ -4207,11 +4222,11 @@ And print value in the echo area.
 (defun gosh-test--process-sentinel (proc event)
   (unless (eq (process-status proc) 'run)
     (let ((buffer (process-get proc 'gosh-test-source-buffer))
-          (errors))
+          result errors)
       (if (not (buffer-live-p buffer))
           (gosh-test--close-process proc)
         (with-current-buffer buffer
-          (setq gosh-test-result
+          (setq result
                 (unwind-protect
                     (with-current-buffer (process-buffer proc)
                       (catch 'done
@@ -4236,6 +4251,7 @@ And print value in the echo area.
                         `(:propertize "OK"
                                       face gosh-modeline-normal-face)))
                   (gosh-test--close-process proc)))
+          (gosh-mode-put :modeline-test-result result)
           (gosh-test--highilght-errors-if-possible errors))))))
 
 (defun gosh-test--close-process (proc)
@@ -4245,10 +4261,10 @@ And print value in the echo area.
 (defun gosh-test--initialize ()
   (add-to-list 'gosh-mode-line-process
                '(t gosh-test--modeline-format))
-  (gosh-test--reset-result)
-  (add-hook 'gosh-mode-timer-functions 
+  (gosh-test--reset)
+  (add-hook 'gosh-mode-timer-functions
             'gosh-test--update-modeline nil t)
-  (add-hook 'after-save-hook 
+  (add-hook 'after-save-hook
             'gosh-test--update-modeline nil t))
 
 
