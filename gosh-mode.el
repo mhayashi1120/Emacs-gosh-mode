@@ -190,30 +190,30 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
    ))
 
 ;; bound only `let' form
-(defvar gosh-delegate-command)
-(defun gosh-delegate-command-get (index)
-  ;; When debugging gosh-mode, execute function (ex: `eval-expression')
-  ;; make unbound variable error.
-  (let ((command (if (and gosh-debug
-                          (not (boundp 'gosh-delegate-command)))
-                     (gosh-current-executable)
-                   gosh-delegate-command)))
-    (nth index (assoc command gosh-command-alist))))
+;; (defvar gosh-delegate-command)
+;; (defun gosh-delegate-command-get (index)
+;;   ;; When debugging gosh-mode, execute function (ex: `eval-expression')
+;;   ;; make unbound variable error.
+;;   (let ((command (if (and gosh-debug
+;;                           (not (boundp 'gosh-delegate-command)))
+;;                      (gosh-current-executable)
+;;                    gosh-delegate-command)))
+;;     (nth index (assoc command gosh-command-alist))))
 
-(defun gosh-delegate-version ()
-  (gosh-delegate-command-get 1))
-(defun gosh-delegate-repo-path ()
-  (gosh-delegate-command-get 2))
-(defun gosh-delegate-load-path ()
-  (gosh-delegate-command-get 3))
-(defun gosh-delegate-command-type ()
-  (gosh-delegate-command-get 4))
-(defun gosh-delegate-path-separator ()
-  (gosh-delegate-command-get 5))
-(defun gosh-delegate-path-g2e ()
-  (gosh-delegate-command-get 6))
-(defun gosh-delegate-path-e2g ()
-  (gosh-delegate-command-get 7))
+;; (defun gosh-delegate-version ()
+;;   (gosh-delegate-command-get 1))
+;; (defun gosh-delegate-repo-path ()
+;;   (gosh-delegate-command-get 2))
+;; (defun gosh-delegate-load-path ()
+;;   (gosh-delegate-command-get 3))
+;; (defun gosh-delegate-command-type ()
+;;   (gosh-delegate-command-get 4))
+;; (defun gosh-delegate-path-separator ()
+;;   (gosh-delegate-command-get 5))
+;; (defun gosh-delegate-path-g2e ()
+;;   (gosh-delegate-command-get 6))
+;; (defun gosh-delegate-path-e2g ()
+;;   (gosh-delegate-command-get 7))
 
 (defun gosh-register-command (command)
   (let* ((full (gosh--check-command command)))
@@ -246,7 +246,8 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
   "Switch gosh command (ex: trunk <-> release)"
   (interactive
    (let ((command (completing-read
-                   "Command: " gosh-command-alist nil nil
+                   (format "Command %s -> " gosh-default-command-internal)
+                   gosh-command-alist nil nil
                    gosh-default-command-internal)))
      (list command)))
   (gosh-default-initialize command))
@@ -482,7 +483,8 @@ else insert top level of the script.
        ((re-search-forward "^ *\\((use\\_>\\)" nil t) ; first `use' statements
         (goto-char (match-beginning 1))
         (gosh--insert-import-statement module))
-       ((re-search-forward (format "^ *(define-module %s\\_>" cm) nil t)
+       ((let ((regexp (format "^ *(define-module[ \t]+%s[ \n\t]" (regexp-quote cm))))
+          (re-search-forward regexp nil t))
         (forward-line 1)
         (gosh--insert-import-statement module))
        ((re-search-forward "^ *(" nil t) ; first statement
@@ -702,6 +704,7 @@ Arg FORCE non-nil means forcely insert bracket."
     (cond *)
     (cond-list *)
     (guard (gosh-symbol-p *))
+    (syntax-rules t *)
 
     (match t *)
     (match-lambda *)
@@ -967,14 +970,15 @@ Evaluate s-expression, syntax check, test-module, etc."
 ;;;###autoload
 (define-derived-mode gosh-mode scheme-mode "Gosh"
   "Major mode for Gauche programming."
-  ;; for emacs 24
-  (if (boundp 'syntax-propertize-function)
-      (set (make-local-variable 'syntax-propertize-function)
-           'gosh-syntax-table-apply-region)
-    (set (make-local-variable 'font-lock-syntactic-keywords)
-         (append
-          font-lock-syntactic-keywords
-          gosh-font-lock-syntactic-keywords)))
+  (if (boundp 'font-lock-syntactic-keywords)
+      (set (make-local-variable 'font-lock-syntactic-keywords)
+           (append
+            font-lock-syntactic-keywords
+            gosh-font-lock-syntactic-keywords))
+    ;; FIXME:
+    ;;  must change to use `syntax-propertize-function' after 24.1
+    (set (make-local-variable 'syntax-propertize-function)
+         'gosh-syntax-table-apply-region))
   (set (make-local-variable 'after-change-functions)
        'gosh-after-change-function)
   ;;TODO cancel-timer after kill all gosh-mode
@@ -1133,17 +1137,18 @@ Evaluate s-expression, syntax check, test-module, etc."
     ))
 
 (defun gosh-syntax-table-apply-region (start end)
-  (let ((modified (buffer-modified-p))
-        buffer-read-only)
-    (save-excursion
-      (save-restriction
-        (narrow-to-region start end)
-        (goto-char (point-min))
-        (while (re-search-forward "#/" nil t)
-          (let ((beg (match-beginning 0)))
-            (when (gosh-context-code-p beg)
-              (gosh-syntax-table-set-properties beg))))))
-    (set-buffer-modified-p modified)))
+  (let ((modified (buffer-modified-p)))
+    (unwind-protect
+        (save-excursion
+          (save-restriction
+            (narrow-to-region start end)
+            (goto-char (point-min))
+            (let ((inhibit-read-only t))
+              (while (re-search-forward "#/" nil t)
+                (let ((beg (match-beginning 0)))
+                  (when (gosh-context-code-p beg)
+                    (gosh-syntax-table-set-properties beg)))))))
+      (set-buffer-modified-p modified))))
 
 (defun gosh-syntax-table-put-property (beg end value)
   (put-text-property beg end 'syntax-table value (current-buffer)))
@@ -1304,8 +1309,9 @@ TODO but not supported with-module context."
      (setq gosh-snatch-filter-candidates t))))
 
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; eldoc
+;;;
+;;; eldoc
+;;;
 
 (defconst gosh-eldoc--cached-data (make-vector 3 nil))
 
@@ -1372,8 +1378,8 @@ Set this variable before open by `gosh-mode'."
     ;; * (lambda args)
     ;; * (lambda (:rest args))
     (unless target-exp
-      (gosh-aif (gosh-eldoc--sexp-rest-arg real-sexp)
-          (setq target-exp it)))
+      (gosh-if-let1 it (gosh-eldoc--sexp-rest-arg real-sexp)
+        (setq target-exp it)))
     (concat "("
             (mapconcat
              'identity
@@ -1615,14 +1621,15 @@ Set this variable before open by `gosh-mode'."
     "Some of ( Parameter | Alias | Dynamic loaded procedure )")))
 
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; utilities
+;;;
+;;; utilities
+;;;
 
-(defmacro gosh-aif (test-form then-form &rest else-forms)
+(defmacro gosh-if-let1 (var expr then &rest else)
   "Anaphoric if. Temporary variable `it' is the result of test-form."
   (declare (indent 2))
-  `(let ((it ,test-form))
-     (if it ,then-form ,@else-forms)))
+  `(let ((,var ,expr))
+     (if ,var ,then ,@else)))
 
 (defun gosh-goto-line (line)
   (save-restriction
@@ -1677,8 +1684,9 @@ Set this variable before open by `gosh-mode'."
 
 
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; alist, list utilities
+;;;
+;;; alist, list utilities
+;;;
 
 (defun gosh-put-alist (key value alist)
   "Set cdr of an element (KEY . ...) in ALIST to VALUE and return ALIST.
@@ -1765,8 +1773,9 @@ This function come from apel"
   (and (consp ls) (car ls)))
 
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; string utilities
+;;;
+;;; string utilities
+;;;
 
 (defun gosh-string-starts-with (pref str)
   (let ((p-len (length pref))
@@ -1775,8 +1784,9 @@ This function come from apel"
          (equal pref (substring str 0 p-len)))))
 
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; file utilities
+;;;
+;;; file utilities
+;;;
 
 (defun gosh-any-file-in-path (file path)
   (car (gosh-filter
@@ -1876,14 +1886,23 @@ referenced mew-complete.el"
     (setq gosh-momentary-message-overlay ov)))
 
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Parse buffer
+;;;
+;;; Parse buffer
+;;;
 
 (defun gosh-context-string-p (&optional point)
   (save-excursion
     (let ((context (parse-partial-sexp (point-min) (or point (point)))))
-      (when (and context (nth 3 context))
-        (cons (nth 3 context) (nth 8 context))))))
+      (cond
+       ((and context (nth 3 context))
+        ;; handling gauche extend definition
+        (let ((beg (nth 8 context)))
+          (goto-char beg)
+          (when (looking-back "#`?")
+            (setq beg (match-beginning 0)))
+          (cons (nth 3 context) beg)))
+       ((looking-back "#`?")
+        (cons ?\" (match-beginning 0)))))))
 
 (defun gosh-context-comment-p (&optional point)
   (save-excursion
@@ -3767,8 +3786,11 @@ PROCEDURE-SYMBOL ::= symbol
   (let* ((command gosh-default-command-internal)
          (proc (gosh-backend-active-process command)))
     (unless proc
-      (let* ((buffer (gosh-backend-process-buffer command)))
+      (let* ((buffer (gosh-backend-process-buffer command))
+             (dir default-directory))
         (with-current-buffer buffer
+          (unless (file-directory-p default-directory)
+            (cd dir))
           (setq proc (start-process "Gosh backend" buffer command "-i"))
           (set-process-filter proc 'gosh-backend-process-filter)
           (gosh-set-alist 'gosh-backend-process-alist command proc)

@@ -137,8 +137,11 @@
 (add-to-list 'auto-mode-alist
              '("\\.scm\\(?:\\.[0-9]+\\)?$" . gosh-mode))
 
+;; stub rarely used, so not `require'.
+(autoload 'gosh-stub-mode "gosh-stub" nil t)
+
 (add-to-list 'auto-mode-alist
-             '("\\.stub\\(?:\\.[0-9]+\\)?$" . scheme-mode))
+             '("\\.stub\\(?:\\.[0-9]+\\)?$" . gosh-stub-mode))
 
 (add-hook 'gosh-mode-hook
           (lambda ()
