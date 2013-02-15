@@ -156,7 +156,8 @@
             (turn-on-eldoc-mode)))
 
 (when (featurep 'auto-highlight-symbol)
-  (add-to-list 'ahs-modes 'gosh-mode))
+  (add-to-list 'ahs-modes 'gosh-mode)
+  (add-to-list 'ahs-modes 'gosh-stub-mode))
 
 
 

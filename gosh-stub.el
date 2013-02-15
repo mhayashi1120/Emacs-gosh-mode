@@ -3,11 +3,7 @@
 ;; * 
 
 
-;;;###autoload
-(define-derived-mode gosh-stub-mode scheme-mode
-  "Gosh Stub"
-  (use-local-map gosh-stub-mode-map)
-  (run-mode-hooks 'gosh-stub-mode-hook))
+(require 'gosh-mode)
 
 ;; TODO
 ;; * To construct keyword search following keyword
@@ -109,6 +105,12 @@
     (define-key map "[" 'gosh-opening-insert-bracket)
 
     (setq gosh-stub-mode-map map)))
+
+;;;###autoload
+(define-derived-mode gosh-stub-mode scheme-mode
+  "Gosh Stub"
+  (use-local-map gosh-stub-mode-map)
+  (run-mode-hooks 'gosh-stub-mode-hook))
 
 ;;TODO goto gosh-mode.el
 (gosh-info-lookup-add-help 'gosh-stub-mode)
