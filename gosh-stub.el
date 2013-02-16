@@ -2,6 +2,8 @@
 ;;;TODO:
 ;; * 
 
+(eval-when-compile
+  (require 'cl))
 
 (require 'gosh-mode)
 
@@ -71,23 +73,60 @@
         (erase-buffer)))
     buf))
 
-(defun gosh-stub-genstub ()
-  (interactive)
-  (when (and (buffer-modified-p)
-             (y-or-n-p "Save buffer? "))
-    (save-buffer))
-  (let ((default-directory (file-name-directory buffer-file-name))
-        (name (file-name-nondirectory buffer-file-name)))
-    (message "Compiling %s..." name)
-    (let ((buf (gosh-stub--process-buffer)))
-      (unless (= (call-process gosh-default-command-internal
-                               nil buf nil
-                               gosh-stub-genstub-script
-                               name) 0)
-        (save-selected-window
-          (pop-to-buffer buf)
-          (error "genstub failed"))))
-    (message "%s done."(current-message))))
+(defun gosh-stub-scheme-name->c-name (deftype libname name)
+  (setq name (replace-regexp-in-string "-" "_" name))
+  (cond
+   ((string= deftype "define-cproc")
+    (format "%s_%s" libname name))
+   ((string= deftype "define-cfn")
+    name)
+   (t name)))
+
+(defun gosh-stub-stub-file->libname (stubfile)
+  (let ((basename (file-name-nondirectory stubfile)))
+    (and (string-match "^\\(.+\\)\\.stub$" basename)
+         (match-string 1 basename))))
+
+(defun gosh-stub-current-defname ()
+  (save-excursion
+    (cond
+     ((re-search-backward "^[ \t]*(\\(define-[^ \t]+\\)[ \t]+\\([^ \t]+\\)" nil t)
+      (list (match-string-no-properties 1)
+            (match-string-no-properties 2)))
+     (t nil))))
+
+(defun gosh-stub--popup-cdefine (sfile &optional def)
+  (let* ((libname (gosh-stub-stub-file->libname sfile))
+         (cfile (expand-file-name (format "%s.c" libname) default-directory))
+         (cbuffer (get-file-buffer cfile))
+         (existsp cbuffer)
+         (cbuffer (or cbuffer (find-file-noselect cfile)))
+         (swin (selected-window))
+         pos)
+    (with-current-buffer cbuffer
+      (when existsp
+        (revert-buffer nil t))
+      (setq pos
+            (catch 'done
+              (cond
+               ((null def)
+                (point-min))
+               (t
+                (destructuring-bind (deftype sname) def
+                  (let ((cname (gosh-stub-scheme-name->c-name deftype libname sname)))
+                    (goto-char (point-min))
+                    (let ((regexp (format "^static .*\\_<%s\\_>" (regexp-quote cname))))
+                      (when (re-search-forward regexp nil t)
+                        (throw 'done (line-beginning-position))))
+                    (when (re-search-forward (format "\\_<%s\\_>" (regexp-quote cname)) nil t)
+                      (throw 'done (line-beginning-position)))))
+                ;; default
+                (point-min))))))
+    (let ((cwin (selected-window)))
+      (pop-to-buffer cbuffer)
+      (set-window-start cwin pos)
+      (goto-char pos))
+    (select-window swin)))
 
 (defvar gosh-stub-mode-map nil)
 
@@ -111,6 +150,33 @@
   "Gosh Stub"
   (use-local-map gosh-stub-mode-map)
   (run-mode-hooks 'gosh-stub-mode-hook))
+
+(defun gosh-stub-genstub ()
+  (interactive)
+  (when (and (buffer-modified-p)
+             (y-or-n-p "Save buffer? "))
+    (save-buffer))
+  (let ((file buffer-file-name)
+        (def (gosh-stub-current-defname)))
+    (gosh-stub-genstub-maybe file)
+    (gosh-stub--popup-cdefine file def)))
+
+(defun gosh-stub-genstub-maybe (sfile)
+  (let* ((libname (gosh-stub-stub-file->libname sfile))
+         (default-directory (file-name-directory sfile))
+         (name (file-name-nondirectory buffer-file-name))
+         (cfile (format "%s.c" libname)))
+    (when (file-newer-than-file-p sfile cfile)
+      (message "Compiling %s..." name)
+      (let ((buf (gosh-stub--process-buffer)))
+        (unless (= (call-process gosh-default-command-internal
+                                 nil buf nil
+                                 gosh-stub-genstub-script
+                                 name) 0)
+          (save-selected-window
+            (pop-to-buffer buf)
+            (error "genstub failed"))))
+      (message "%s done."(current-message)))))
 
 ;;TODO goto gosh-mode.el
 (gosh-info-lookup-add-help 'gosh-stub-mode)
