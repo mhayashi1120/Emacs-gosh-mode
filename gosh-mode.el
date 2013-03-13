@@ -4,7 +4,7 @@
 ;; Keywords: lisp gauche scheme edit
 ;; URL: https://github.com/mhayashi1120/Emacs-gosh-mode/raw/master/gosh-mode.el
 ;; Emacs: GNU Emacs 22 or later
-;; Version: 0.2.1
+;; Version: 0.2.2
 
 ;; This program is free software; you can redistribute it and/or
 ;; modify it under the terms of the GNU General Public License as
@@ -3870,7 +3870,9 @@ PROCEDURE-SYMBOL ::= symbol
 
 (defun gosh-send-last-sexp ()
   "Send the previous sexp to the sticky backend process.
-That sexp evaluated at current module"
+That sexp evaluated at current module. The module may not be loaded.
+Execute \\[gosh-eval-buffer] if you certain the buffer is a reliable code.
+"
   (interactive)
   (gosh-eval--check-backend)
   (if (gosh-parse-last-expression-define-p)
@@ -4109,8 +4111,12 @@ And print value in the echo area.
                               (re-search-forward (format "\\_<\\(%s\\)\\_>" lreg) nil t))
                      (setq beg (match-beginning 1))
                      (setq fin (match-end 1)))
-                   (flymake-make-overlay
-                    beg fin msg 'flymake-errline 'flymake-errline)))))))
+                   (condition-case err
+                       (flymake-make-overlay
+                        beg fin msg 'flymake-errline 'flymake-errline)
+                     (error
+                      (flymake-make-overlay
+                       beg fin msg 'flymake-errline 'flymake-errline nil)))))))))
 
 (defun gosh-test--update-modeline ()
   (let* ((prev-module (gosh-mode-get :tested-module))
