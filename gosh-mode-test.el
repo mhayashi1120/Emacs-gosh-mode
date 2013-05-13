@@ -13,7 +13,7 @@
      ,@forms))
 
 (ert-deftest gosh-reader-general-0001 ()
-  :tags '(gosh)
+  :tags '(gosh-mode)
 
   ;;; general
   (should-error (gosh-reader-read-string "") :type 'end-of-file)
@@ -85,7 +85,7 @@
       (funcall parenthese 2)
       (should (equal (gosh-opening--parse-current-context) `(case a *)))
       (forward-char)
-      (should (equal (gosh-opening--parse-current-context) `(case a [*]))))))
+      (should (equal (gosh-opening--parse-current-context) `(case a (*)))))))
 
 (ert-deftest gosh-mode-test--with-bracket ()
   :tags '(gosh-mode)

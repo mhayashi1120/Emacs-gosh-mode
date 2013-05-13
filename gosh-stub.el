@@ -154,6 +154,9 @@
 
     (setq gosh-stub-mode-syntax-table table)))
 
+(defvar gosh-stub-mode-abbrev-table nil)
+(define-abbrev-table 'gosh-stub-mode-abbrev-table ())
+
 ;;;###autoload
 (define-derived-mode gosh-stub-mode scheme-mode
   "Gosh Stub"
