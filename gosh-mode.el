@@ -2124,7 +2124,7 @@ referenced mew-complete.el"
      ((eq begin ?\[)
       ;; Introduces a literal character set.
       (list 'charset (gosh-reader--read-by-regexp
-                      "\\[\\(\\(?:\\[[^\[]+\\]\\|\\\\.\\|[^\]]\\)*\\)\\]" 1)))
+                      "\\[\\(\\(?:\\[[^\[]+?\\]\\|\\\\.\\|[^\]]\\)*?\\)\\]" 1)))
      ((eq begin ?\\)
       ;; Introduces a literal character.
       (gosh-reader--read-char))
