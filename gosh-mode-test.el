@@ -12,6 +12,52 @@
      (insert ,code)
      ,@forms))
 
+(ert-deftest gosh-reader-general-0001 ()
+  :tags '(gosh)
+
+  ;;; general
+  (should-error (gosh-reader-read-string "") :type 'end-of-file)
+  ;; bracket same as list (Not like a Emacs vector)
+  (should (equal (gosh-reader-read-string "[1 2]") '((1 2) . 5)))
+  (should (equal (gosh-reader-read-string "(1 2 . 3)") '((1 2 . 3) . 9)))
+  (should-error (gosh-reader-read-string "(1 2 . 3 . )") :type 'invalid-read-syntax)
+  (should-error (gosh-reader-read-string "(.)") :type 'invalid-read-syntax)
+
+  ;;; symbol
+  (should (equal (gosh-reader-read-string "a") '(a . 1)))
+
+  ;;; number
+  (should (equal (gosh-reader-read-string "1") '(1 . 1)))
+  ;; overflow Emacs integer
+  (should (equal (gosh-reader-read-string "100000000000000000000") '((number "100000000000000000000") . 21)))
+
+  ;;; vector
+  (should (equal (gosh-reader-read-string "#(a b)") '([a b] . 6)))
+  (should (equal (gosh-reader-read-string "#u8(1 2)") '((u8 [1 2]) . 8)))
+  (should (equal (gosh-reader-read-string "#u8(a)") '((u8 [a]) . 6)))
+  (should (equal (gosh-reader-read-string "#u8()") '((u8 []) . 5)))
+
+  ;;TODO u*vector
+
+  ;;; char
+  (should (equal (gosh-reader-read-string "#\\newline") '((char 10) . 9)))
+
+  ;;; charset
+  (should (equal (gosh-reader-read-string "#[1]") '((charset "1") . 4)))
+  (should (equal (gosh-reader-read-string "#[b[:alpha:]a]") '((charset "b[:alpha:]a") . 14)))
+  (should (equal (gosh-reader-read-string "#[]") '((charset "") . 3)))
+
+  ;;TODO
+  ;; (should-error (gosh-reader-read-string "(1 .  )") :type 'invalid-read-syntax)
+  (should (equal (gosh-reader-read-string "\"hoge\"") '("hoge" . 6)))
+  (should (equal (gosh-reader-read-string "'(1 2 3)") '((quote (1 2 3)) . 8)))
+  (should (equal (gosh-reader-read-string "`(1 2)") '((quote (1 2)) . 6)))
+  (should (equal (gosh-reader-read-string ",(1 2)") '((unquote (1 2)) . 6)))
+  
+  ;;TODO what should i do?
+  (should (equal (gosh-reader-read-string "||")  '(## . 2)))
+  )
+
 (ert-deftest gosh-mode-test--parse-current-context ()
   :tags '(gosh-mode)
 

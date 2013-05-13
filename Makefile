@@ -17,7 +17,7 @@ VERSION = 0.2.1
 
 RELEASE_FILES = \
 	gosh-mode.el gosh-config.el gosh-const.el \
-	gosh-mode-test.el gosh-mode-make.el \
+	gosh-mode-test.el gosh-mode-make.el gosh-stub.el \
 	MAKE-CFG.el Makefile \
 	README
 

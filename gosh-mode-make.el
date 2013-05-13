@@ -16,6 +16,7 @@
        "gosh-config.el"
        "gosh-mode.el"
        "gosh-const.el"
+       "gosh-stub.el"
        ))
 
 ;; (when (memq system-type '(windows-nt))

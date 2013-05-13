@@ -122,10 +122,10 @@
                       (throw 'done (line-beginning-position)))))
                 ;; default
                 (point-min))))))
+    (pop-to-buffer cbuffer)
     (let ((cwin (selected-window)))
-      (pop-to-buffer cbuffer)
-      (set-window-start cwin pos)
-      (goto-char pos))
+      (set-window-start cwin pos))
+    (goto-char pos)
     (select-window swin)))
 
 (defvar gosh-stub-mode-map nil)
@@ -144,6 +144,15 @@
     (define-key map "[" 'gosh-opening-insert-bracket)
 
     (setq gosh-stub-mode-map map)))
+
+(defvar gosh-stub-mode-syntax-table nil)
+(unless gosh-stub-mode-syntax-table
+
+  (let ((table (copy-syntax-table scheme-mode-syntax-table)))
+
+    (modify-syntax-entry ?: "." table)
+
+    (setq gosh-stub-mode-syntax-table table)))
 
 ;;;###autoload
 (define-derived-mode gosh-stub-mode scheme-mode
@@ -178,7 +187,7 @@
             (error "genstub failed"))))
       (message "%s done."(current-message)))))
 
-;;TODO goto gosh-mode.el
-(gosh-info-lookup-add-help 'gosh-stub-mode)
+;;TODO prepare for gauche-dev
+;; (gosh-info-lookup-add-help 'gosh-stub-mode)
 
 (provide 'gosh-stub)
