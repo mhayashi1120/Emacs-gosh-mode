@@ -721,22 +721,23 @@ Arg FORCE non-nil means forcely insert bracket."
 
 ;; `*' point to the cursor position.
 (defun gosh-opening--context-bracket-p (context)
-  (flet ((match-to
-          (def args)
-          (loop for a1 in def
-                for a2 on args
-                if (eq a1 '*)
-                return (member a1 a2)
-                else if (listp a1)
-                return (match-to a1 (car a2))
-                else if (and (functionp a1)
-                             (not (funcall a1 (car a2))))
-                return nil)))
-    (let ((proc (car context)) (args (cdr context)))
-      (loop for (def-name . def-args) in gosh-opening--auto-bracket-alist
-            if (and (eq def-name proc)
-                    (match-to def-args args))
-            return t))))
+  (let (match-to)
+    (let ((match-to
+          (lambda (def args)
+            (loop for a1 in def
+                  for a2 on args
+                  if (eq a1 '*)
+                  return (member a1 a2)
+                  else if (listp a1)
+                  return (funcall match-to a1 (car a2))
+                  else if (and (functionp a1)
+                               (not (funcall a1 (car a2))))
+                  return nil))))
+      (let ((proc (car context)) (args (cdr context)))
+        (loop for (def-name . def-args) in gosh-opening--auto-bracket-alist
+              if (and (eq def-name proc)
+                      (funcall match-to def-args args))
+              return t)))))
 
 (defun gosh-opening--bracket-p ()
   ;; retry 5 count backward current sexp
@@ -970,6 +971,9 @@ Evaluate s-expression, syntax check, test-module, etc."
 (defvar gosh-mode--context nil)
 (make-variable-buffer-local 'gosh-mode--context)
 (put 'gosh-mode--context 'risky-local-variable t)
+
+(defvar gosh-mode-abbrev-table nil)
+(define-abbrev-table 'gosh-mode-abbrev-table ())
 
 ;;;###autoload
 (define-derived-mode gosh-mode scheme-mode "Gosh"
@@ -2120,7 +2124,7 @@ referenced mew-complete.el"
      ((eq begin ?\[)
       ;; Introduces a literal character set.
       (list 'charset (gosh-reader--read-by-regexp
-                      "\\[\\(\\(?:\\[[^\[]+\\]\\|\\\\.\\|[^\]]\\)*\\)\\]" 1)))
+                      "\\[\\(\\(?:\\[[^\[]+?\\]\\|\\\\.\\|[^\]]\\)*?\\)\\]" 1)))
      ((eq begin ?\\)
       ;; Introduces a literal character.
       (gosh-reader--read-char))

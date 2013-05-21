@@ -13,7 +13,7 @@
      ,@forms))
 
 (ert-deftest gosh-reader-general-0001 ()
-  :tags '(gosh)
+  :tags '(gosh-mode)
 
   ;;; general
   (should-error (gosh-reader-read-string "") :type 'end-of-file)
@@ -45,6 +45,8 @@
   ;;; charset
   (should (equal (gosh-reader-read-string "#[1]") '((charset "1") . 4)))
   (should (equal (gosh-reader-read-string "#[b[:alpha:]a]") '((charset "b[:alpha:]a") . 14)))
+  (should (equal (gosh-reader-read-string "#[[:graph:]]") '((charset "b[:alpha:]a") . 14)))
+  
   (should (equal (gosh-reader-read-string "#[]") '((charset "") . 3)))
 
   ;;TODO
@@ -56,6 +58,8 @@
   
   ;;TODO what should i do?
   (should (equal (gosh-reader-read-string "||")  '(## . 2)))
+
+  ;;TODO consider greedy regexp search testing
   )
 
 (ert-deftest gosh-mode-test--parse-current-context ()
@@ -85,7 +89,7 @@
       (funcall parenthese 2)
       (should (equal (gosh-opening--parse-current-context) `(case a *)))
       (forward-char)
-      (should (equal (gosh-opening--parse-current-context) `(case a [*]))))))
+      (should (equal (gosh-opening--parse-current-context) `(case a (*)))))))
 
 (ert-deftest gosh-mode-test--with-bracket ()
   :tags '(gosh-mode)

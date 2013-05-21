@@ -13,6 +13,17 @@
    (shell-command-to-string
     (format "find %s \\( -name .\\?\\* -prune -or -true \\) -type f -name \\*.scm" dir)) "\n" t))
 
+(defun gosh-dev--check-reader (file)
+  (condition-case err
+      (with-temp-buffer
+        (insert-file-contents file)
+        (goto-char (point-min))
+        (while (not (eobp))
+          (gosh-reader-read)
+          (gosh-reader--ignore)))
+    (error 
+     (insert (format "File: %s Error: %s\n" file err)))))
+
 
 
 ;;TODO remove duplicated values *gosh-scheme-srfi-info*
