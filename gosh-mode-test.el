@@ -12,52 +12,83 @@
      (insert ,code)
      ,@forms))
 
+(defun gosh-test-read-just-a (string)
+  (car-safe (gosh-read-from-string string)))
+
 (ert-deftest gosh-reader-general-0001 ()
   :tags '(gosh-mode)
 
   ;;; general
-  (should-error (gosh-reader-read-string "") :type 'end-of-file)
+  (should-error (gosh-test-read-just-a "") :type 'end-of-file)
   ;; bracket same as list (Not like a Emacs vector)
-  (should (equal (gosh-reader-read-string "[1 2]") '((1 2) . 5)))
-  (should (equal (gosh-reader-read-string "(1 2 . 3)") '((1 2 . 3) . 9)))
-  (should-error (gosh-reader-read-string "(1 2 . 3 . )") :type 'invalid-read-syntax)
-  (should-error (gosh-reader-read-string "(.)") :type 'invalid-read-syntax)
+  (should (equal (gosh-test-read-just-a "[1 2]") '(1 2)))
+  (should (equal (gosh-test-read-just-a "(1 2 . 3)") '(1 2 . 3)))
+  (should-error (gosh-test-read-just-a "(1 2 . 3 . )") :type 'invalid-read-syntax)
+  (should-error (gosh-test-read-just-a "(.)") :type 'invalid-read-syntax)
+
+  ;;; string
+  (should (equal (gosh-test-read-just-a "\"a\"") "a"))
+  (should (equal (gosh-test-read-just-a "\"\"") ""))
+  (should (equal (gosh-test-read-just-a "#`\"\"") ""))
+  (should (equal (gosh-test-read-just-a "#`\",(abcd)\"") ",(abcd)"))
 
   ;;; symbol
-  (should (equal (gosh-reader-read-string "a") '(a . 1)))
+  (should (equal (gosh-test-read-just-a "a") 'a))
+  (should (equal (gosh-test-read-just-a "#:a") [uninterned-symbol "a"]))
 
   ;;; number
-  (should (equal (gosh-reader-read-string "1") '(1 . 1)))
+  (should (equal (gosh-test-read-just-a "1") 1))
   ;; overflow Emacs integer
-  (should (equal (gosh-reader-read-string "100000000000000000000") '((number "100000000000000000000") . 21)))
+  (should (equal (gosh-test-read-just-a "100000000000000000000") [number "100000000000000000000"]))
 
   ;;; vector
-  (should (equal (gosh-reader-read-string "#(a b)") '([a b] . 6)))
-  (should (equal (gosh-reader-read-string "#u8(1 2)") '((u8 [1 2]) . 8)))
-  (should (equal (gosh-reader-read-string "#u8(a)") '((u8 [a]) . 6)))
-  (should (equal (gosh-reader-read-string "#u8()") '((u8 []) . 5)))
+  (should (equal (gosh-test-read-just-a "#(a b)") [vector [a b]]))
+  (should (equal (gosh-test-read-just-a "#u8(1 2)") [u8vector [1 2]]))
+  (should (equal (gosh-test-read-just-a "#u8(a)") [u8vector [a]]))
+  (should (equal (gosh-test-read-just-a "#u8()") [u8vector []]))
 
-  ;;TODO u*vector
+  ;; modifing reader behavior
+  (should (equal (gosh-test-read-just-a "#!fold-caseABCD A") 'A))
+  (should (equal (gosh-test-read-just-a "#!fold-case ABCD") 'abcd))
+  (should (equal (with-temp-buffer
+                   (insert "#!fold-case ABCD #!no-fold-case ABCD")
+                   (goto-char (point-min))
+                   (list (gosh-read) (gosh-read))) '(abcd ABCD)))
+  (should (equal (with-temp-buffer
+                   (insert "#!fold-case ABCD ABCD")
+                   (goto-char (point-min))
+                   (list (gosh-read) (gosh-read))) '(abcd abcd)))
+
+  ;; test/srfi.scm nested comment
+  (should (equal (gosh-test-read-just-a "#|##|###|#|||#### ||#|||||#|#1") 1))
 
   ;;; char
-  (should (equal (gosh-reader-read-string "#\\newline") '((char 10) . 9)))
+  (should (equal (gosh-test-read-just-a "#\\newline") [char 10]))
+
+  ;;; bool
+  (should (equal (gosh-test-read-just-a "#t") '\#t))
+  (should (equal (gosh-test-read-just-a "#f") '\#f))
 
   ;;; charset
-  (should (equal (gosh-reader-read-string "#[1]") '((charset "1") . 4)))
-  (should (equal (gosh-reader-read-string "#[b[:alpha:]a]") '((charset "b[:alpha:]a") . 14)))
-  (should (equal (gosh-reader-read-string "#[[:graph:]]") '((charset "b[:alpha:]a") . 14)))
+  (should (equal (gosh-test-read-just-a "#[1]") [charset "1"]))
+  (should (equal (gosh-test-read-just-a "#[b[:alpha:]a]") [charset "b[:alpha:]a"]))
+  (should (equal (gosh-test-read-just-a "#[[:graph:]]") [charset "[:graph:]"]))
   
-  (should (equal (gosh-reader-read-string "#[]") '((charset "") . 3)))
+  (should (equal (gosh-test-read-just-a "#[]") [charset ""]))
 
   ;;TODO
-  ;; (should-error (gosh-reader-read-string "(1 .  )") :type 'invalid-read-syntax)
-  (should (equal (gosh-reader-read-string "\"hoge\"") '("hoge" . 6)))
-  (should (equal (gosh-reader-read-string "'(1 2 3)") '((quote (1 2 3)) . 8)))
-  (should (equal (gosh-reader-read-string "`(1 2)") '((quote (1 2)) . 6)))
-  (should (equal (gosh-reader-read-string ",(1 2)") '((unquote (1 2)) . 6)))
+  ;; (should-error (gosh-test-read-just-a "(1 .  )") :type 'invalid-read-syntax)
+  (should (equal (gosh-test-read-just-a "\"hoge\"") "hoge"))
+  (should (equal (gosh-test-read-just-a "'(1 2 3)") '(quote (1 2 3))))
+  (should (equal (gosh-test-read-just-a "`(1 2)") '(quote (1 2))))
+  (should (equal (gosh-test-read-just-a ",(1 2)") [unquote (1 2)]))
+
+  (should (equal (gosh-test-read-just-a "(#3=(1 2) #3#)") '((1 2) [back-reference 3])))
+  (should (equal (gosh-test-read-just-a "#,(1 2)") '[reader-constructor (1 2)]))
   
   ;;TODO what should i do?
-  (should (equal (gosh-reader-read-string "||")  '(## . 2)))
+  (should (equal (gosh-test-read-just-a "||")  '##))
+
 
   ;;TODO consider greedy regexp search testing
   )

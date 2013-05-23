@@ -3,7 +3,7 @@
 ;; Author: Masahiro Hayashi <mhayashi1120@gmail.com>
 ;; Keywords: lisp gauche scheme edit
 ;; URL: https://github.com/mhayashi1120/Emacs-gosh-mode/raw/master/gosh-mode.el
-;; Emacs: GNU Emacs 22 or later
+;; Emacs: GNU Emacs 23 or later
 ;; Version: 0.2.3
 
 ;; This program is free software; you can redistribute it and/or
@@ -101,9 +101,449 @@
 (defvar gosh-debug nil)
 
 
+;;;
+;;; Gauche data <-> Emacs data
+;;;
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Basic settings
+;; list -> list
+;; number -> number or gosh-object[number]
+;; vector -> gosh-object[vector] 
+;; string -> string
+;; interporate-string -> string
+;; regexp -> gosh-object[regexp]
+
+(defun gosh-object-p (obj)
+  (and (vectorp obj) (= (length obj) 2)))
+
+(defun gosh-object-type (obj)
+  (aref obj 0))
+
+(defun gosh-object-value (obj)
+  (aref obj 1))
+
+(defun gosh-object (type value)
+  (case type
+    (char (vector 'char value))
+    (charset (vector 'charset value))
+    (number (vector 'number value))
+    (vector (vector 'vector value))
+    (regexp (vector 'regexp value))
+    ((u8vector u16vector u32vector u64vector
+               s8vector s16vector s32vector s64vector)
+     (vector type value))
+    (unquote (vector 'unquote value))
+    (uninterned-symbol (vector 'uninterned-symbol value))
+    (reader-constructor (vector 'reader-constructor value))
+    (back-reference (vector 'back-reference value))
+    (t (error "Not a supported type %s" type))))
+
+;;;
+;;; Gauche pseudo reader
+;;;
+
+;; TODO nested comment sample is trunk/test/srfi.scm
+
+;;TODO  etc
+(defconst gosh-reader--ws "\s\t\n\f")
+
+;; read.c ctypes[]
+(defconst gosh-reader--word-re
+  (let ((chars "][\000-\037\s\"'(),;\\`{|}\177"))
+    (format "\\(\\(?:\\\\.\\|[^%s]\\)+\\)"
+            chars)))
+
+(defconst gosh-reader--string-re "\"\\(\\(?:\\\\\.\\|[^\"]\\)*\\)\"")
+
+;; (with-input-from-string "#!fold-case ABCD\n ABCD"
+;;   (^() (read-line) (read)))
+;; => ABCD
+(defvar gosh-reader--fold-case nil)
+(make-variable-buffer-local 'gosh-reader--fold-case)
+
+(defun gosh-reader--ignore ()
+  (while (or (plusp (gosh-reader--skip-ws))
+             (plusp (gosh-reader--skip-comment))
+             (plusp (gosh-reader--skip-debug-macro))
+             (plusp (gosh-reader--skip-meta)))))
+
+(defun gosh-reader--skip-meta ()
+  (cond
+   ((looking-at "#![\s/]")
+    (gosh-reader--skip-to-match ".*\n"))
+   ((looking-at "#!")
+    (let ((start (point)))
+      (forward-char 2)
+      (let ((word (gosh-reader--read)))
+        (cond
+         ((eq word 'fold-case)
+          (setq gosh-reader--fold-case t))
+         ((eq word 'no-fold-case)
+          (setq gosh-reader--fold-case nil))
+         (t
+          ;; gauche reader show the message
+          ;; but this gosh-reader do not.
+          ))
+        (- (point) start))))
+   (t
+    0)))
+
+(defun gosh-reader--skip-debug-macro ()
+  (cond
+   ((looking-at "#\\?")
+    (goto-char (match-end 0))
+    (+ 2 (gosh-reader--skip-word)))
+   (t 0)))
+
+(defun gosh-reader--skip-ws ()
+  (skip-chars-forward gosh-reader--ws))
+
+(defun gosh-reader--skip-nested-comments ()
+  ;; already read first `#|'
+  (let ((nested 1)
+        (start (point)))
+    (while (> nested 0)
+      (cond
+       ((eobp)
+        (signal 'invalid-read-syntax '("todo")))
+       ((looking-at "#|")
+        (setq nested (1+ nested))
+        (forward-char 2))
+       ((looking-at "|#")
+        (setq nested (1- nested))
+        (forward-char 2))
+       (t
+        (forward-char))))
+    (- (point) start)))
+
+(defun gosh-reader--skip-comment ()
+  (cond
+   ((eq (char-after) ?\;)
+    (skip-chars-forward "^\n"))
+   ((looking-at "#|")
+    (goto-char (match-end 0))
+    (gosh-reader--skip-nested-comments))
+   ((looking-at "#;")
+    (let ((start (point)))
+      (goto-char (match-end 0))
+      (gosh-reader--read)
+      (- (point) start)))
+   (t
+    0)))
+
+(defun gosh-reader--skip-word ()
+  (let ((start (point)))
+    (when (looking-at gosh-reader--word-re)
+      (goto-char (match-end 0)))
+    (- (point) start)))
+
+(defun gosh-reader--skip-to-match (regexp)
+  (unless (looking-at regexp)
+    (signal 'invalid-read-syntax (list "TODO nothing to consume")))
+  (goto-char (match-end 0))
+  (length (match-string 0)))
+
+(defun gosh-reader--sharp-syntax ()
+  (forward-char)
+  (when (eobp)
+    (signal 'end-of-file nil))
+  (let ((begin (downcase (char-after))))
+    (cond
+     ((eq begin ?!)
+      ;; this context should have already been skipped.
+      (signal 'invalid-read-syntax `("Assert #!")))
+     ((eq begin ?\()
+      ;; vector
+      (gosh-object 'vector (vconcat (gosh-reader--read-list ?\)))))
+     ((eq begin ?*)
+      ;; If followed by a double quote, denotes an incomplete string.
+      (gosh-reader--read-bulk-string))
+     ((eq begin ?,)
+      ;; [SRFI-10] Introduces reader constructor syntax.
+      (forward-char)
+      (let ((sexp (gosh-reader--read)))
+        (gosh-object 'reader-constructor sexp)))
+     ((eq begin ?\/)
+      ;; regexp
+      (gosh-object 'regexp (gosh-reader--read-bulk-literal ?\/)))
+     ((memq begin '(?0 ?1 ?2 ?3 ?4 ?5 ?6 ?7 ?8 ?9))
+      ;; [SRFI-38] Shared substructure definition and reference.
+      (gosh-reader--read-reference))
+     ((eq begin ?:)
+      ;; Uninterned symbol.
+      (forward-char)
+      (unless (looking-at gosh-reader--word-re)
+        (signal 'invalid-read-syntax `("#:")))
+      (gosh-object 'uninterned-symbol (match-string-no-properties 1)))
+     ((eq begin ?\;)
+      ;; [SRFI-62] S-expression comment. Reads begin one S-expression and discard it.
+      ;; comment context should have already been skipped.
+      (signal 'invalid-read-syntax `("Assert #;")))
+     ((eq begin ?<)
+      ;; Introduces an unreadable object.
+      (signal 'invalid-read-syntax `("Unreadable object")))
+     ((eq begin ?\?)
+      ;; Introduces debug macros.
+      (signal 'invalid-read-syntax `("Debug macro")))
+     ((memq begin '(?b ?d ?e ?i ?o ?x))
+      ;; [R5RS] Binary number prefix.
+      ;; [R5RS] Decimal number prefix.
+      ;; [R5RS] Exact number prefix.
+      ;; [R5RS] Inexact number prefix.
+      ;; [R5RS] Octal number prefix.
+      ;; [R5RS] Hexadecimal number prefix.
+      (gosh-reader--read-number))
+     ((memq begin '(?t ?f))
+      (gosh-reader--read-boolean begin))
+     ((memq begin '(?u ?s))
+      ;; [SRFI-4] introducing SRFI-4 uniform vector.
+      ;; [SRFI-4] introducing SRFI-4 uniform vector.
+      (gosh-reader--read-vector))
+     ((eq begin ?\[)
+      ;; Introduces a literal character set.
+      (gosh-object 'charset
+                   (gosh-reader--read-by-regexp
+                    "\\[\\(\\(?:\\[[^\[]+?\\]\\|\\\\.\\|[^\]]\\)*?\\)\\]" 1)))
+     ((eq begin ?\\)
+      ;; Introduces a literal character.
+      (gosh-reader--read-char))
+     ((eq begin ?\`)
+      ;;Introduces an interpolated string.
+      (gosh-reader--read-bulk-string))
+     ((eq begin ?\|)
+      ;; [SRFI-30] Introduces a block comment.
+      ;; comment context should have already been skipped.
+      (signal 'invalid-read-syntax `("Assert #|")))
+     (t
+      (signal 'invalid-read-syntax `(,(format "#%c" begin)))))))
+
+(defconst gosh-reader--char-symbol-alist
+  '(
+    ("space"   . ?\s  )
+    ("newline" . ?\n  ) ("nl"      . ?\n  ) ("lf"      . ?\n  )
+    ("return"  . ?\r  ) ("cr"      . ?\r  )
+    ("tab"     . ?\t  ) ("ht"      . ?\t  )
+    ("page"    . ?\f  )
+    ("escape"  . ?\x1b) ("esc"     . ?\x1b)
+    ("delete"  . ?\x7f) ("del"     . ?\x7f)
+    ("null"    . ?\x00)
+    ))
+
+(defun gosh-reader--read-char ()
+  (unless (looking-at gosh-reader--word-re)
+    (signal 'invalid-read-syntax nil))
+  (goto-char (match-end 1))
+  (let ((text (substring (match-string-no-properties 1) 1))
+        tmp)
+    (gosh-object 'char
+                 (cond
+                  ((= (length text) 1)
+                   (string-to-char text))
+                  ((setq tmp (assoc text gosh-reader--char-symbol-alist))
+                   (cdr tmp))
+                  ((string-match "\\`[xX]\\([0-9a-fA-F]+\\)\\'" text)
+                   (string-to-number (match-string 1 text) 16))
+                  ((string-match "\\`[uU]\\([0-9a-fA-F]+\\)\\'" text)
+                   (string-to-number (match-string 1 text) 16))
+                  (t
+                   (signal 'invalid-read-syntax (list text)))))))
+
+(defun gosh-reader--read-vector ()
+  (unless (looking-at "\\([usUS]\\(?:8\\|16\\|32\\|64\\)\\)(")
+    (signal 'invalid-read-syntax nil))
+  (goto-char (match-end 1))
+  (let* ((vsize (downcase (match-string-no-properties 1)))
+         (vtype (intern (concat vsize "vector")))
+         (list (gosh-reader--read-list ?\))))
+    (gosh-object vtype (vconcat list))))
+
+(defun gosh-reader--read-number ()
+  (let ((start (point)))
+    (forward-char)
+    (unless (looking-at gosh-reader--word-re)
+      (signal 'invalid-read-syntax nil))
+    (goto-char (match-end 0))
+    (gosj-object 'number
+                 (format "#%s"
+                         (buffer-substring-no-properties start (point))))))
+
+(defun gosh-reader--read-boolean (char)
+  (forward-char)
+  (cond
+   ((eq char ?t)
+    (intern "#t"))
+   ((eq char ?f)
+    (intern "#f"))
+   (t (signal 'invalid-read-syntax `("Assert #" char)))))
+
+(defun gosh-reader--read-reference ()
+  (cond
+   ((looking-at "[0-9]+=")
+    (goto-char (match-end 0))
+    (gosh-reader--read))
+   ((looking-at "\\([0-9]+\\)#")
+    (goto-char (match-end 0))
+    (gosh-object 'back-reference (string-to-number (match-string-no-properties 1))))
+   (t
+    (signal 'invalid-read-syntax
+            (list "invalid reference form")))))
+
+(defun gosh-reader--read-bulk-literal (ending-char)
+  (let ((start (point))
+        (regexp (format "\\(\\(?:\\\\.\\|[^%c]\\)+%c\\)"
+                        ending-char ending-char)))
+    (forward-char)
+    (unless (looking-at regexp)
+      (signal 'invalid-read-syntax (list "todo msg")))
+    (goto-char (match-end 0))
+    (buffer-substring-no-properties start (point))))
+
+(defun gosh-reader--read-bulk-string ()
+  (forward-char)
+  (unless (looking-at gosh-reader--string-re)
+    ;;TODO msg
+    (signal 'invalid-read-syntax nil))
+  (goto-char (match-end 0))
+  (match-string-no-properties 1))
+
+;; TODO more sophisticate
+(defun gosh-reader--read-list (end &optional limit)
+  (forward-char)
+  (let ((res '())
+        (dot-ctx))
+    (catch 'done
+      (while t
+        (gosh-reader--ignore)
+        (when (eq (char-after) end)
+          (forward-char)
+          (cond
+           ((not dot-ctx)
+            (throw 'done (nreverse res)))
+           ((eq dot-ctx 'finish)
+            (throw 'done res))))
+        (when (and limit (>= (length res) limit))
+          (throw 'done (nreverse res)))
+        (when (eq dot-ctx 'finish)
+          (signal 'invalid-read-syntax (list "Invaild dot syntax")))
+        (let ((item (gosh-reader--read)))
+          (cond
+           ((eq '\. item)
+            (when (or dot-ctx (null res))
+              (signal 'invalid-read-syntax (list "Invalid dot syntax")))
+            (setq dot-ctx 'start))
+           ((eq dot-ctx 'start)
+            (setq res (append
+                       (nreverse (cdr res))
+                       (cons (car res) item)))
+            (setq dot-ctx 'finish))
+           (t
+            (setq res (cons item res)))))))))
+
+(defun gosh-reader--maybe-number (text)
+  (let ((n (string-to-number text)))
+    (cond
+     ;; only accept as emacs number if transeposable text.
+     ((equal (number-to-string n) text)
+      n)
+     ;; FIXME:
+     ;; only handle simple number format.
+     ((string-match "\\`[-+]?[0-9]+\\(\\.[0-9]+\\)?\\'" text)
+      (gosh-object 'number text))
+     (t nil))))
+
+(defun gosh-reader--word-to-datum (text)
+  (let ((n (gosh-reader--maybe-number text)))
+    (cond
+     (n n)
+     ((not gosh-reader--fold-case)
+      (intern text))
+     (t
+      (intern (downcase text))))))
+
+(defun gosh-reader--read-by-regexp (regexp subexp)
+  (unless (looking-at regexp)
+    (signal 'invalid-read-syntax (list "todo")))
+  (goto-char (match-end 0))
+  (match-string-no-properties subexp))
+
+(defun gosh-reader--read-escaped-symbol ()
+  (forward-char)
+  (unless (looking-at "\\(\\(?:\\\\.\\|[^|]\\)*\\)|")
+    (signal 'invalid-read-syntax (list "Not a escaped symbol")))
+  (goto-char (match-end 0))
+  (intern (match-string-no-properties 1)))
+
+;; TODO FIXME: reconsider 
+(defun gosh-reader--read ()
+  (gosh-reader--ignore)
+  (when (eobp)
+    (signal 'end-of-file nil))
+  (let ((next (char-after)))
+    (cond
+     ((eq next ?\()
+      (gosh-reader--read-list ?\)))
+     ((eq next ?\[)
+      (gosh-reader--read-list ?\]))
+     ((eq next ?#)
+      (gosh-reader--sharp-syntax))
+     ((eq next ?\|)
+      (gosh-reader--read-escaped-symbol))
+     ((eq next ?,)
+      (forward-char)
+      (when (eobp)
+        (signal 'end-of-file nil))
+      (gosh-object 'unquote (gosh-reader--read)))
+     ((memq next '(?\' ?\`))            ; ignore differences ' and `
+      (forward-char)
+      (list 'quote (gosh-reader--read)))
+     ((eq next ?\")
+      (unless (looking-at gosh-reader--string-re)
+        (signal 'invalid-read-syntax (list "Non terminated string")))
+      (goto-char (match-end 0))
+      (match-string-no-properties 1))
+     ((looking-at gosh-reader--word-re)
+      (goto-char (match-end 0))
+      (gosh-reader--word-to-datum (match-string-no-properties 1)))
+     (t
+      (signal 'invalid-read-syntax nil)))))
+
+(defun gosh-read ()
+  (gosh-reader--read))
+
+;;TODO read-partial-list?
+(defun gosh-read-list (limit)
+  (gosh-reader--ignore)
+  (let ((next (char-after)))
+    (cond
+     ((eq next ?\()
+      (gosh-reader--read-list ?\) limit))
+     ((eq next ?\[)
+      (gosh-reader--read-list ?\] limit))
+     (t
+      (signal 'invalid-read-syntax nil)))))
+
+(defun gosh-read-from-string (string)
+  (let ((result (gosh-read-context-string string)))
+    (cons (nth 0 result) (nth 1 result))))
+
+(defun gosh-read-context-string (string &optional context)
+  (with-temp-buffer
+    (insert string)
+    (goto-char (point-min))
+    (mapc
+     (lambda (x)
+       (set (car x) (cdr x)))
+     context)
+    (list (gosh-read) (1- (point))
+          (delq nil (mapcar 
+                     (lambda (x)
+                       (and (string-match "\\`gosh-" (symbol-name (car-safe x)))
+                            x))
+                     (buffer-local-variables))))))
+
+
+;;;
+;;; Basic settings
+;;;
 
 (defcustom gosh-default-command "gosh"
   "Gauche program name."
@@ -221,7 +661,7 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
       (error "Unable recognize as gosh command"))
     (or (assoc full gosh-command-alist)
         (let* ((output (gosh--call-command->string full full "-V"))
-               (ver (when (string-match "version[ \t]+\\([0-9][0-9.]+\\)" output)
+               (ver (when (string-match "version[\s\t]+\\([0-9][0-9.]+\\)" output)
                       (match-string 1 output)))
                (type (cond
                       ((string-match "mingw32$" output) 'mingw32)
@@ -341,7 +781,7 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
   (interactive)
   (let* ((sym (gosh-parse-symbol-at-point)))
     (catch 'found
-      (when (assq sym (gosh-parse-context-local-vars))
+      (when (assq sym (gosh-parse--current-local-vars))
         (let* ((first (point))
                (start (or (prog1
                               (re-search-backward "^(" nil t)
@@ -358,7 +798,7 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
                   (throw 'found t))))
           ;; jump is faild.
           (goto-char first)))
-      (when (assq sym (gosh-parse-current-globals t))
+      (when (assq sym (gosh-parse--current-globals t))
         (gosh-jump-to-def sym)
         (throw 'found t))
       ;; search base modules
@@ -366,7 +806,7 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
        (lambda (x)
          (when (gosh-jump-to-module-def x sym)
            (throw 'found t)))
-       (ignore-errors (gosh-parse-current-base-modules)))
+       (ignore-errors (gosh-parse--current-base-modules)))
       ;; search imported modules
       (let ((modules
              (ignore-errors
@@ -400,7 +840,7 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
 (defun gosh-jump-to-def (definition)
   (let* ((name (symbol-name definition))
          (first (point))
-         (regexp (format "^[ \t]*(def\\(?:\\s_\\|\\sw\\)*\\(?:(\\|[ \t]\\)+\\_<%s\\_>"
+         (regexp (format "^[\s\t]*(def\\(?:\\s_\\|\\sw\\)*\\(?:(\\|[\s\t]\\)+\\_<%s\\_>"
                          (regexp-quote name))))
     (goto-char (point-min))
     (cond
@@ -471,19 +911,19 @@ else insert top level of the script.
       (goto-char (point-min))
       ;;TODO reconsider when multiple module is defined in the buffer.
       (cond
-       ((re-search-forward (format "(use[ \t\n]+\\_<%s\\_>" module) nil t)
+       ((re-search-forward (format "(use[\s\t\n]+\\_<%s\\_>" module) nil t)
         (cond
          ((gosh-context-code-p)
           (ding)
           (message "Module %s have already imported." module))
          ((and (forward-line 0)
-               (looking-at "^\\([ \t]*;+[ \t]*\\)"))
+               (looking-at "^\\([\s\t]*;+[\s\t]*\\)"))
           ;; uncomment guessed as temporarily commented out statement.
           (replace-match "" nil nil nil 1))))
        ((re-search-forward "^ *\\((use\\_>\\)" nil t) ; first `use' statements
         (goto-char (match-beginning 1))
         (gosh--insert-import-statement module))
-       ((let ((regexp (format "^ *(define-module[ \t]+%s[ \n\t]" (regexp-quote cm))))
+       ((let ((regexp (format "^ *(define-module[\s\t]+%s[\s\t\n]" (regexp-quote cm))))
           (re-search-forward regexp nil t))
         (forward-line 1)
         (gosh--insert-import-statement module))
@@ -512,13 +952,13 @@ else insert top level of the script.
                 (save-excursion
                   (save-restriction
                     (widen)
-                    (and (re-search-backward "Module: \\([^ \n\t]+\\)" nil t)
+                    (and (re-search-backward "Module: \\([^\s\t\n]+\\)" nil t)
                          (match-string 1)))))))
         (error nil)))))
 
 (defun gosh-exports-functions (file)
   (gosh-with-find-file file
-    (gosh-parse-current-exports)))
+    (gosh-parse--current-exports)))
 
 (defun gosh-show-info (symbol-name)
   "Popup `info' buffer"
@@ -743,42 +1183,9 @@ Arg FORCE non-nil means forcely insert bracket."
   ;; retry 5 count backward current sexp
   (loop with context
         for i from 0 to 5
-        do (setq context (gosh-opening--parse-current-context i))
+        do (setq context (gosh-parse--current-context-for-opening i))
         if (and context (gosh-opening--context-bracket-p context))
         return t))
-
-(defun gosh-opening--parse-current-context (&optional count)
-  (save-excursion
-    (let ((c (or count 0))
-          (start (point)))
-      (while (and
-              (not (gosh-context-toplevel-p)) ; top level
-              (condition-case nil
-                  (progn
-                    (backward-sexp)
-                    t)
-                (scan-error
-                 (cond
-                  ((plusp c)
-                   (decf c)
-                   (skip-chars-backward " \t\n(["))
-                  ((looking-at "\\(?:\\sw\\|\\s_\\)")
-                   nil)
-                  (t
-                   (backward-char)
-                   t))))))
-      (skip-chars-backward " \t\n([")
-      (let* ((partial (buffer-substring-no-properties (point) start))
-             (parsed (parse-partial-sexp (point) start))
-             (parenthese (mapcar
-                          (lambda (x)
-                            (gosh--paren-against-char (char-after x)))
-                          (reverse (nth 9 parsed))))
-             (closing (concat parenthese))
-             (sexp (car
-                    (gosh-read-from-string
-                     (concat partial " *" closing)))))
-        (and (consp sexp) sexp)))))
 
 (defun gosh--sort-sexp-region (start end)
   "Sort sexp between START and END."
@@ -807,7 +1214,7 @@ Arg FORCE non-nil means forcely insert bracket."
           (mapc
            (lambda (s)
              (let ((contents (cadr s)))
-               (when (string-match "\\`[ \t\n]+" contents)
+               (when (string-match "\\`[\s\t\n]+" contents)
                  (setq contents (substring contents (match-end 0))))
                (insert contents)
                (unless (memq (char-before) '(?\n))
@@ -1509,7 +1916,7 @@ Set this variable before open by `gosh-mode'."
 (defun gosh-eldoc-print-current-symbol-info ()
   (save-match-data
     (with-local-quit
-      (let* ((fnsym0 (gosh-parse-fnsym-current-sexp))
+      (let* ((fnsym0 (gosh-parse--current-context))
              (fnpos (if (consp fnsym0) (cadr fnsym0) 0))
              (sym (and (consp fnsym0) (gosh-nth* fnpos (car fnsym0))))
              (fnsym (cond ((atom fnsym0) fnsym0)
@@ -1569,15 +1976,12 @@ Set this variable before open by `gosh-mode'."
 
 (defun gosh-eldoc--find-and-print-string (spec env highlight)
   (cond
-   ((and (consp spec)
-         (consp (cdr spec)))
-    (let ((type (cadr spec)))
+   ((and (consp spec) (consp (cdr spec)))
+    (let ((type (nth 1 spec)))
       (concat
        (cond
-        ((nth 3 spec)
-         "")
-        ((and (consp type)
-              (memq (car type) '(class)))
+        ((nth 3 spec) "")               ;TODO ?? super? slots?
+        ((and (consp type) (eq (car type) 'class))
          (concat "Class: "
                  (gosh-eldoc--sexp->string (car spec))
                  ;;super class
@@ -1590,8 +1994,7 @@ Set this variable before open by `gosh-mode'."
                     " Slots: "
                     (gosh-eldoc--sexp->string
                      (mapcar 'car-safe (caddr type)))))))
-        ((and (consp type)
-              (memq (car type) '(syntax lambda)))
+        ((and (consp type) (memq (car type) '(syntax lambda)))
          (concat
           (and (eq (car type) 'syntax)
                "Syntax: ")
@@ -1607,20 +2010,25 @@ Set this variable before open by `gosh-mode'."
                (concat " => " (gosh-eldoc--sexp->string (caddr type))))))
         ((and (consp type) (eq (car type) 'special))
          (gosh-eldoc--sexp->string (car spec)))
-        ((and (consp type) (eq (car type) 'string) (stringp (cdr type)))
+        ((stringp type)
          (concat
           "String: \""
           (gosh-eldoc--sexp->string (cdr type))
           "\""))
-        ((and (consp type) (eq (car type) 'number) (stringp (cdr type)))
+        ((numberp type)
          (concat
           "Number: "
-          (gosh-eldoc--sexp->string (cdr type))))
+          (gosh-eldoc--sexp->string type)))
         ((symbolp type)
          (let ((spec (gosh-env-lookup env type)))
            ;; ignore `max-lisp-eval-depth' error
            (or (gosh-eldoc--find-and-print-string spec env highlight)
                (format "some parameter or alias typed `%s'" type))))
+        ((gosh-object-p type)
+         (concat
+          (capitalize (symbol-name (gosh-object-type type)))
+          ": "
+          (gosh-eldoc--sexp->string (gosh-object-value type))))
         (t
          (gosh-eldoc--sexp->string type)))
        (if (and (not (nth 3 spec)) (nth 4 spec)) " - " "")
@@ -1632,6 +2040,36 @@ Set this variable before open by `gosh-mode'."
 ;;;
 ;;; utilities
 ;;;
+
+;; [SRFI-2]
+;; http://srfi.schemers.org/srfi-2/srfi-2.html
+;;
+;; AND-LET* (CLAWS) BODY
+
+;; CLAWS ::= '() | (cons CLAW CLAWS)
+;; CLAW  ::=  (VARIABLE EXPRESSION) | (EXPRESSION) | BOUND-VARIABLE
+(defmacro gosh-and* (varlist &rest body)
+  (declare (indent 1))
+  (reduce
+   (lambda (v res)
+     (cond
+      ((atom v)
+       ;; BOUND-VARIABLE
+       `(and ,v ,res))
+      ((= (length v) 1)
+       ;; (EXPRESSION)
+       `(and ,@v ,res))
+      ((> (length v) 2)
+       (error "Malformed `and-let*'"))
+      ((not (symbolp (car v)))
+       (error "Malformed `and-let*'"))
+      (t
+       ;; (VARIABLE EXPRESSION)
+       `(let ((,(car v) ,(cadr v)))
+          (and ,(car v) ,res)))))
+   varlist
+   :from-end t
+   :initial-value `(progn ,@body)))
 
 (defmacro gosh-if-let1 (var expr then &rest else)
   "Anaphoric if. Temporary variable `it' is the result of test-form."
@@ -1994,338 +2432,6 @@ referenced mew-complete.el"
            (list sym1 pos1 (gosh-parse-symbol-at-point) pos2)))
        (list sym1 pos1 nil 0)))))
 
-;;;
-;;; Gauche pseudo reader
-;;;
-
-;;TODO
-;; また、リーダはトークン`#!fold-case'を読むと大文字小文字を
-;; 区別しないモードに切り替わります。トークン`#!no-fold-case'は
-;; その逆の効果、すなわち大文字小文字を区別するモードへと切り替えます。
-;; これらのトークンは、それが読まれたポートからの以降の読み込みに影響を
-;; 与えます。
-;; TODO nested comment sample is trunk/test/srfi.scm
-
-;;TODO  etc
-(defconst gosh-reader--ws "\s\t\n\f")
-
-(defconst gosh-reader--word-re
-  (let ((chars "][\000-\037\s\"'(),;\\`{|}\177"))
-    (format "\\(\\(?:\\\\.\\|[^%s]\\)+\\)"
-            chars)))
-
-(defconst gosh-reader--string-re "\"\\(\\(?:\\\\\.\\|[^\"]\\)*\\)\"")
-
-(defun gosh-reader--ignore ()
-  (while (or (plusp (gosh-reader--skip-ws))
-             (plusp (gosh-reader--skip-comment))
-             (plusp (gosh-reader--skip-debug-macro)))))
-
-(defun gosh-reader--skip-debug-macro ()
-  (cond
-   ((looking-at "#\\?")
-    (goto-char (match-end 0))
-    (+ 2 (gosh-reader--skip-word)))
-   (t 0)))
-
-(defun gosh-reader--skip-ws ()
-  (skip-chars-forward gosh-reader--ws))
-
-(defun gosh-reader--skip-comment ()
-  (cond
-   ((eq (char-after) ?\;)
-    (skip-chars-forward "^\n"))
-   ((looking-at "#|")
-    (let ((start (point)))
-      (goto-char (match-end 0))
-      (unless (re-search-forward "|#" nil t)
-        (signal 'invalid-read-syntax
-                (list "Unexpected EOF in nested comment")))
-      (- (point) start)))
-   ((looking-at "#;")
-    (let ((start (point)))
-      (goto-char (match-end 0))
-      (gosh-reader-read)
-      (- (point) start)))
-   (t
-    0)))
-
-(defun gosh-reader--skip-word ()
-  (let ((start (point)))
-    (when (looking-at gosh-reader--word-re)
-      (goto-char (match-end 0)))
-    (- (point) start)))
-
-(defun gosh-reader--skip-to-match (regexp)
-  (unless (looking-at regexp)
-    (signal 'invalid-read-syntax (list "TODO nothing to consume")))
-  (goto-char (match-end 0)))
-
-(defun gosh-reader--sharp-syntax ()
-  (forward-char)
-  (when (eobp)
-    (signal 'end-of-file nil))
-  (let ((begin (downcase (char-after))))
-    (cond
-     ((eq begin ?!)
-      ;;TODO
-      ;; 文字シーケンス`#!'は、どこでどのように現れるかによって2つの全く異なる
-      ;; 意味を持ちます。
-
-      (gosh-reader--skip-to-match ".*\n"))
-     ((eq begin ?\()
-      ;; vector
-      (vconcat (gosh-reader--read-list ?\))))
-     ((eq begin ?*)
-      ;; If followed by a double quote, denotes an incomplete string.
-      (gosh-reader--read-bulk-string))
-     ((eq begin ?,)
-      ;; [SRFI-10] Introduces reader constructor syntax.
-      (forward-char)
-      (let ((sexp (gosh-reader-read)))
-        (list 'reader-constructor sexp)))
-     ((eq begin ?\/)
-      ;; regexp
-      (list 'regexp (gosh-reader--read-bulk-literal ?\/)))
-     ((memq begin '(?0 ?1 ?2 ?3 ?4 ?5 ?6 ?7 ?8 ?9))
-      ;; [SRFI-38] Shared substructure definition and reference.
-      (gosh-reader--read-reference))
-     ((eq begin ?:)
-      ;; Uninterned symbol.
-      (forward-char)
-      (unless (looking-at gosh-reader--word-re)
-        (signal 'invalid-read-syntax (list (format "#%c" begin))))
-      (list 'uninterned-symbol (match-string-no-properties 1)))
-     ((eq begin ?\;)
-      ;; [SRFI-62] S-expression comment. Reads begin one S-expression and discard it.
-      ;; comment context should have already been skipped.
-      (signal 'invalid-read-syntax (list (format "Assert #%c" begin))))
-     ((eq begin ?<)
-      ;; Introduces an unreadable object.
-      (signal 'invalid-read-syntax (list "Unreadable object")))
-     ((eq begin ?\?)
-      ;; Introduces debug macros.
-      (gosh-reader--skip-word)
-      (signal 'invalid-read-syntax (list "Debug macro")))
-     ((memq begin '(?b ?d ?e ?i ?o ?x))
-      ;; [R5RS] Binary number prefix.
-      ;; [R5RS] Decimal number prefix.
-      ;; [R5RS] Exact number prefix.
-      ;; [R5RS] Inexact number prefix.
-      ;; [R5RS] Octal number prefix.
-      ;; [R5RS] Hexadecimal number prefix.
-      (gosh-reader--read-number))
-     ((memq begin '(?t ?f))
-      (gosh-reader--read-boolean begin))
-     ((memq begin '(?u ?s))
-      ;; [SRFI-4] introducing SRFI-4 uniform vector.
-      ;; [SRFI-4] introducing SRFI-4 uniform vector.
-      (gosh-reader--read-vector))
-     ((eq begin ?\[)
-      ;; Introduces a literal character set.
-      (list 'charset (gosh-reader--read-by-regexp
-                      "\\[\\(\\(?:\\[[^\[]+?\\]\\|\\\\.\\|[^\]]\\)*?\\)\\]" 1)))
-     ((eq begin ?\\)
-      ;; Introduces a literal character.
-      (gosh-reader--read-char))
-     ((eq begin ?\`)
-      ;;Introduces an interpolated string.
-      (gosh-reader--read-bulk-string))
-     ((eq begin ?\|)
-      ;; [SRFI-30] Introduces a block comment.
-      ;; comment context should have already been skipped.
-      (signal 'invalid-read-syntax (list (format "Assert #%c" begin))))
-     (t
-      (signal 'invalid-read-syntax (list (format "#%c" begin)))))))
-
-(defconst gosh-reader--char-symbol-alist
-  '(
-    ("space"   . ?\s  )
-    ("newline" . ?\n  ) ("nl"      . ?\n  ) ("lf"      . ?\n  )
-    ("return"  . ?\r  ) ("cr"      . ?\r  )
-    ("tab"     . ?\t  ) ("ht"      . ?\t  )
-    ("page"    . ?\f  )
-    ("escape"  . ?\x1b) ("esc"     . ?\x1b)
-    ("delete"  . ?\x7f) ("del"     . ?\x7f)
-    ("null"    . ?\x00)
-    ))
-
-(defun gosh-reader--read-char ()
-  (unless (looking-at gosh-reader--word-re)
-    (signal 'invalid-read-syntax nil))
-  (goto-char (match-end 1))
-  (let ((text (substring (match-string-no-properties 1) 1))
-        tmp)
-    (list 'char
-          (cond
-           ((= (length text) 1)
-            (string-to-char text))
-           ((setq tmp (assoc text gosh-reader--char-symbol-alist))
-            (cdr tmp))
-           ;;TODO consider case
-           ((string-match "\\`[xX]\\([0-9a-fA-F]+\\)\\'" text)
-            (string-to-number (match-string 1 text) 16))
-           ;;TODO consider case
-           ((string-match "\\`[uU]\\([0-9a-fA-F]+\\)\\'" text)
-            (string-to-number (match-string 1 text) 16))
-           (t
-            (signal 'invalid-read-syntax (list text)))))))
-
-(defun gosh-reader--read-vector ()
-  (unless (looking-at "\\([usUS]\\(?:8\\|16\\|32\\|64\\)\\)(")
-    (signal 'invalid-read-syntax nil))
-  (goto-char (match-end 1))
-  (let ((vtype (intern (match-string-no-properties 1)))
-        (list (gosh-reader--read-list ?\))))
-    (list vtype (vconcat list))))
-
-(defun gosh-reader--read-number ()
-  (let ((start (point)))
-    (forward-char)
-    (unless (looking-at gosh-reader--word-re)
-      (signal 'invalid-read-syntax nil))
-    (goto-char (match-end 0))
-    (list 'number
-          (format "#%s"
-                  (buffer-substring-no-properties start (point))))))
-
-(defun gosh-reader--read-boolean (char)
-  (forward-char)
-  (cond
-   ((eq char ?t)
-    (intern "#t"))
-   ((eq char ?f)
-    (intern "#f"))
-   ;; todo assert?
-   (t (signal 'invalid-read-syntax nil))))
-
-(defun gosh-reader--read-reference ()
-  (cond
-   ((looking-at "[0-9]+=")
-    (goto-char (match-end 0))
-    (gosh-reader-read))
-   ((looking-at "\\([0-9]+\\)#")
-    (goto-char (match-end 0))
-    (list 'reference (match-string-no-properties 1)))
-   (t
-    (signal 'invalid-read-syntax
-            (list "invalid reference form")))))
-
-(defun gosh-reader--read-bulk-literal (ending-char)
-  (let ((start (point))
-        (regexp (format "\\(\\(?:\\\\.\\|[^%c]\\)+%c\\)"
-                        ending-char ending-char)))
-    (forward-char)
-    (unless (looking-at regexp)
-      (signal 'invalid-read-syntax (list "todo msg")))
-    (goto-char (match-end 0))
-    (buffer-substring-no-properties start (point))))
-
-(defun gosh-reader--read-bulk-string ()
-  (forward-char)
-  (unless (looking-at gosh-reader--string-re)
-    ;;TODO msg
-    (signal 'invalid-read-syntax nil))
-  (goto-char (match-end 0))
-  (match-string-no-properties 1))
-
-;; TODO more sophisticate
-(defun gosh-reader--read-list (end)
-  (forward-char)
-  (let ((res '())
-        (dot-ctx))
-    (catch 'done
-      (while t
-        (gosh-reader--ignore)
-        (when (eq (char-after) end)
-          (forward-char)
-          (cond
-           ((not dot-ctx)
-            (throw 'done (nreverse res)))
-           ((eq dot-ctx 'finish)
-            (throw 'done res))))
-        (when (eq dot-ctx 'finish)
-          (signal 'invalid-read-syntax (list "Invaild dot syntax")))
-        (let ((item (gosh-reader-read)))
-          (cond
-           ((eq '\. item)
-            (when (or dot-ctx (null res))
-              (signal 'invalid-read-syntax (list "Invalid dot syntax")))
-            (setq dot-ctx 'start))
-           ((eq dot-ctx 'start)
-            (setq res (append
-                       (nreverse (cdr res))
-                       (cons (car res) item)))
-            (setq dot-ctx 'finish))
-           (t
-            (setq res (cons item res)))))))))
-
-(defun gosh-reader--maybe-number (text)
-  (let ((n (string-to-number text)))
-    (cond
-     ((equal (number-to-string n) text)
-      n)
-     ;; FIXME:
-     ;; only handle simple number format.
-     ((string-match "\\`[-+]?[0-9]+\\(\\.[0-9]+\\)?\\'" text)
-      (list 'number text))
-     (t
-      (intern text)))))
-
-(defun gosh-reader--read-by-regexp (regexp subexp)
-  (unless (looking-at regexp)
-    (signal 'invalid-read-syntax (list "todo")))
-  (goto-char (match-end 0))
-  (match-string-no-properties subexp))
-
-(defun gosh-reader--read-escaped-symbol ()
-  (forward-char)
-  (unless (looking-at "\\(\\(?:\\\\.\\|[^|]\\)*\\)|")
-    (signal 'invalid-read-syntax (list "Not a escaped symbol")))
-  (goto-char (match-end 0))
-  (intern (match-string-no-properties 1)))
-
-(defun gosh-reader-read ()
-  (gosh-reader--ignore)
-  (when (eobp)
-    (signal 'end-of-file nil))
-  (let ((next (char-after)))
-    (cond
-     ((eq next ?\()
-      (gosh-reader--read-list ?\)))
-     ((eq next ?\[)
-      (gosh-reader--read-list ?\]))
-     ((eq next ?#)
-      (gosh-reader--sharp-syntax))
-     ((eq next ?\|)
-      (gosh-reader--read-escaped-symbol))
-     ((eq next ?,)
-      (forward-char)
-      (when (eobp)
-        (signal 'end-of-file nil))
-      (list 'unquote (gosh-reader-read)))
-     ((looking-at gosh-reader--string-re)
-      (goto-char (match-end 0))
-      (match-string-no-properties 1))
-     ((looking-at gosh-reader--word-re)
-      (goto-char (match-end 0))
-      ;;TODO consider number
-      (gosh-reader--maybe-number (match-string-no-properties 1)))
-     ((memq next '(?\' ?\`))            ; ignore differences ' and `
-      (forward-char)
-      (list 'quote (gosh-reader-read)))
-     (t
-      (signal 'invalid-read-syntax nil)))))
-
-(defun gosh-reader-read-string (string)
-  (with-temp-buffer
-    (insert string)
-    (goto-char (point-min))
-    (cons (gosh-reader-read) (1- (point)))))
-
-(defalias 'gosh-read 'gosh-reader-read)
-(defalias 'gosh-read-from-string 'gosh-reader-read-string)
-
 
 
 (defun gosh-goto-next-top-level ()
@@ -2337,6 +2443,10 @@ referenced mew-complete.el"
                (and (re-search-forward "^(" nil t)
                     (progn (backward-char 1) t)))
         (goto-char (point-max)))))
+
+(defun gosh--module-import-symbol-p (sym)
+  (memq sym '(use require require-extension begin cond-expand
+                  define-module autoload import)))
 
 ;; sexp-at-point is always fragile, both because the user can input
 ;; incomplete sexps and because some scheme sexps are not valid elisp
@@ -2369,10 +2479,11 @@ referenced mew-complete.el"
   (and (gosh-context-toplevel-p)
        (save-excursion
          (beginning-of-defun)
-         (looking-at "([ \t\n]*define"))))
+         (looking-at "([\s\t\n]*define"))))
 
 (defun gosh-parse-sexp-type-at-point (&optional env)
   (case (char-syntax (char-after))
+    ;;TODO why check only list?
     ((?\()
      (forward-char 1)
      (when (eq ?w (char-syntax (char-after)))
@@ -2389,15 +2500,8 @@ referenced mew-complete.el"
                   (eq 'lambda (caadr spec))
                   (cddadr spec)
                   (car (cddadr spec)))))))))
-    ((?\")
-     (cons 'string (read (current-buffer))))
-    ((?\w)
-     (if (string-match "[0-9]" (string (char-after)))
-         ;; To avoid overflow to string
-         (cons 'number (symbol-name (gosh-parse-symbol-at-point)))
-       (gosh-parse-symbol-at-point)))
     (t
-     nil)))
+     (gosh-read))))
 
 (defun gosh-parse-let-vars-at-point (&optional env limit loopp)
   (let ((end (min (or limit (point-max))
@@ -2508,15 +2612,15 @@ referenced mew-complete.el"
       (when base
         (push base env)))
     ;; imports
-    (let ((imports (ignore-errors (gosh-parse-current-import-symbols))))
+    (let ((imports (ignore-errors (gosh-parse--current-import-symbols))))
       (when imports
         (push imports env)))
     ;; top-level defs
-    (let ((top (ignore-errors (gosh-parse-current-globals))))
+    (let ((top (ignore-errors (gosh-parse--current-globals))))
       (when top
         (push top env)))
     ;; current local vars
-    (let ((locals (ignore-errors (gosh-parse-context-local-vars env))))
+    (let ((locals (ignore-errors (gosh-parse--current-local-vars env))))
       (when locals
         (push locals env)))
     env))
@@ -2531,7 +2635,7 @@ referenced mew-complete.el"
           (unless (bobp)
             (backward-char)))
         (let ((matcher (lambda ()
-                         (when (looking-at "(\\(?:with\\|define\\)-module[ \t\n]+\\([^ \t\n()]+\\)")
+                         (when (looking-at "(\\(?:with\\|define\\)-module[\s\t\n]+\\([^\s\t\n()]+\\)")
                            (throw 'return (match-string-no-properties 1)))))
               (toplevel (gosh-context-toplevel-p)))
           (unless toplevel
@@ -2540,7 +2644,7 @@ referenced mew-complete.el"
               (funcall matcher)
               (gosh-beginning-of-list))
             (funcall matcher)))
-        (when (re-search-backward "^[ \t]*(select-module[ \t\n]+\\([^ \t\n()]+\\)" nil t)
+        (when (re-search-backward "^[\s\t]*(select-module[\s\t\n]+\\([^\s\t\n()]+\\)" nil t)
           (throw 'return (match-string-no-properties 1)))
         "user"))))
 
@@ -2550,27 +2654,25 @@ referenced mew-complete.el"
 ;; use or import
 (defun gosh-parse-buffer-import-modules-with-prefix ()
   (save-excursion
-    (save-restriction
-      (widen)
-      (goto-char (point-min))
-      (let ((res '()))
-        (while (re-search-forward "(\\(?:use\\|import\\)[ \t\n]" nil t)
-          (when (gosh-context-code-p)
-            (ignore-errors
-              (save-excursion
-                (goto-char (match-beginning 0))
-                (let* ((sexp (gosh-read))
-                       (module (cadr sexp))
-                       (pref (memq :prefix sexp)))
-                  (setq res (cons
-                             (cons module
-                                   (if (and pref (symbolp (cadr pref)))
-                                       (symbol-name (cadr pref))
-                                     ""))
-                             res)))))))
-        (nreverse res)))))
+    (goto-char (point-min))
+    (let ((res '()))
+      (while (re-search-forward "(\\(?:use\\|import\\)[\s\t\n]" nil t)
+        (when (gosh-context-code-p)
+          (ignore-errors
+            (save-excursion
+              (goto-char (match-beginning 0))
+              (let* ((sexp (gosh-read))
+                     (module (cadr sexp))
+                     (pref (memq :prefix sexp)))
+                (setq res (cons
+                           (cons module
+                                 (if (and pref (symbolp (cadr pref)))
+                                     (symbol-name (cadr pref))
+                                   ""))
+                           res)))))))
+      (nreverse res))))
 
-(defun gosh-parse-context-local-vars (&optional env)
+(defun gosh-parse--current-local-vars (&optional env)
   (let ((vars '())
         (start (point))
         (limit (save-excursion (beginning-of-defun) (+ (point) 1)))
@@ -2579,14 +2681,13 @@ referenced mew-complete.el"
                        (gosh-beginning-of-sexp)
                        (gosh-beginning-of-sexp))
                      (point)))
+        ;;TODO huh? not incremented.
         (scan-internal))
     (save-excursion
       (while (> (point) limit)
-        (or (ignore-errors
-              (progn
-                (skip-chars-backward " \t\n" limit)
-                (gosh-beginning-of-sexp)
-                t))
+        (or (progn
+              (ignore-errors (gosh-beginning-of-sexp ))
+              t)
             (goto-char limit))
         (when (and (> (point) (point-min))
                    (eq ?\( (char-syntax (char-before (point))))
@@ -2664,7 +2765,7 @@ referenced mew-complete.el"
                (if (string-match "^define\\(-.*\\)?" (symbol-name sym))
                    (let ((defs (save-excursion
                                  (backward-char)
-                                 (gosh-parse-read-definitions))))
+                                 (gosh-parse--read-definitions))))
                      (setq vars
                            (append (gosh-append-map
                                     (lambda (x)
@@ -2692,7 +2793,7 @@ referenced mew-complete.el"
                    (+ 1 (if (numberp scan-internal) scan-internal 2)))
                   (backward-sexp)
                   (when (< (point) start)
-                    (setq vars (append (gosh-parse-read-trailing-definitions) vars))))))))))
+                    (setq vars (append (gosh-parse--read-inner-definitions) vars))))))))))
     (reverse vars)))
 
 (defun gosh-parse-sexp-imports (sexp)
@@ -2720,41 +2821,15 @@ referenced mew-complete.el"
      (mapcar (lambda (x) (cons (if (consp x) (car x) x) '((lambda obj))))
              (cddr sexp)))))
 
-(defun gosh-parse-sexp-import-modules (sexp)
-  (case (and (consp sexp) (car sexp))
-    ((define-module)
-     (gosh-append-map 'gosh-parse-sexp-import-modules (cdr sexp)))
-    ((use)
-     (list (cadr sexp)))
-    ((require-extension)
-     (when (eq (cadr sexp) 'srfi)
-       (delq
-        nil
-        (mapcar (lambda (n)
-                  (when (numberp n)
-                    (intern (concat "srfi-" (number-to-string n)))))
-                (cddr sexp)))))
-    ((import)
-     (cdr sexp))))
-
-(defun gosh-module-symbol-p (sym)
-  (memq sym '(use require require-extension begin cond-expand
-                  define-module autoload import)))
-
-(defun gosh-skip-shebang ()
-  ;; skip shebang if present
-  (if (looking-at "#!")
-      (forward-line)))
-
-(defun gosh-parse-fnsym-current-sexp ()
+(defun gosh-parse--current-context ()
   (let (sexp count count-up dangling)
     (unless (gosh-context-toplevel-p)
       (save-excursion
         (let (start end)
           (gosh-beginning-of-string)
           (unless (setq dangling
-                        (or (looking-at "[ \n\t]*[()]")
-                            (looking-at "[ \n\t]")))
+                        (or (looking-at "[\s\t\n]*[()]")
+                            (looking-at "[\s\t\n]")))
             (condition-case err
                 (forward-sexp)
               (scan-error
@@ -2784,130 +2859,131 @@ referenced mew-complete.el"
       (setq count (1+ count)))
     (list sexp count)))
 
-(defun gosh-parse-current-import-symbols ()
+(defun gosh-parse--current-context-for-opening (&optional count)
+  (save-excursion
+    (let ((c (or count 0))
+          (start (point)))
+      (while (and
+              (not (gosh-context-toplevel-p)) ; top level
+              (condition-case nil
+                  (progn
+                    (backward-sexp)
+                    t)
+                (scan-error
+                 (cond
+                  ((plusp c)
+                   (decf c)
+                   (skip-chars-backward "\s\t\n(["))
+                  ((looking-at "\\(?:\\sw\\|\\s_\\)")
+                   nil)
+                  (t
+                   (backward-char)
+                   t))))))
+      (skip-chars-backward "\s\t\n([")
+      (let* ((partial (buffer-substring-no-properties (point) start))
+             (parsed (parse-partial-sexp (point) start))
+             (parenthese (mapcar
+                          (lambda (x)
+                            (gosh--paren-against-char (char-after x)))
+                          (reverse (nth 9 parsed))))
+             (closing (concat parenthese))
+             (sexp (car
+                    (gosh-read-from-string
+                     (concat partial " *" closing)))))
+        (and (consp sexp) sexp)))))
+
+(defun gosh-parse--current-import-symbols ()
   (let ((res '()))
     (save-excursion
       (goto-char (point-min))
-      (gosh-skip-shebang)
       ;; scan for module forms
       (while (not (eobp))
-        (if (ignore-errors (forward-sexp) t)
-            (let ((end (point)))
-              (backward-sexp)
-              (when (eq ?\( (char-syntax (char-after)))
-                (forward-char)
-                (when (not (eq ?\( (char-syntax (char-after))))
-                  (let ((sym (gosh-parse-symbol-at-point)))
-                    (cond
-                     ((gosh-module-symbol-p sym)
-                      (backward-char)
-                      (ignore-errors
-                        (setq res
-                              (append (gosh-parse-sexp-imports
-                                       (gosh-nth-sexp-at-point 0))
-                                      res))))))))
-              (goto-char end))
-          ;; if an incomplete sexp is found, try to recover at the
-          ;; next line beginning with an open paren
-          (gosh-goto-next-top-level))))
+        (ignore-errors
+          (gosh-and*
+              ((sexp (gosh-parse-read))
+               ((consp sexp))
+               (fnsym (car sexp))
+               ((gosh--module-import-symbol-p fnsym)))
+            (setq res
+                  (append (gosh-parse-sexp-imports sexp) res))))))
     res))
 
-;; we should be just inside the opening paren of an expression
-(defun gosh-parse-name-of-current-define ()
-  (save-excursion
-    (gosh-beginning-of-next-sexp)
-    (if (eq ?\( (char-syntax (char-after)))
-        (forward-char))
-    (and (memq (char-syntax (char-after)) '(?\w ?\_))
-         (gosh-parse-symbol-at-point))))
+(defun gosh-parse--construct-definition (sexp)
+  (let ((fnsym (car-safe sexp))
+        (body (cdr-safe sexp)))
+    (case fnsym
+      ((define-syntax)
+       (let ((name (nth 0 body)))
+         `((,name (syntax)))))
+      ((define-macro)
+       (let* ((sig (nth 0 body))
+              (name (car sig))
+              (args (cdr sig)))
+         `((,name (syntax ,args)))))
+      ((define-method)
+       (let* ((name (car-safe body))
+              (args (car (cdr-safe body))))
+         `((,name (lambda ,args)))))
+      ((define define-constant)
+       (let* ((first (car-safe body)))
+         (cond
+          ((consp first)
+           `((,(car first) (lambda ,(cdr first)))))
+          ((and (atom first) (cdr body))
+           `((,first ,(car-safe (cdr body))))))))
+      ((define-class)
+       (let ((name (nth 0 body))
+             (super (nth 1 body))
+             (slots (nth 2 body)))
+         `((,name (class ,super ,slots)))))
+      ((define-condition-type)
+       (let ((name (nth 0 body))
+             (super `(,(nth 1 body)))
+             (slots (nthcdr 3 body)))
+         `((,name (class ,super ,slots)))))
+      ((define-record-type)
+       (let ((name (nth 0 body))
+             (members (nthcdr 3 body)))
+         `((,name (class nil ,members)))))
+      ((begin begin0)
+       (gosh-append-map 'gosh-parse--construct-definition body))
+      (t
+       '()))))
 
-(defun gosh-parse-type-of-current-define ()
+(defun gosh-parse--read-definitions ()
   (save-excursion
-    (gosh-beginning-of-next-sexp)
-    (cond
-     ((eq ?\( (char-syntax (char-after)))
-      `(lambda ,(cdr (gosh-nth-sexp-at-point 0))))
-     (t
-      (ignore-errors
-        (gosh-beginning-of-next-sexp)
-        (gosh-parse-sexp-type-at-point))))))
+    (let ((sexp (ignore-errors (gosh-read-list 5))))
+      (gosh-parse--construct-definition sexp))))
 
-(defun gosh-parse-class-of-current-define ()
-  (save-excursion
-    (let ((super (gosh-nth-sexp-at-point 2))
-          (slots (gosh-nth-sexp-at-point 3))
-          ;;TODO options
-          )
-      (list super slots))))
-
-(defun gosh-parse-applying-of-current-define ()
-  (save-excursion
-    (gosh-beginning-of-next-sexp)
-    (gosh-beginning-of-next-sexp)
-    (ignore-errors
-      `(lambda ,(gosh-nth-sexp-at-point 0)))))
-
-;; we should be at the opening paren of an expression
-(defun gosh-parse-read-definitions (&optional env)
-  (save-excursion
-    (let ((sym (ignore-errors
-                 (and (eq ?\( (char-syntax (char-after)))
-                      (progn (forward-char)
-                             (gosh-parse-symbol-at-point))))))
-      (case sym
-        ((define-syntax define-compiled-syntax defmacro define-macro)
-         (list (list (gosh-parse-name-of-current-define) '(syntax))))
-        ((define-method)
-         (let ((name (gosh-parse-name-of-current-define))
-               (type (gosh-parse-applying-of-current-define)))
-           (list (if type (list name type) (list name)))))
-        ((define define-constant)
-         (let ((name (gosh-parse-name-of-current-define))
-               (type (gosh-parse-type-of-current-define)))
-           (list (if type (list name type) (list name)))))
-        ((define-class)
-         (let ((name (gosh-parse-name-of-current-define))
-               (contents (gosh-parse-class-of-current-define)))
-           `((,name (class ,@contents)))))
-        ((define-record-type)
-         (backward-char)
-         (ignore-errors
-           (let ((sexp (gosh-nth-sexp-at-point 0)))
-             `((,(caaddr sexp) (lambda ,(cdaddr sexp)))
-               (,(cadddr sexp) (lambda (obj)))
-               ,@(gosh-append-map
-                  (lambda (x)
-                    (if (consp x)
-                        (if (consp (cddr x))
-                            `((,(cadr x) (lambda (non-procedure)))
-                              (,(caddr x)
-                               (lambda (non-procedure val) undefined)))
-                          `((,(cadr x) (lambda (non-procedure)))))))
-                  (cddddr sexp))))))
-        ((begin begin0)
-         (forward-sexp)
-         (gosh-parse-read-trailing-definitions))
-        (t
-         '())))))
-
-(defun gosh-scheme-in-defun-name ()
-  (save-excursion
-    (gosh-beginning-of-list)
-    (and (gosh-beginning-of-list)
-         (looking-at "^(define")
-         (point))))
+;;TODO consider cost of this code
+(defun gosh-parse-read ()
+  (let ((start (point)))
+    (catch 'done
+      (while (not (eobp))
+        (condition-case nil
+            (let ((sexp (gosh-read)))
+              (throw 'done sexp))
+          (error
+           (goto-char start)
+           (forward-line)
+           ;;TODO nested comment
+           (unless (re-search-forward "^(" nil t)
+             ;;TODO nil?
+             (throw 'done nil))
+           (forward-line 0)
+           (setq start (point))))))))
 
 (defun gosh-parse-file-globals (file)
   (gosh-with-find-file file
     (save-excursion
       (goto-char (point-min))
-      (gosh-parse-current-globals t))))
+      (gosh-parse--current-globals t))))
 
 (defun gosh-parse-file-exports (file)
   (let (syms modules)
     (gosh-with-find-file file
-      (setq syms (gosh-parse-exported-symbols))
-      (setq modules (gosh-parse-current-base-modules)))
+      (setq syms (gosh-parse--exported-symbols))
+      (setq modules (gosh-parse--current-base-modules)))
     (mapc
      (lambda (mod)
        (let ((f (gosh--module->file mod)))
@@ -2916,13 +2992,14 @@ referenced mew-complete.el"
     syms))
 
 ;; for internal defines, etc.
-(defun gosh-parse-read-trailing-definitions (&optional enclosing-end)
+;;TODO max
+(defun gosh-parse--read-inner-definitions (&optional max)
   (let ((defs '())
-        (end (or enclosing-end (point-max))))
+        (end (or max (point-max))))
     (save-excursion
       (while (< (point) end)
         (let ((here (point))
-              (new-defs (gosh-parse-read-definitions)))
+              (new-defs (gosh-parse--read-definitions)))
           (cond
            (new-defs
             (setq defs (append new-defs defs))
@@ -2935,24 +3012,24 @@ referenced mew-complete.el"
             (goto-char end))))))
     defs))
 
-(defun gosh-parse-file-base-modules (file)
+(defun gosh-parse--file-base-modules (file)
   (gosh-with-find-file file
-    (gosh-parse-current-base-modules)))
+    (gosh-parse--current-base-modules)))
 
-(defun gosh-parse-current-base-modules ()
+(defun gosh-parse--current-base-modules ()
   (let (mod modules)
     (save-excursion
       (goto-char (point-min))
-      (while (re-search-forward "(extend\\b" nil t)
+      (while (re-search-forward "(extend\\_>" nil t)
         (when (gosh-context-code-p)
           (ignore-errors
-            (while (setq mod (read (current-buffer)))
+            (while (setq mod (gosh-read))
               (setq modules (cons mod modules)))))))
     (nreverse modules)))
 
-(defun gosh-parse-exported-symbols ()
-  (let* ((env (gosh-parse-current-globals))
-         (exports (gosh-parse-current-exports t env))
+(defun gosh-parse--exported-symbols ()
+  (let* ((env (gosh-parse--current-globals))
+         (exports (gosh-parse--current-exports t env))
          (res '()))
     ;; if source file execute dynamic load.
     ;; global definition (env) will be null.
@@ -2972,54 +3049,47 @@ referenced mew-complete.el"
      env)
     res))
 
-(defun gosh-parse-current-toplevel-symbol ()
+(defun gosh-parse--current-toplevel-symbol ()
   (when (and (eq ?\( (char-syntax (char-after)))
              (eq ?w (char-syntax (char-after (1+ (point))))))
     (save-excursion
       (forward-char)
       (gosh-parse-symbol-at-point))))
 
-;; a little more liberal than gosh-parse-read-trailing-definitions we try to scan to a new
-;; top-level form (i.e. a line beginning with an open paren) if
-;; there's an error during normal sexp movement
-(defun gosh-parse-current-globals (&optional only-current)
+(defun gosh-parse--current-globals (&optional only-current)
   (let ((res '()))
     (save-excursion
-      (save-restriction
-        (goto-char (point-min))
-        (or (ignore-errors (end-of-defun) (backward-sexp) t)
-            (and (re-search-forward "^(" nil t) (progn (backward-char) t))
-            (goto-char (point-max)))
-        (while (not (eobp))
-          (let ((sym (gosh-parse-current-toplevel-symbol)))
-            (case sym
-              ((define-module)
-               (unless only-current
-                 (let* ((decls (gosh-nth-sexp-at-point 0))
-                        (parents (cdr (assq 'extend decls))))
-                   (setq res (append
-                              (gosh-append-map
-                               'gosh-module-global-definitions
-                               parents)
-                              res)))))
-              ((extend)
-               (unless only-current
-                 (let ((parents (cdr (gosh-nth-sexp-at-point 0))))
-                   (setq res (append
-                              (gosh-append-map
-                               'gosh-module-global-definitions
-                               parents)
-                              res)))))))
-          (setq res
-                (append
-                 (ignore-errors (gosh-parse-read-definitions))
-                 res))
-          (or (and (progn (forward-char) (re-search-forward "^(" nil t))
-                   (progn (backward-char) t))
-              (gosh-goto-next-top-level)))))
+      (goto-char (point-min))
+      (while (not (eobp))
+        (let* ((sexp (gosh-parse-read))
+               (fnsym (car-safe sexp)))
+          (case fnsym
+            ((define-module)
+             (unless only-current
+               (let* ((body (cdr-safe sexp))
+                      (parents (cdr (assq 'extend body))))
+                 (setq res (append
+                            (gosh-append-map
+                             'gosh-module-global-definitions
+                             parents)
+                            res)))))
+            ((extend)
+             (unless only-current
+               (let* ((body (cdr-safe sexp))
+                      (parents (cdr body)))
+                 (setq res (append
+                            (gosh-append-map
+                             'gosh-module-global-definitions
+                             parents)
+                            res)))))
+            (t
+             (setq res
+                   (append
+                    (ignore-errors (gosh-parse--construct-definition sexp))
+                    res)))))))
     res))
 
-(defun gosh-parse-current-exports (&optional only-current env)
+(defun gosh-parse--current-exports (&optional only-current env)
   (let ((res '()))
     (save-excursion
       (goto-char (point-min))
@@ -3027,7 +3097,7 @@ referenced mew-complete.el"
           (re-search-forward "^(" nil t)
           (goto-char (point-max)))
       (while (not (eobp))
-        (let ((sym (gosh-parse-current-toplevel-symbol)))
+        (let ((sym (gosh-parse--current-toplevel-symbol)))
           (case sym
             ((define-module)
              (let ((decls (gosh-nth-sexp-at-point 0)))
@@ -3043,14 +3113,14 @@ referenced mew-complete.el"
                 ((and (listp decls) (assq 'export decls))
                  (setq res (nconc (cdr (assq 'export decls)) res)))
                 ((and (listp decls) (assq 'export-all decls))
-                 (setq res (nconc (mapcar 'car (or env (gosh-parse-current-globals)))
+                 (setq res (nconc (mapcar 'car (or env (gosh-parse--current-globals)))
                                   res))
                  ;; skip all
                  (goto-char (point-max))))))
             ((export export-if-defined)
              (setq res (nconc (cdr (gosh-nth-sexp-at-point 0)) res)))
             ((export-all)
-             (setq res (nconc (mapcar 'car (or env (gosh-parse-current-globals)))
+             (setq res (nconc (mapcar 'car (or env (gosh-parse--current-globals)))
                               res))
              ;; skip all
              (goto-char (point-max)))
@@ -3121,7 +3191,7 @@ TODO key should be module-file?? multiple executable make complex.
         (nth 4 cached)
       ;; (re)compute module exports
       (let ((res (gosh-parse-file-globals file))
-            (bases (gosh-parse-file-base-modules file)))
+            (bases (gosh-parse--file-base-modules file)))
         (push (list file mod (gosh-file-mtime file) bases res)
               gosh-cache-file-globals)
         res))))
@@ -3668,14 +3738,14 @@ d:/home == /cygdrive/d/home
       (ac-define-source gosh-symbols
         '((candidates . gosh-ac-symbol-candidates)
           (symbol . "s")
-          (prefix . "[ \t\n]\\(\\(?:\\sw\\|\\s_\\)+\\)")
+          (prefix . "[\s\t\n]\\(\\(?:\\sw\\|\\s_\\)+\\)")
           (requires . 2)
           (cache)))
 
       (ac-define-source gosh-keywords
         '((candidates . gosh-ac-keywords-candidates)
           (symbol . "k")
-          (prefix . "[ \t\n]\\(:\\(?:\\sw\\|\\s_\\)*\\)")
+          (prefix . "[\s\t\n]\\(:\\(?:\\sw\\|\\s_\\)*\\)")
           (requires . 1)
           (cache)))
 
@@ -3684,7 +3754,7 @@ d:/home == /cygdrive/d/home
         (ac-define-source gosh-modules
           `((candidates . gosh-ac-module-candidates)
             (symbol . "m")
-            (prefix . ,(concat "(" (regexp-opt syntaxes) "[ \t\n]+\\(\\(?:\\sw\\|\\s_\\)+\\)"))
+            (prefix . ,(concat "(" (regexp-opt syntaxes) "[\s\t\n]+\\(\\(?:\\sw\\|\\s_\\)+\\)"))
             (requires . 1)
             (cache))))
 
@@ -3720,7 +3790,7 @@ d:/home == /cygdrive/d/home
 
 ;; keywords match to current context
 (defun gosh-ac-keywords-candidates ()
-  (let ((fnsym (gosh-parse-fnsym-current-sexp)))
+  (let ((fnsym (gosh-parse--current-context)))
     (when (and (cadr fnsym) (> (cadr fnsym) 0))
       (let ((fn (caar fnsym))
             (env (gosh-parse-current-env)))
@@ -3834,7 +3904,7 @@ d:/home == /cygdrive/d/home
       (let* ((function (buffer-substring (point)
                                          (progn (forward-sexp 1) (point))))
              (function-sym (intern-soft function))
-             (method (and (not (assq function-sym (gosh-parse-context-local-vars)))
+             (method (and (not (assq function-sym (gosh-parse--current-local-vars)))
                           (get function-sym 'scheme-indent-function)))
              indent)
         (cond
@@ -4036,8 +4106,8 @@ PROCEDURE-SYMBOL ::= symbol
     (setq inhibit-quit nil)
     (signal 'quit nil)))
 
-(defvar gosh-backend-prompt-string-regexp "\ngosh>[ \t]*$")
-(defvar gosh-backend-prompt-regexp "^gosh>[ \t]*\\'")
+(defvar gosh-backend-prompt-string-regexp "\ngosh>[\s\t]*$")
+(defvar gosh-backend-prompt-regexp "^gosh>[\s\t]*\\'")
 (defconst gosh-backend-process-buffer-format " *Gosh-mode<%s>* ")
 (defvar gosh-backend-process-alist nil)
 
@@ -4543,7 +4613,7 @@ And print value in the echo area.
                                    help-echo "Gosh test error: Unable to load this file"
                                    mouse-face mode-line-highlight)))
                         (goto-char (point-min))
-                        (while (re-search-forward "ERROR:[ \t]*\\(.*\\)" nil t)
+                        (while (re-search-forward "ERROR:[\s\t]*\\(.*\\)" nil t)
                           (setq errors (cons (match-string 1) errors)))
                         (when errors
                           (throw 'done
@@ -4941,7 +5011,7 @@ CHECK is function that accept no arg and return boolean."
    ;;  info-lookup-symbol   (to look up a symbol in the info)
    :topic 'symbol
    :mode  mode
-   :regexp "[^()'\" \t\n]+"
+   :regexp "[^()'\"\s\t\n]+"
    :ignore-case nil
    :doc-spec gosh-info-appendixes
    :parse-rule  nil
@@ -4967,7 +5037,7 @@ CHECK is function that accept no arg and return boolean."
           (save-excursion
             (goto-char (point-min))
             (let (res)
-              (while (re-search-forward "^\\* \\([^ \t\n]+\\):[ \t]+" nil t)
+              (while (re-search-forward "^\\* \\([^\s\t\n]+\\):[\s\t]+" nil t)
                 (setq res (cons (match-string-no-properties 1) res)))
               (setq gosh-info--documented-modules
                     (nreverse res))))))))
