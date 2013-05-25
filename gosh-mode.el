@@ -21,45 +21,11 @@
 ;; Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
 ;; Boston, MA 02110-1301, USA.
 
-
 ;;; Commentary:
 ;;
 
 ;; gosh-mode is forked from scheme-complete.el
 ;; Many code is duplicated but specialize to Gauche.
-
-;;; TODO:
-
-;; * cmuscheme C-c C-t to trace. what is this?
-;; * split backend to?
-;;   each executable script.
-;;   module script. (all module have one backend(?))
-;; * create parser process that is separated from backend process?
-;; * independent from flymake
-;;
-;; scheme-send-last-sexp to any keybind
-
-;; gosh-eval-buffer to C-c C-b
-;; gosh-eval-region to C-c C-n
-
-;; * unload `user' module except followings
-;;   *program-name*, *argv*
-
-;; * regulate gosh-sticky-* gosh-eval-*
-
-;; * Load automatically if module file is on the *load-path*?
-;;   => Bad idea. Increase security risk
-
-;; * gosh-show-info
-;;   when :prefix symbol
-
-;; * risky-local-variable
-
-;; * re-consider find-file-noselect
-;;   remove history? or use other low level api?
-
-;; * auto bracket
-;;   prefixed symbol
 
 ;;; Code:
 
@@ -69,7 +35,7 @@
   :group 'lisp
   :prefix "gosh-")
 
-(defvar gosh-mode-version "0.2.3")
+(defvar gosh-mode-version "0.3.0")
 
 (eval-when-compile
   (require 'cl)
@@ -613,15 +579,15 @@ This function come from apel"
                         ending-char ending-char)))
     (forward-char)
     (unless (looking-at regexp)
-      (signal 'invalid-read-syntax (list "todo msg")))
+      (signal 'invalid-read-syntax
+              (list (format "No valid ending char %c" ending-char))))
     (goto-char (match-end 0))
     (buffer-substring-no-properties start (point))))
 
-(defun gosh-reader--read-bulk-string ()
+(defun gosh-reader--read-special-string ()
   (forward-char)
   (unless (looking-at gosh-reader--string-re)
-    ;;TODO msg
-    (signal 'invalid-read-syntax nil))
+    (signal 'invalid-read-syntax (list "Not a valid special string")))
   (goto-char (match-end 0))
   (match-string-no-properties 1))
 
@@ -769,7 +735,7 @@ This function come from apel"
       (gosh-reader--sharp-vector))
      ((eq begin ?*)
       ;; If followed by a double quote, denotes an incomplete string.
-      (gosh-reader--read-bulk-string))
+      (gosh-reader--read-special-string))
      ((eq begin ?,)
       ;; [SRFI-10] Introduces reader constructor syntax.
       (gosh-reader--sharp-constructor))
@@ -818,7 +784,7 @@ This function come from apel"
       (gosh-reader--sharp-char))
      ((eq begin ?\`)
       ;;Introduces an interpolated string.
-      (gosh-reader--read-bulk-string))
+      (gosh-reader--read-special-string))
      ((eq begin ?\|)
       ;; [SRFI-30] Introduces a block comment.
       ;; comment context should have already been skipped.
@@ -853,7 +819,6 @@ This function come from apel"
   (goto-char (match-end 0))
   (gosh-reader--word-to-datum (match-string-no-properties 1)))
 
-;; TODO FIXME: reconsider 
 (defun gosh-reader--read ()
   (gosh-reader-ignore)
   (when (eobp)
@@ -992,15 +957,6 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
    " (and (slot-exists? e 'message) (slot-ref e 'message))"
    " \"ERROR\""
    " )))) %s)\n"))
-
-(defconst gosh-backend-check-parenthes-format
-  (concat
-   "(with-input-from-file \"%s\""
-   " (lambda () "
-   " (let loop ((exp (read))) "
-   " (unless (eof-object? exp) "
-   " (loop (read))))))\n"
-   ))
 
 ;; bound only `let' form
 ;; (defvar gosh-delegate-command)
@@ -1758,7 +1714,6 @@ d:/home == /cygdrive/d/home
                   (append (gosh-parse--extract-importer sexp) res))))))
     res))
 
-;;TODO require
 (defun gosh-parse--extract-importer (sexp)
   (case (and (consp sexp) (car-safe sexp))
     ((begin define-module)
@@ -1776,12 +1731,13 @@ d:/home == /cygdrive/d/home
                       gprefix)
                      (t ""))))
        (list (list module prefix))))
+    ((require)
+     (let* ((mpath (nth 1 sexp))
+            (mname (subst-char-in-string ?/ ?. mpath))
+            (module (intern mname)))
+       (list (list module ""))))
     ((require-extension)
-     (gosh-append-map 'gosh-parse--extract-importer (cdr sexp)))
-    ((autoload)
-     ;;TODO only arg is symbol
-     (mapcar (lambda (x) (cons (if (consp x) (car x) x) '((lambda obj))))
-             (cddr sexp)))))
+     (gosh-append-map 'gosh-parse--extract-importer (cdr sexp)))))
 
 (defun gosh-parse--construct-definition (sexp)
   (let ((fnsym (car-safe sexp))
@@ -1931,6 +1887,12 @@ d:/home == /cygdrive/d/home
                              'gosh-cache-module-globals
                              parents)
                             res)))))
+            ((autoload)
+             (let* ((body (cdr-safe sexp)))
+               ;;TODO resolve
+               (setq res (append
+                          (mapcar (lambda (x) (list x)) (cdr body))
+                          res))))
             (t
              (setq res
                    (append
