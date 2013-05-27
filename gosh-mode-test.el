@@ -152,6 +152,15 @@
       (gosh-beginning-of-list)
       (should (= (1- (point)) result)))))
 
+(defun gosh-mode-test-funcall-in-sexp (func sexp)
+  (gosh-mode-test-funcall-in-text func (prin1-to-string sexp)))
+
+(defun gosh-mode-test-parse-local-vars (sexp result)
+  (should 
+   (equal
+    (gosh-mode-test-funcall-in-sexp 'gosh-parse--current-local-vars sexp)
+    result)))
+
 (ert-deftest gosh-mode-test--BoL ()
   :tags '(gosh-mode)
   (gosh-mode-test-BoL "(let()_  -> _(let()")
@@ -181,7 +190,25 @@
   (should (equal (gosh-mode-test-funcall-in-text 'gosh-parse--current-sexp-in-list "(fn _\"A\")") '((fn "A") 1)))
   (should (equal (gosh-mode-test-funcall-in-text 'gosh-parse--current-sexp-in-list "(fn \"_A\")") '((fn "A") 1)))
   (should (equal (gosh-mode-test-funcall-in-text 'gosh-parse--current-sexp-in-list "(fn \"A_\")") '((fn "A") 1)))
-  (should (equal (gosh-mode-test-funcall-in-text 'gosh-parse--current-sexp-in-list "(fn \"A\"_)") '((fn "A") 1))))
+  (should (equal (gosh-mode-test-funcall-in-text 'gosh-parse--current-sexp-in-list "(fn \"A\"_)") '((fn "A") 1)))
+  (should (equal (gosh-mode-test-funcall-in-text 'gosh-parse--current-sexp-in-list "(fn \"A\")_") '(nil 0)))
+  )
+
+(ert-deftest gosh-mode-test--local-var-detection ()
+  :tags '(gosh-mode)
+  (gosh-mode-test-parse-local-vars '(define (method a1) _) '((a1)))
+  (gosh-mode-test-parse-local-vars '(define (method _ a1)) '())
+  (gosh-mode-test-parse-local-vars '(define (method) _) '())
+  (gosh-mode-test-parse-local-vars '(define (method) (define (inner a1) _)) '((a1)))
+  (gosh-mode-test-parse-local-vars '(define (method a1 a2) (define (inner a1) _)) '((a1) (a2)))
+  (gosh-mode-test-parse-local-vars '(define (method A1) (define (inner a1)) _) '((A1) (inner (lambda (a1)))))
+
+  (gosh-mode-test-parse-local-vars '(define-method method (A1) _) '((A1)))
+  (gosh-mode-test-parse-local-vars '(define-method method ((A1 <integer>)) _) '((A1 <integer>)))
+
+  (gosh-mode-test-parse-local-vars '(define (method a1 :key k1 (k2 1) :rest vars) _) '((a1) (k1) (k2 1) (vars)))
+  )
+
 
 (when (memq system-type '(windows-nt))
   (ert-deftest gosh-mode-test--w32-path ()

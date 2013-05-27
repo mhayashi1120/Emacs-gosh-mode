@@ -20,7 +20,7 @@
         (goto-char (point-min))
         (while (not (eobp))
           (gosh-read)
-          (gosh-reader--ignore)))
+          (gosh-reader-ignore)))
     (error 
      (insert (format "File: %s Error: %s\n" file err)))))
 
