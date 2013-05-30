@@ -29,7 +29,6 @@
 
 ;;; Code:
 
-
 (defgroup gosh-mode nil
   "Gauche script editing mode."
   :group 'lisp
@@ -65,9 +64,9 @@
 (defvar gosh-debug nil)
 
 
-;;;
-;;; utilities
-;;;
+;;;;
+;;;; utilities
+;;;;
 
 ;; [SRFI-2]
 ;; http://srfi.schemers.org/srfi-2/srfi-2.html
@@ -181,12 +180,6 @@ This function come from apel"
       (set symbol nil))
   (set symbol (gosh-put-alist key value (symbol-value symbol))))
 
-(defun gosh-env-filter (pred env)
-  (mapcar 'car
-          (apply 'concatenate
-                 'list
-                 (mapcar (lambda (e) (gosh-filter pred e)) env))))
-
 (defun gosh-filter (pred list)
   (loop for l in list
         if (funcall pred l)
@@ -244,7 +237,6 @@ This function come from apel"
           ls (cdr ls)))
   (and (consp ls) (car ls)))
 
-
 ;;
 ;; string utilities
 ;;
@@ -262,7 +254,6 @@ This function come from apel"
     (and (<= p-len s-len)
          (equal pref (substring str 0 p-len)))))
 
-
 ;;
 ;; file utilities
 ;;
@@ -294,6 +285,7 @@ This function come from apel"
          (buf (find-file-noselect file nowarn)))
     buf))
 
+;;TODO consider userlock
 (defmacro gosh-with-find-file (path-expr &rest body)
   (declare (indent 1))
   (let ((path (make-symbol "path"))
@@ -310,7 +302,7 @@ This function come from apel"
            ,res)))))
 
 (defun gosh-file-mtime (file)
-  (nth 5 (file-attributes file)))
+  (float-time (nth 5 (file-attributes file))))
 
 
 ;;;
@@ -335,6 +327,7 @@ This function come from apel"
 
 (defun gosh-object (type value)
   (case type
+    (symbol (vector 'symbol value))      ; only special symbol `nil'
     (char (vector 'char value))
     (charset (vector 'charset value))
     (number (vector 'number value))
@@ -395,35 +388,15 @@ This function come from apel"
       (t
        (let* ((str (symbol-name type))
               (i (string-match "-?[0-9]+$" str)))
-         (if i
-             (gosh-scheme-translate-type (intern (substring str 0 i)))
-           (let ((i (string-match "-\\([^-]+\\)$" str)))
-             (if i
-                 (gosh-scheme-translate-type (intern (substring str (+ i 1))))
-               (if (string-match "\\?$" str)
-                   'boolean
-                 'object)))))))))
-
-(defun gosh-lookup-type (spec pos)
-  (let ((i 1)
-        (type nil))
-    (while (and (consp spec) (<= i pos))
-      (cond
-       ((eq :optional (car spec))
-        (if (and (= i pos) (consp (cdr spec)))
-            (setq type (cadr spec)))
-        (setq i (+ pos 1)))
-       ((= i pos)
-        (setq type (car spec))
-        (setq spec nil))
-       ((and (consp (cdr spec)) (eq '\.\.\. (cadr spec)))
-        (setq type (car spec))
-        (setq spec nil)))
-      (setq spec (cdr spec))
-      (incf i))
-    (if type
-        (setq type (gosh-scheme-translate-type type)))
-    type))
+         (cond
+          (i
+           (gosh-scheme-translate-type (intern (substring str 0 i))))
+          ((setq i (string-match "-\\([^-]+\\)$" str))
+           (gosh-scheme-translate-type (intern (substring str (+ i 1)))))
+          ((string-match "\\?$" str)
+           'boolean)
+          (t
+           'object)))))))
 
 (defun gosh-predicate->type (pred)
   (case pred
@@ -478,10 +451,12 @@ This function come from apel"
   (let ((n (gosh-reader--maybe-number text)))
     (cond
      (n n)
-     ((not gosh-reader--fold-case)
-      (intern text))
      (t
-      (intern (downcase text))))))
+      (when gosh-reader--fold-case
+        (setq text (downcase text)))
+      (if (string= text "nil")
+          (gosh-object 'symbol nil)
+        (intern text))))))
 
 (defun gosh-reader-ignore ()
   (let ((start (point)))
@@ -813,6 +788,7 @@ This function come from apel"
   (list 'quote (gosh-reader--read)))
 
 (defun gosh-reader--read-string ()
+  ;;TODO consider escape sequence
   (unless (looking-at gosh-reader--string-re)
     (signal 'invalid-read-syntax (list "Non terminated string")))
   (goto-char (match-end 0))
@@ -1240,15 +1216,6 @@ d:/home == /cygdrive/d/home
 (defun gosh-context-toplevel-p (&optional point)
   (not (nth 9 (parse-partial-sexp (point-min) (or point (point))))))
 
-;; returns current argument position within sexp
-(defun gosh-beginning-of-current-sexp-operator ()
-  (let ((pos 0))
-    (skip-syntax-backward "w_")
-    (while (and (not (bobp)) (not (eq ?\( (char-syntax (char-before)))))
-      (gosh-parse--upward-sexp)
-      (incf pos))
-    pos))
-
 ;; goto beginning of current sexp (_ is cursor)
 ;; See `gosh-mode-test--BoL' at gosh-mode-test.el
 ;;TODO cleanup
@@ -1288,6 +1255,25 @@ d:/home == /cygdrive/d/home
         (when end
           (goto-char end))))))
 
+;; returns current argument position within sexp
+(defun gosh-beginning-of-current-sexp-operator ()
+  (let ((pos 0))
+    (skip-syntax-backward "w_")
+    (while (and (not (bobp)) (not (eq ?\( (char-syntax (char-before)))))
+      (gosh-parse--upward-sexp)
+      (incf pos))
+    pos))
+
+(defun gosh-end-of-sexp ()
+  (gosh-end-of-string)
+  (let* ((c0 (char-before))
+         (c (char-after))
+         (syn0 (and c0 (char-syntax c0)))
+         (syn (and c (char-syntax c))))
+    (when (or (memq syn0 '(?\s ?>))
+              (not (memq syn '(?\s ?>))))
+      (ignore-errors (forward-sexp)))))
+
 ;; for the enclosing sexp, returns a cons of the leading symbol (if
 ;; any) and the current position within the sexp (starting at 0)
 ;; (defun gosh-enclosing-sexp-prefix ()
@@ -1307,19 +1293,6 @@ d:/home == /cygdrive/d/home
        (list sym1 pos1 nil 0)))))
 
 
-
-;; sexp-at-point is always fragile, both because the user can input
-;; incomplete sexps and because some scheme sexps are not valid elisp
-;; sexps.  this is one of the few places we use it, so we're careful
-;; to wrap it in ignore-errors.
-(defun gosh-nth-sexp-at-point (n)
-  (ignore-errors
-    (save-excursion
-      (forward-sexp (+ n 1))
-      (let ((end (point)))
-        (forward-sexp -1)
-        (gosh-read-just-first (buffer-substring (point) end))))))
-
 ;;;
 ;;; parsing program which may contain unbalanced parenthese/bracket
 ;;;
@@ -1351,6 +1324,15 @@ d:/home == /cygdrive/d/home
          (beginning-of-defun)
          (looking-at "([\s\t\n]*define"))))
 
+;;TODO remove
+(defun gosh-nth-sexp-at-point (n)
+  (ignore-errors
+    (save-excursion
+      (forward-sexp (+ n 1))
+      (let ((end (point)))
+        (forward-sexp -1)
+        (gosh-read-just-first (buffer-substring (point) end))))))
+
 ;;TODO remove and merge
 (defun gosh-parse--sexp-type-at-point (&optional env)
   (case (char-syntax (char-after))
@@ -1377,97 +1359,90 @@ d:/home == /cygdrive/d/home
   (cond
    ((null x) '())
    ((symbolp x)
-    (if (memq x '(_ ___ \.\.\.))
+    (if (memq x '(_ ___ ...))
         '()
       (list (list x))))
    ((consp x)
     (case (car x)
-      ((or not)
+      ((or not and)
        (gosh-parse--extract-match-clause-vars (cdr x)))
-      ((and)
-       (if (and (consp (cdr x))
-                (consp (cddr x))
-                (symbolp (cadr x))
-                (consp (caddr x))
-                (not (memq (caaddr x)
-                           '(= $ @ ? and or not quote quasiquote get! set!))))
-           (cons (list (cadr x) (if (listp (caddr x)) 'list 'pair))
-                 (gosh-parse--extract-match-clause-vars (cddr x)))
-         (gosh-parse--extract-match-clause-vars (cddr x))))
-      ((= $ @)
+      ((= $ @ struct)
+       ;; TODO no need to check consp?
        (if (consp (cdr x)) (gosh-parse--extract-match-clause-vars (cddr x)) '()))
-      ((\? ? ) ; XXXX this is a hack, the lone ? gets read as a char (space)
-       (if (and (consp (cdr x))
-                (consp (cddr x))
-                (symbolp (cadr x))
-                (symbolp (caddr x)))
-           (cons (list (caddr x) (gosh-predicate->type (cadr x)))
-                 (gosh-parse--extract-match-clause-vars (cdddr x)))
-         (gosh-parse--extract-match-clause-vars (cddr x))))
+      ((?\?)
+       (gosh-parse--extract-match-clause-vars (cddr x)))
       ((get! set!)
-       (if (consp (cdr x)) (gosh-parse--extract-match-clause-vars (cadr x)) '()))
+       (gosh-parse--extract-match-clause-vars (cadr x)))
       ((quote) '())
-      ((quasiquote) '())                ; XXXX
       (t
-       (gosh-union
-        (gosh-parse--extract-match-clause-vars (car x))
-        (gosh-parse--extract-match-clause-vars (cdr x))))))
-   ((vectorp x)
-    (gosh-parse--extract-match-clause-vars (concatenate 'list x)))
+       (gosh-append-map 'gosh-parse--extract-match-clause-vars x))))
+   ((and (gosh-object-p x)
+         (eq (gosh-object-type x) 'vector))
+    (gosh-parse--extract-match-clause-vars
+     (append (gosh-object-value x) nil)))
    (t
     '())))
 
 (defun gosh-parse--current-local-vars (&optional env)
-  (let ((ctx (gosh-parse--current-context))
+  (let ((context (gosh-parse--current-context))
         ;; to carrying about alist as function argument
         (vars (list t)))
-    (dolist (sexp ctx)
-      (let ((fnsym (car-safe sexp)))
-        (case fnsym
-          ((lambda)
-           (gosh-parse--construct-simple-args vars (nth 1 sexp)))
-          ((match match-let match-let*)
-           (dolist (clause (nthcdr 2 sexp))
-             (gosh-parse--construct-match-vars vars (car clause))))
-          ((match-let1)
-           (gosh-parse--construct-match-vars vars (nth 1 sexp)))
-          ((let)
-           ;;TODO env
-           (cond
-            ((atom (nth 1 sexp))
-             (gosh-parse--construct-let-vars vars (nth 2 sexp)))
-            ((consp (nth 1 sexp))
-             (gosh-parse--construct-let-vars vars (nth 1 sexp)))))
-          ((let* and-let* letrec
-                 fluid-let)
-           ;;TODO env
-           (gosh-parse--construct-let-vars vars (nth 1 sexp)))
-          ((let1 rlet1 if-let1)
-           (gosh-parse--put-var vars (nth 1 sexp) (list (nth 2 sexp))))
-          ((let-values let*-values)
-           (dolist (var-expr (nth 1 sexp))
-             (gosh-parse--construct-simple-args vars (car var-expr))))
-          ((let-syntax letrec-syntax)
-           ;;TODO
-           (dolist (syn-expr (nth 1 sexp))
-             (gosh-parse--put-var vars (car syn-expr) `((syntax)))))
-          ((do)
-           ;;TODO
-           (dolist (var-expr (nth 1 sexp))
-             (gosh-parse--put-var vars (car var-expr) nil)))
-          ((receive)
-           (gosh-parse--construct-simple-args vars (nth 1 sexp)))
-          ((define define-constant)
-           ;;TODO if inner definitions
-           ;; (gosh-parse--put-var vars (car (nth 1 sexp)) 
-           (gosh-parse--construct-simple-args vars (cdr (nth 1 sexp))))
-          ((define-in-module)
-           ;;TODO test
-           (gosh-parse--construct-simple-args vars (cdr (nth 2 sexp))))
-          ((define-method)
-           (gosh-parse--construct-typed-vars vars  (nth 2 sexp)))
-          )))
+    (loop for ctx on context
+          do 
+          (let* ((sexp (car ctx))
+                 (fnsym (car-safe sexp)))
+            (case fnsym
+              ((lambda)
+               (gosh-parse--construct-simple-args vars (nth 1 sexp)))
+              ((match)
+               (let ((clause (cdr ctx)))
+                 (gosh-parse--construct-match-vars vars (car-safe clause))))
+              ((match-let match-let*)
+               (dolist (pat-expr (nth 1 sexp))
+                 (gosh-parse--construct-match-vars vars (car-safe pat-expr))))
+              ((match-let1)
+               (gosh-parse--construct-match-vars vars (nth 1 sexp)))
+              ((let)
+               ;;TODO env
+               (cond
+                ((atom (nth 1 sexp))
+                 (gosh-parse--construct-let-vars vars (nth 2 sexp)))
+                ((consp (nth 1 sexp))
+                 (gosh-parse--construct-let-vars vars (nth 1 sexp)))))
+              ((let* and-let* letrec
+                     fluid-let)
+               ;;TODO env
+               (gosh-parse--construct-let-vars vars (nth 1 sexp)))
+              ((let1 rlet1 if-let1)
+               (gosh-parse--put-var vars (nth 1 sexp) (list (nth 2 sexp))))
+              ((let-values let*-values)
+               (dolist (var-expr (nth 1 sexp))
+                 (gosh-parse--construct-simple-args vars (car var-expr))))
+              ((let-syntax letrec-syntax)
+               ;;TODO
+               (dolist (syn-expr (nth 1 sexp))
+                 (gosh-parse--put-var vars (car syn-expr) `((syntax)))))
+              ((do)
+               ;;TODO
+               (dolist (var-expr (nth 1 sexp))
+                 (gosh-parse--put-var vars (car var-expr) nil)))
+              ((receive)
+               (gosh-parse--construct-simple-args vars (nth 1 sexp)))
+              ((define define-constant)
+               ;;TODO if inner definitions
+               ;; (gosh-parse--put-var vars (car (nth 1 sexp)) 
+               (gosh-parse--construct-simple-args vars (cdr (nth 1 sexp))))
+              ((define-in-module)
+               ;;TODO test
+               (gosh-parse--construct-simple-args vars (cdr (nth 2 sexp))))
+              ((define-method)
+               (gosh-parse--construct-typed-vars vars  (nth 2 sexp)))
+              )))
     (delq t vars)))
+
+(defun gosh-parse--put-vars (alist key-value-pairs)
+  (dolist (kv key-value-pairs)
+    (gosh-parse--put-var alist (car kv) (cadr kv))))
 
 (defun gosh-parse--put-var (alist key value)
   (let ((elm (assq key alist)))
@@ -1506,65 +1481,46 @@ d:/home == /cygdrive/d/home
          ((consp (car x))
           (gosh-parse--put-var alist (caar x) (cdar x))))))
 
-(defun gosh-parse--current-context ()
+(defun gosh-parse--skip-backward-quoting ()
+  (when (memq (char-before) '(?\# ?\' ?\`))
+    (backward-char)))
+
+;;TODO
+;; (let* ([aa #f)) (valid-proc _))
+;; Above case raise invalid-read-syntax error. 
+;; But what should i do? Should keep process as long as i can?
+(defun gosh-parse--current-context (&optional max)
   (save-excursion
-    (let ((res '()))
-      (while (not (gosh-context-toplevel-p))
+    (let ((res '())
+          (prev nil))
+      (gosh-parse--skip-backward-quoting)
+      (while (and (not (gosh-context-toplevel-p))
+                  (or (null max)
+                      (< (length res) max)))
         (let ((end (point)))
           (gosh-beginning-of-list)
-          (let* ((paren-start (char-after))
-                 (paren-end (gosh-paren-against-char paren-start))
-                 (s (buffer-substring (point) end))
-                 (sexp (gosh-read-just-first (concat s `(,paren-end)))))
-            (setq res (cons sexp res)))))
+          (let ((paren-start (char-after)))
+            (gosh-parse--skip-backward-quoting)
+            (let* ((paren-end (gosh-paren-against-char paren-start))
+                   (s (buffer-substring-no-properties (point) end))
+                   (sexp (gosh-read-just-first (concat s `(,paren-end))))
+                   (last (last sexp)))
+              (when (and (consp last) prev)
+                (setcdr last (list prev)))
+              (setq res (cons sexp res))
+              (setq prev sexp)))))
       res)))
 
-(defun gosh-parse--current-sexp-in-list ()
+(defun gosh-parse--current-fnsexp-in-list ()
   (save-excursion
-    (gosh-end-of-string)
-    (let* ((c0 (char-before))
-           (c (char-after))
-           (syn0 (and c0 (char-syntax c0)))
-           (syn (and c (char-syntax c))))
-      (when (or (memq syn0 '(?\s ?>))
-                (not (memq syn '(?\s ?>))))
-        (ignore-errors (forward-sexp)))
-      (let* ((ctx (gosh-parse--current-context))
-             (fnsexp (car-safe (last ctx)))
-             (index (1- (length fnsexp))))
-        (list fnsexp (max index 0))))))
-
-(defun gosh-parse--current-context-for-opening (&optional count)
-  (save-excursion
-    (let ((c (or count 0))
-          (start (point)))
-      (while (and
-              (not (gosh-context-toplevel-p)) ; top level
-              (condition-case nil
-                  (progn
-                    (backward-sexp)
-                    t)
-                (scan-error
-                 (cond
-                  ((plusp c)
-                   (decf c)
-                   (skip-chars-backward "\s\t\n(["))
-                  ((looking-at "\\(?:\\sw\\|\\s_\\)")
-                   nil)
-                  (t
-                   (backward-char)
-                   t))))))
-      (skip-chars-backward "\s\t\n([")
-      (let* ((partial (buffer-substring-no-properties (point) start))
-             (parsed (parse-partial-sexp (point) start))
-             (parenthese (mapcar
-                          (lambda (x)
-                            (gosh-paren-against-char (char-after x)))
-                          (reverse (nth 9 parsed))))
-             (closing (concat parenthese))
-             (sexp (gosh-read-just-first
-                    (concat partial " *" closing))))
-        (and (consp sexp) sexp)))))
+    (gosh-end-of-sexp)
+    (let* ((ctx (gosh-parse--current-context 1))
+           (fnsexp (car-safe ctx))
+           (index (1- (length fnsexp))))
+      (unless (and (consp fnsexp)
+                   (symbolp (car fnsexp)))
+        (setq fnsexp nil))
+      (list fnsexp (max index 0)))))
 
 (defun gosh-parse--current-import-symbols (importers)
   (let ((res '()))
@@ -1581,7 +1537,7 @@ d:/home == /cygdrive/d/home
                              (fullsym (intern (concat prefix dname))))
                         (cons fullsym (cdr d))))
                      (t d)))
-                  (gosh-cache-module-exports module)))))
+                  (gosh-cache-module-export-env module)))))
           (setq res (append syms res)))))
     res))
 
@@ -1592,7 +1548,7 @@ d:/home == /cygdrive/d/home
       ;; scan for module forms
       (while (not (eobp))
         (ignore-errors
-          (gosh-and* ((sexp (gosh-parse-read))
+          (gosh-and* ((sexp (gosh-parse-read-form))
                       ((consp sexp)))
             (setq res
                   (append (gosh-parse--extract-importer sexp) res))))))
@@ -1665,45 +1621,176 @@ d:/home == /cygdrive/d/home
       (t
        '()))))
 
-;;TODO consider `gosh-parse-file-exports'
-(defun gosh-parse-exports-functions (file)
-  (gosh-with-find-file file
-    (gosh-parse--current-exports)))
+(defun gosh-parse-current-module ()
+  (save-excursion
+    (save-restriction
+      (widen)
+      (catch 'return
+        (gosh-end-of-string)
+        ;; avoid starts of "(with-module"
+        (let ((context (gosh-parse--current-context)))
+          (dolist (module-switch '(define-module with-module))
+            (let ((pair (assq module-switch context)))
+              (when (and pair (nth 1 pair))
+                (throw 'return (format "%s" (nth 1 pair)))))))
+        (while (re-search-backward "^[\s\t]*(select-module[\s\t\n]+\\([^\s\t\n()]+\\)" nil t)
+          (when (gosh-context-code-p)
+            (throw 'return (match-string-no-properties 1))))
+        ;; default is user module
+        "user"))))
 
-(defun gosh-parse-file-globals (file)
-  (gosh-with-find-file file
-    (save-excursion
-      (goto-char (point-min))
-      (gosh-parse--current-globals t))))
+(defun gosh-parse-read-form ()
+  ;; read expression as long as program can.
+  ;; editing source code may have unbalanced brace.
+  ;; if no more valid S-expression at point, cursor 
+  ;; ended the buffer and return nil.
+  (let ((start (point)))
+    (catch 'done
+      (while (not (eobp))
+        (condition-case nil
+            (let ((sexp (gosh-read)))
+              (when sexp
+                (throw 'done sexp)))
+          (error
+           (goto-char start)
+           (forward-line)
+           ;;TODO in nested comment
+           (unless (re-search-forward "^(" nil t)
+             (goto-char (point-max))
+             (throw 'done nil))
+           (forward-line 0)
+           (setq start (point))))))))
 
-(defun gosh-parse-file-exports (file)
+(defun gosh-parse-read-current-buffer ()
+  (save-excursion
+    (goto-char (point-min))
+    (let ((res '())
+          sexp)
+      (while (setq sexp (gosh-parse-read-form))
+        (setq res (cons sexp res)))
+      (nreverse res))))
+
+;;
+;; Parsed cache
+;;
+
+;;TODO to have extend relation
+(defvar gosh-cache--module-export-env '(t)
+  "Each item is following list
+\\(file-name module-symbol time symbols-alist)
+
+TODO key should be module-file?? multiple executable make complex.")
+
+;;TODO to have extend relation
+;;TODO refactor file information collect to one object. same *-module-exports
+(defvar gosh-cache--file-global-env '(t)
+  "Each item is following list
+\\(file-name module-symbol time symbols-alist)")
+
+(defun gosh-cache--get (cache)
+  (nth 3 cache))
+
+(defun gosh-cache--pull (file cache)
+  (let ((hit (assoc file cache)))
+    (cond
+     ((null hit)
+      (setq hit (cons file nil))
+      (setcdr (last cache) (list hit)))
+     ((ignore-errors
+        (let ((mtime (gosh-file-mtime (nth 0 hit)))
+              ;; cached time
+              (ctime (nth 2 hit)))
+          (> mtime ctime)))
+      (setcdr hit nil)))
+    hit))
+
+(defun gosh-cache--push (file mod cache value)
+  (let ((mtime (gosh-file-mtime file)))
+    (setcdr cache `(,mod ,mtime ,value))))
+
+(defvar gosh-cache--file-forms '(t)
+  "TODO comment ")
+
+(defun gosh-cache-module-forms (module)
+  (let* ((file (gosh--module->file module))
+         (cached (and file (gosh-cache--pull file gosh-cache--file-forms))))
+    (or (gosh-cache--get cached)
+        ;; (re)compute module as forms
+        (let ((res (gosh-parse-file-forms file)))
+          (gosh-cache--push file module cached res)
+          res))))
+
+;; Gather export symbols of MOD.
+(defun gosh-cache-module-export-env (module)
+  (let ((mname (symbol-name module)))
+    (cond
+     ((and (symbolp module) (string-match "^srfi-\\([0-9]+\\)$" mname))
+      (let ((srfi-n (string-to-number (match-string 1 mname))))
+        (gosh-env--srfi-exports srfi-n)))
+     (t
+      (let* ((file (gosh--module->file module))
+             (cached (and file (gosh-cache--pull file gosh-cache--module-export-env))))
+        (or (gosh-cache--get cached)
+            ;; (re)compute module exports
+            (let* ((todo (gosh-cache-module-forms module))
+                   (res (gosh-env-file-exports file todo)))
+              (gosh-cache--push file module cached res)
+              res)))))))
+
+;; Gather module all definitions which is derived by child module.
+(defun gosh-cache-module-global-env (module)
+  (let* ((file (gosh--module->file module))
+         (cached (and file (gosh-cache--pull file gosh-cache--file-global-env))))
+    (or (gosh-cache--get cached)
+        ;; (re)compute module exports
+        (let* ((todo (gosh-cache-module-forms module))
+               (res (gosh-env-file-globals file todo)))
+          (gosh-cache--push file module cached res)
+          res))))
+
+;;
+;; env
+;;
+
+(defun gosh-env-file-globals (file parsed)
+  (gosh-env-current-globals t parsed))
+
+(defun gosh-env-file-exports (file &optional todo-pppp)
   (let (syms modules)
     (gosh-with-find-file file
-      (setq syms (gosh-parse--exported-symbols))
-      (setq modules (gosh-parse--current-base-modules)))
+      (let ((parsed (or todo-pppp (gosh-parse-read-current-buffer))))
+        (setq syms (gosh-env--exported-symbols parsed))
+        (setq modules (gosh-env--base-modules parsed))))
     (dolist (mod modules)
-      (let ((f (gosh--module->file mod)))
-        (setq syms (append (gosh-parse-file-exports f) syms))))
+      (let ((file (gosh--module->file mod)))
+        (setq syms (append (gosh-env-file-exports file) syms))))
     syms))
 
-(defun gosh-parse--file-base-modules (file)
+;;TODO consider `gosh-env-file-exports'
+(defun gosh-env-exports-functions (file)
   (gosh-with-find-file file
-    (gosh-parse--current-base-modules)))
+    (let ((parsed (gosh-parse-read-current-buffer)))
+      (gosh-env--current-exports nil nil parsed))))
 
-(defun gosh-parse--current-base-modules ()
-  (let (mod modules)
-    (save-excursion
-      (goto-char (point-min))
-      (while (re-search-forward "(extend\\_>" nil t)
-        (when (gosh-context-code-p)
-          (ignore-errors
-            (while (setq mod (gosh-read))
-              (setq modules (cons mod modules)))))))
-    (nreverse modules)))
+(defun gosh-env--file-base-modules (file)
+  (gosh-with-find-file file
+    ;;TODO parse
+    (gosh-env--current-base-modules)))
 
-(defun gosh-parse--exported-symbols ()
-  (let* ((env (gosh-parse--current-globals))
-         (exports (gosh-parse--current-exports t env))
+(defun gosh-env--base-modules (parsed)
+  (let ((extends (cdr
+                  (or (assq 'extend parsed)
+                      (let ((def (assq 'define-module parsed)))
+                        (assq 'extend def))))))
+    extends))
+
+(defun gosh-env--current-base-modules ()
+  ;;TODO parse and restrict module
+  (gosh-env--base-modules (gosh-parse-read-current-buffer)))
+
+(defun gosh-env--exported-symbols (parsed)
+  (let* ((env (gosh-env-current-globals nil parsed))
+         (exports (gosh-env--current-exports t env parsed))
          (res '()))
     ;; if source file execute dynamic load.
     ;; global definition (env) will be null.
@@ -1719,46 +1806,43 @@ d:/home == /cygdrive/d/home
           (setq res (cons x res)))))
     res))
 
-(defun gosh-parse--current-globals (&optional only-current)
+(defun gosh-env-current-globals (&optional only-current parsed)
   (let ((res '()))
-    (save-excursion
-      (goto-char (point-min))
-      (while (not (eobp))
-        (let* ((sexp (gosh-parse-read))
-               (fnsym (car-safe sexp)))
-          (case fnsym
-            ((define-module)
-             (unless only-current
-               (let* ((body (cdr-safe sexp))
-                      (parents (cdr (assq 'extend body))))
-                 (setq res (append
-                            (gosh-append-map
-                             'gosh-cache-module-globals
-                             parents)
-                            res)))))
-            ((extend)
-             (unless only-current
-               (let* ((body (cdr-safe sexp))
-                      (parents (cdr body)))
-                 (setq res (append
-                            (gosh-append-map
-                             'gosh-cache-module-globals
-                             parents)
-                            res)))))
-            ((autoload)
-             (let* ((body (cdr-safe sexp)))
-               ;;TODO resolve
+    (dolist (sexp (or parsed (gosh-parse-read-current-buffer)))
+      (let ((fnsym (car-safe sexp)))
+        (case fnsym
+          ((define-module)
+           (unless only-current
+             (let* ((body (cdr-safe sexp))
+                    (parents (cdr (assq 'extend body))))
                (setq res (append
-                          (mapcar (lambda (x) (list x)) (cdr body))
-                          res))))
-            (t
-             (setq res
-                   (append
-                    (ignore-errors (gosh-parse--construct-definition sexp))
-                    res)))))))
+                          (gosh-append-map
+                           'gosh-cache-module-global-env
+                           parents)
+                          res)))))
+          ((extend)
+           (unless only-current
+             (let* ((body (cdr-safe sexp))
+                    (parents (cdr body)))
+               (setq res (append
+                          (gosh-append-map
+                           'gosh-cache-module-global-env
+                           parents)
+                          res)))))
+          ((autoload)
+           (let* ((body (cdr-safe sexp)))
+             ;;TODO resolve
+             (setq res (append
+                        (mapcar (lambda (x) (list x)) (cdr body))
+                        res))))
+          (t
+           (setq res
+                 (append
+                  (ignore-errors (gosh-parse--construct-definition sexp))
+                  res))))))
     res))
 
-(defun gosh-parse--current-exports (&optional only-current env)
+(defun gosh-env--current-exports (&optional only-current env parsed)
   (let* ((res '())
          (extend-handler
           (lambda (form)
@@ -1767,7 +1851,7 @@ d:/home == /cygdrive/d/home
                 (setq res (append
                            (mapcar 'car
                                    (gosh-append-map
-                                    'gosh-cache-module-exports
+                                    'gosh-cache-module-export-env
                                     parents))
                            res))))))
          (export-handler
@@ -1778,42 +1862,44 @@ d:/home == /cygdrive/d/home
             (setq res (nconc
                        (mapcar
                         'car
-                        (or env (gosh-parse--current-globals)))
+                        (or env (gosh-env-current-globals)))
                        res))
             ;; skip all
             (goto-char (point-max)))))
 
-    (save-excursion
-      (goto-char (point-min))
-      (ignore-errors
-        (while (not (eobp))
-          (let* ((sexp (gosh-parse-read))
-                 (fnsym (car-safe sexp)))
-            (case fnsym
-              ((define-module)
-               (let ((decls (cddr sexp)))
-                 (funcall extend-handler (assq 'extend decls))
-                 (cond
-                  ((and (consp decls) (assq 'export decls))
-                   (funcall export-handler (assq 'export decls)))
-                  ((and (consp decls) (assq 'export-all decls))
-                   (funcall export-all-handler)))))
-              ((export export-if-defined)
-               (funcall export-handler (cdr sexp)))
-              ((export-all)
-               (funcall export-all-handler))
-              ((extend)
-               (funcall extend-handler sexp)))))))
+    (ignore-errors
+      (dolist (sexp (or parsed (gosh-parse-read-current-buffer)))
+        (let ((fnsym (car-safe sexp)))
+          (case fnsym
+            ((define-module)
+             (let ((decls (cddr sexp)))
+               (funcall extend-handler (assq 'extend decls))
+               (cond
+                ((and (consp decls) (assq 'export decls))
+                 (funcall export-handler (assq 'export decls)))
+                ((and (consp decls) (assq 'export-all decls))
+                 (funcall export-all-handler)))))
+            ((export export-if-defined)
+             (funcall export-handler (cdr sexp)))
+            ((export-all)
+             (funcall export-all-handler))
+            ((extend)
+             (funcall extend-handler sexp))))))
     res))
 
-(defun gosh-scheme-srfi-exports (i)
+(defun gosh-env--srfi-exports (i)
   (cond
    ((integerp i)
     (when (and (>= i 0)
                (< i (length *gosh-scheme-srfi-info*)))
       (cdr (aref *gosh-scheme-srfi-info* i))))))
 
-(defun gosh-parse-current-env ()
+;;TODO rename?
+(defun gosh-parse-file-forms (file)
+  (gosh-with-find-file file
+    (gosh-parse-read-current-buffer)))
+
+(defun gosh-env-current ()
   ;; r5rs
   (let ((env (list *gosh-scheme-r5rs-info*))
         (importers (gosh-parse-gather-current-importer)))
@@ -1829,7 +1915,7 @@ d:/home == /cygdrive/d/home
       (when imports
         (push imports env)))
     ;; top-level defs
-    (let ((top (ignore-errors (gosh-parse--current-globals))))
+    (let ((top (ignore-errors (gosh-env-current-globals))))
       (when top
         (push top env)))
     ;; current local vars
@@ -1838,115 +1924,48 @@ d:/home == /cygdrive/d/home
         (push locals env)))
     env))
 
-(defun gosh-parse-current-module ()
-  (save-excursion
-    (save-restriction
-      (widen)
-      (catch 'return
-        ;; avoid starts of "(with-module"
-        (when (eq (char-syntax (char-after)) ?\()
-          (unless (bobp)
-            (backward-char)))
-        (let ((matcher
-               (lambda ()
-                 (when (looking-at "(\\(?:with\\|define\\)-module[\s\t\n]+\\([^\s\t\n()]+\\)")
-                   (throw 'return (match-string-no-properties 1))))))
-          (unless (gosh-context-toplevel-p)
-            ;; while not top level
-            (while (and (not (bobp))
-                        (not (eq (char-syntax (char-after)) ?\()))
-              (funcall matcher)
-              (gosh-beginning-of-list))
-            (funcall matcher)))
-        (when (re-search-backward "^[\s\t]*(select-module[\s\t\n]+\\([^\s\t\n()]+\\)" nil t)
-          (throw 'return (match-string-no-properties 1)))
-        "user"))))
+(defun gosh-env-filter (pred env)
+  (mapcar 'car
+          (apply 'concatenate
+                 'list
+                 (mapcar (lambda (e) (gosh-filter pred e)) env))))
 
-;;TODO consider cost of this code
-(defun gosh-parse-read ()
-  (let ((start (point)))
-    (catch 'done
-      (while (not (eobp))
-        (condition-case nil
-            (let ((sexp (gosh-read)))
-              (throw 'done sexp))
-          (error
-           (goto-char start)
-           (forward-line)
-           ;;TODO nested comment
-           (unless (re-search-forward "^(" nil t)
-             ;;TODO nil?
-             (throw 'done nil))
-           (forward-line 0)
-           (setq start (point))))))))
+(defun gosh-env-matches (env sym with-detailed)
+  (let ((specs nil)
+        (ls env)
+        cands tmp)
+    (dolist (l ls)
+      (while (setq tmp (assq sym l))
+        (setq l (cdr (memq tmp l)))
+        (setq cands (cons tmp cands))
+        (when (or (null with-detailed)
+                  (cdr tmp))
+          (setq specs (cons tmp specs)))))
+    ;; when specs are not found if with-detailed or not,
+    ;; return first candidate.
+    (unless specs
+      (when (consp cands)
+        (setq specs (list (car cands)))))
+    specs))
 
-;;
-;; Parsed cache
-;;
-
-;;TODO to have extend relation
-(defvar gosh-cache--module-exports '()
-  "Each item is following list
-\\(file-name module-symbol time symbols-alist [defined-symbols])
-
-TODO key should be module-file?? multiple executable make complex.
-"
-  )
-
-;;TODO to have extend relation
-;;TODO refactor file information collect to one object. same *-module-exports
-(defvar gosh-cache--file-globals '()
-  "Each item is following list
-\\(file-name module-symbol time symbols-alist)"
-  )
-
-;; Gather export symbols of MOD.
-(defun gosh-cache-module-exports (mod)
-  (cond
-   ((and (consp mod) (eq 'srfi (car mod)))
-    ;; TODO remove this cond
-    (gosh-append-map 'gosh-scheme-srfi-exports (cdr mod)))
-   ((and (symbolp mod) (string-match "^srfi-\\([0-9]+\\)$" (symbol-name mod)))
-    (let ((srfi-n (string-to-number (match-string 1 (symbol-name mod)))))
-      (gosh-scheme-srfi-exports srfi-n)))
-   (t
-    (let* ((file (gosh--module->file mod))
-           (cached (gosh-cache--find-with-mark file 'gosh-cache--module-exports)))
-      (if cached
-          (nth 3 cached)
-        ;; (re)compute module exports
-        (let ((res (gosh-parse-file-exports file)))
-          (push (list file mod (gosh-file-mtime file) res)
-                gosh-cache--module-exports)
-          res))))))
-
-;; Gather module all definitions which is derived by child module.
-(defun gosh-cache-module-globals (mod)
-  (let* ((file (gosh--module->file mod))
-         (cached (gosh-cache--find-with-mark file 'gosh-cache--file-globals)))
-    (if cached
-        (nth 4 cached)
-      ;; (re)compute module exports
-      (let ((res (gosh-parse-file-globals file))
-            (bases (gosh-parse--file-base-modules file)))
-        (push (list file mod (gosh-file-mtime file) bases res)
-              gosh-cache--file-globals)
-        res))))
-
-(defun gosh-cache--find-with-mark (file cache-var)
-  (let* ((pred (lambda (item)
-                 (equal (nth 0 item) file)))
-         (cached (gosh-find pred (symbol-value cache-var))))
-    (when (and cached
-               (stringp (nth 0 cached))
-               (ignore-errors
-                 (let ((mtime (gosh-file-mtime (nth 0 cached)))
-                       (ctime (nth 2 cached)))
-                   (not (or (equal mtime ctime)
-                            (time-less-p mtime ctime))))))
-      (set cache-var (gosh-remove pred (symbol-value cache-var)))
-      (setq cached nil))
-    cached))
+(defun gosh-env-lookup (env sym)
+  (let ((specs (gosh-env-matches env sym nil))
+        res s)
+    ;; find most detailed info
+    (dolist (s specs)
+      (when (and (consp s)
+                 (or (> (length s) (length res))
+                     (and (= (length s) (length res))
+                          ;;FIXME TODO....
+                          (consp (cadr s))
+                          (consp (cadr res))
+                          (eq 'lambda (caadr s))
+                          (eq 'lambda (caadr res))
+                          ;; compare lambda args
+                          (> (length (gosh-flat (cadadr s)))
+                             (length (gosh-flat (cadadr res)))))))
+        (setq res s)))
+    res))
 
 
 ;;;;
@@ -2007,6 +2026,7 @@ TODO key should be module-file?? multiple executable make complex.
   "Face used to error highlight mode line module name."
   :group 'gosh-mode)
 
+;;;###autoload
 (defun gosh-run (cmd)
   "Wrapper of `run-scheme' command."
   (interactive
@@ -2019,7 +2039,8 @@ TODO key should be module-file?? multiple executable make complex.
                                nil nil gosh-default-command)
             gosh-default-command-internal)))
      (list (combine-and-quote-strings (list command "-i")))))
-  (run-scheme cmd)
+  (let ((scheme-program-name (format "%s -i" gosh-default-command)))
+    (run-scheme cmd))
   (unless (eq major-mode 'gosh-inferior-mode)
     (gosh-inferior-mode)))
 
@@ -2109,7 +2130,7 @@ Set this variable before open by `gosh-mode'."
   :initialize (lambda (s v) (set s v)))
 
 (defun gosh-eldoc--initialize ()
-  (when (require 'eldoc nil t)
+  (when (featurep 'eldoc)
     (when (numberp gosh-eldoc-idle-delay)
       (set (make-local-variable 'eldoc-idle-delay) gosh-eldoc-idle-delay))
     (set (make-local-variable 'eldoc-documentation-function)
@@ -2144,7 +2165,9 @@ Set this variable before open by `gosh-mode'."
               (and (keywordp prev-sym) prev-sym)))
             (keywords (cdr (memq :key info-sexp))))
         (setq target-exp (or (assq key1 keywords)
-                             (assq key2 keywords)))))
+                             (assq key2 keywords)
+                             (car-safe (memq key1 keywords))
+                             (car-safe (memq key2 keywords))))))
     (unless target-exp
       (setq target-exp (nth index real-sexp)))
     ;; index exceed maximum but
@@ -2271,14 +2294,14 @@ Set this variable before open by `gosh-mode'."
   (save-match-data
     (with-local-quit
       (when (gosh-context-code-p)
-        (let* ((fnsym0 (gosh-parse--current-sexp-in-list))
+        (let* ((fnsym0 (gosh-parse--current-fnsexp-in-list))
                (fnpos (if (consp fnsym0) (cadr fnsym0) 0))
                (sym (and (consp fnsym0) (gosh-nth* fnpos (car fnsym0))))
                (fnsym (cond ((atom fnsym0) fnsym0)
                             (t (caar fnsym0))))
                (env (save-excursion
                       (gosh-beginning-of-string)
-                      (gosh-parse-current-env)))
+                      (gosh-env-current)))
                (spec1 (and fnsym (gosh-env-matches env fnsym t)))
                (spec2 (and sym (gosh-env-matches env sym t)))
                (string1 (and spec1
@@ -2456,46 +2479,9 @@ Set this variable before open by `gosh-mode'."
                 (setq unread-command-events (list orig-event)))
               (setq done t))))))))))
 
-(defun gosh-env-matches (env sym with-detailed)
-  (let ((specs nil)
-        (ls env)
-        cands tmp)
-    (dolist (l ls)
-      (while (setq tmp (assq sym l))
-        (setq l (cdr (memq tmp l)))
-        (setq cands (cons tmp cands))
-        (when (or (null with-detailed)
-                  (cdr tmp))
-          (setq specs (cons tmp specs)))))
-    ;; when specs are not found if with-detailed or not,
-    ;; return first candidate.
-    (unless specs
-      (when (consp cands)
-        (setq specs (list (car cands)))))
-    specs))
-
-(defun gosh-env-lookup (env sym)
-  (let ((specs (gosh-env-matches env sym nil))
-        res s)
-    ;; find most detailed info
-    (dolist (s specs)
-      (when (and (consp s)
-                 (or (> (length s) (length res))
-                     (and (= (length s) (length res))
-                          ;;FIXME TODO....
-                          (consp (cadr s))
-                          (consp (cadr res))
-                          (eq 'lambda (caadr s))
-                          (eq 'lambda (caadr res))
-                          ;; compare lambda args
-                          (> (length (gosh-flat (cadadr s)))
-                             (length (gosh-flat (cadadr res)))))))
-        (setq res s)))
-    res))
-
 ;; checking return values:
 ;;   a should be capable of returning instances of b
-(defun gosh-type-match-p (a b)
+(defun gosh-completion--type-match-p (a b)
   (let ((a1 (gosh-scheme-translate-type a))
         (b1 (gosh-scheme-translate-type b)))
     (and (not (eq a1 'undefined))   ; check a *does* return something
@@ -2519,19 +2505,19 @@ Set this variable before open by `gosh-mode'."
                         ;; type unions
                         (gosh-find
                          (lambda (x)
-                           (gosh-type-match-p
+                           (gosh-completion--type-match-p
                             a1 (gosh-scheme-translate-type x)))
                          (cdr b1))
                       (let ((b2 (gosh-translate-special-type b1)))
                         (and (not (equal b1 b2))
-                             (gosh-type-match-p a1 b2))))))
+                             (gosh-completion--type-match-p a1 b2))))))
                (and (consp a1)
                     (case (car a1)
                       ((or)
                        ;; type unions
                        (gosh-find
                         (lambda (x)
-                          (gosh-type-match-p (gosh-scheme-translate-type x) b1))
+                          (gosh-completion--type-match-p (gosh-scheme-translate-type x) b1))
                         (cdr a1)))
                       ((lambda)
                        ;; procedures
@@ -2545,7 +2531,27 @@ Set this variable before open by `gosh-mode'."
                        (let ((a2 (gosh-translate-special-type a1))
                              (b2 (gosh-translate-special-type b1)))
                          (and (or (not (equal a1 a2)) (not (equal b1 b2)))
-                              (gosh-type-match-p a2 b2)))))))))))
+                              (gosh-completion--type-match-p a2 b2)))))))))))
+
+(defun gosh-completion--lookup-type (spec pos)
+  (let ((i 1)
+        (type nil))
+    (while (and (consp spec) (<= i pos))
+      (cond
+       ((eq :optional (car spec))
+        (if (and (= i pos) (consp (cdr spec)))
+            (setq type (cadr spec)))
+        (setq i (+ pos 1)))
+       ((= i pos)
+        (setq type (car spec))
+        (setq spec nil))
+       ((and (consp (cdr spec)) (eq '\.\.\. (cadr spec)))
+        (setq type (car spec))
+        (setq spec nil)))
+      (setq spec (cdr spec))
+      (incf i))
+    (and type
+         (gosh-scheme-translate-type type))))
 
 ;;TODO name
 (defun gosh-param-list-match-p (p1 p2)
@@ -2607,140 +2613,136 @@ Set this variable before open by `gosh-mode'."
 
 (defun gosh-smart-complete (&optional arg)
   (interactive "P")
-  (let* ((sym (gosh-complete-symbol-name-at-point))
-         (in-str-p (gosh-context-string-p))
-         (x (save-excursion
-              (if in-str-p (gosh-beginning-of-string))
-              (gosh-enclosing-2-sexp-prefixes)))
-         (inner-proc (car x))
-         (inner-pos (cadr x))
-         (outer-proc (caddr x))
-         (outer-pos (cadddr x))
-         (env (save-excursion
-                (if in-str-p (gosh-beginning-of-string))
-                (gosh-parse-current-env)))
-         (outer-spec (gosh-env-lookup env outer-proc))
-         (outer-type (gosh-scheme-translate-type (cadr outer-spec)))
-         (inner-spec (gosh-env-lookup env inner-proc))
-         (inner-type (gosh-scheme-translate-type (cadr inner-spec))))
-    (cond
-     ;; return all env symbols when a prefix arg is given
-     (arg
-      (gosh-completion-do sym (gosh-env-filter (lambda (x) t) env)))
-     ;; allow different types of strings
-     (in-str-p
-      (let* ((param-type
-              (and (consp inner-type)
-                   (eq 'lambda (car inner-type))
-                   (gosh-lookup-type (cadr inner-type) inner-pos)))
-             (completer (or (gosh-complete-in-string param-type)
-                            '(gosh-complete-file-name
-                              file-name-nondirectory))))
-        (gosh-completion-do
-         ;;(if (consp completer) (funcall (cadr completer) sym) sym)
-         sym
-         (gosh-complete-apply-string-completer completer sym))))
-     ;; outer special
-     ((and (consp outer-type)
-           (eq 'special (car outer-type))
-           (cadddr outer-type))
-      (gosh-completion-do sym (funcall (cadddr outer-type) sym)))
-     ;; inner special
-     ((and (consp inner-type)
-           (eq 'special (car inner-type))
-           (caddr inner-type))
-      (gosh-completion-do sym (funcall (caddr inner-type) sym)))
-     ;; completing inner procedure, complete procedures with a
-     ;; matching return type
-     ((and (consp outer-type)
-           (eq 'lambda (car outer-type))
-           (not (zerop outer-pos))
-           (gosh-nth* (- outer-pos 1) (cadr outer-type))
-           (or (zerop inner-pos)
-               (and (>= 1 inner-pos)
-                    (consp inner-type)
-                    (eq 'lambda (car inner-type))
-                    (let ((param-type
-                           (gosh-lookup-type (cadr inner-type) inner-pos)))
-                      (and (consp param-type)
-                           (eq 'lambda (car param-type))
-                           (eq (caddr inner-type) (caddr param-type)))))))
-      (let ((want-type (gosh-lookup-type (cadr outer-type) outer-pos)))
-        (gosh-completion-do
-         sym
-         (gosh-env-filter
-          (lambda (x)
-            (let ((type (cadr x)))
-              (or (memq type '(procedure object nil))
-                  (and (consp type)
-                       (or (and (eq 'syntax (car type))
-                                (not (eq 'undefined (caddr type))))
-                           (and (eq 'lambda (car type))
-                                (gosh-type-match-p (caddr type)
-                                                   want-type)))))))
-          env))))
-     ;; completing a normal parameter
-     ((and inner-proc
-           (not (zerop inner-pos))
-           (consp inner-type)
-           (eq 'lambda (car inner-type)))
-      (let* ((param-type (gosh-lookup-type (cadr inner-type) inner-pos))
-             (set-or-flags
-              (or (and (consp param-type)
-                       (case (car param-type)
-                         ((set) (cddr param-type))
-                         ((flags) (cdr param-type))))
-                  ;; handle nested arithmetic functions inside a flags
-                  ;; parameter
-                  (and (not (zerop outer-pos))
-                       (consp outer-type)
-                       (eq 'lambda (car outer-type))
-                       (let ((outer-param-type
-                              (gosh-lookup-type (cadr outer-type)
-                                                outer-pos)))
-                         (and (consp outer-param-type)
-                              (eq 'flags (car outer-param-type))
-                              (memq (gosh-scheme-translate-type param-type)
-                                    '(number complex real rational integer))
-                              (memq (gosh-scheme-translate-type (caddr inner-type))
-                                    '(number complex real rational integer))
-                              (cdr outer-param-type))))))
-             (base-type (if set-or-flags
-                            (if (and (consp param-type)
-                                     (eq 'set (car param-type)))
-                                (gosh-scheme-translate-type (cadr param-type))
-                              'integer)
-                          param-type))
-             (base-completions
-              (gosh-env-filter
-               (lambda (x)
-                 (and (not (and (consp (cadr x)) (eq 'syntax (caadr x))))
-                      (gosh-type-match-p (cadr x) base-type)))
-               env))
-             (str-completions
-              (let ((completer (gosh-complete-in-string base-type)))
-                (and
-                 completer
-                 (gosh-complete-apply-string-completer completer sym)))))
-        (gosh-completion-do
-         sym
-         (append set-or-flags base-completions)
-         str-completions)))
-     ;; completing a function
-     ((zerop inner-pos)
-      (gosh-completion-do
-       sym
-       (gosh-env-filter
-        (lambda (x)
-          (or (null (cdr x))
-              (and (cadr x) (atom (cadr x)))
-              (memq (cadr x) '(procedure object nil))
-              (and (consp (cadr x))
-                   (memq (caadr x) '(lambda syntax special)))))
-        env)))
-     ;; complete everything
-     (t
-      (gosh-completion-do sym (gosh-env-filter (lambda (x) t) env))))))
+  (let ((sym (gosh-complete-symbol-name-at-point))
+        (in-str-p (gosh-context-string-p))
+        x env)
+    (destructuring-bind
+        (env inner-proc inner-pos outer-proc outer-pos)
+        (save-excursion
+          (if in-str-p (gosh-beginning-of-string))
+          (cons (gosh-env-current) (gosh-enclosing-2-sexp-prefixes)))
+      (let* ((outer-spec (gosh-env-lookup env outer-proc))
+             (outer-type (gosh-scheme-translate-type (cadr outer-spec)))
+             (inner-spec (gosh-env-lookup env inner-proc))
+             (inner-type (gosh-scheme-translate-type (cadr inner-spec))))
+        (cond
+         ;; return all env symbols when a prefix arg is given
+         (arg
+          (gosh-completion-do sym (gosh-env-filter (lambda (x) t) env)))
+         ;; allow different types of strings
+         (in-str-p
+          (let* ((param-type
+                  (and (consp inner-type)
+                       (eq 'lambda (car inner-type))
+                       (gosh-completion--lookup-type (cadr inner-type) inner-pos)))
+                 (completer (or (gosh-complete-in-string param-type)
+                                '(gosh-complete-file-name
+                                  file-name-nondirectory))))
+            (gosh-completion-do
+             ;;(if (consp completer) (funcall (cadr completer) sym) sym)
+             sym
+             (gosh-complete-apply-string-completer completer sym))))
+         ;; outer special
+         ((and (consp outer-type)
+               (eq 'special (car outer-type))
+               (cadddr outer-type))
+          (gosh-completion-do sym (funcall (cadddr outer-type) sym)))
+         ;; inner special
+         ((and (consp inner-type)
+               (eq 'special (car inner-type))
+               (caddr inner-type))
+          (gosh-completion-do sym (funcall (caddr inner-type) sym)))
+         ;; completing inner procedure, complete procedures with a
+         ;; matching return type
+         ((and (consp outer-type)
+               (eq 'lambda (car outer-type))
+               (not (zerop outer-pos))
+               (gosh-nth* (- outer-pos 1) (cadr outer-type))
+               (or (zerop inner-pos)
+                   (and (>= 1 inner-pos)
+                        (consp inner-type)
+                        (eq 'lambda (car inner-type))
+                        (let ((param-type
+                               (gosh-completion--lookup-type (cadr inner-type) inner-pos)))
+                          (and (consp param-type)
+                               (eq 'lambda (car param-type))
+                               (eq (caddr inner-type) (caddr param-type)))))))
+          (let ((want-type (gosh-completion--lookup-type (cadr outer-type) outer-pos)))
+            (gosh-completion-do
+             sym
+             (gosh-env-filter
+              (lambda (x)
+                (let ((type (cadr x)))
+                  (or (memq type '(procedure object nil))
+                      (and (consp type)
+                           (or (and (eq 'syntax (car type))
+                                    (not (eq 'undefined (caddr type))))
+                               (and (eq 'lambda (car type))
+                                    (gosh-completion--type-match-p (caddr type)
+                                                       want-type)))))))
+              env))))
+         ;; completing a normal parameter
+         ((and inner-proc
+               (not (zerop inner-pos))
+               (consp inner-type)
+               (eq 'lambda (car inner-type)))
+          (let* ((param-type (gosh-completion--lookup-type (cadr inner-type) inner-pos))
+                 (set-or-flags
+                  (or (and (consp param-type)
+                           (case (car param-type)
+                             ((set) (cddr param-type))
+                             ((flags) (cdr param-type))))
+                      ;; handle nested arithmetic functions inside a flags
+                      ;; parameter
+                      (and (not (zerop outer-pos))
+                           (consp outer-type)
+                           (eq 'lambda (car outer-type))
+                           (let ((outer-param-type
+                                  (gosh-completion--lookup-type (cadr outer-type)
+                                                    outer-pos)))
+                             (and (consp outer-param-type)
+                                  (eq 'flags (car outer-param-type))
+                                  (memq (gosh-scheme-translate-type param-type)
+                                        '(number complex real rational integer))
+                                  (memq (gosh-scheme-translate-type (caddr inner-type))
+                                        '(number complex real rational integer))
+                                  (cdr outer-param-type))))))
+                 (base-type (if set-or-flags
+                                (if (and (consp param-type)
+                                         (eq 'set (car param-type)))
+                                    (gosh-scheme-translate-type (cadr param-type))
+                                  'integer)
+                              param-type))
+                 (base-completions
+                  (gosh-env-filter
+                   (lambda (x)
+                     (and (not (and (consp (cadr x)) (eq 'syntax (caadr x))))
+                          (gosh-completion--type-match-p (cadr x) base-type)))
+                   env))
+                 (str-completions
+                  (let ((completer (gosh-complete-in-string base-type)))
+                    (and
+                     completer
+                     (gosh-complete-apply-string-completer completer sym)))))
+            (gosh-completion-do
+             sym
+             (append set-or-flags base-completions)
+             str-completions)))
+         ;; completing a function
+         ((zerop inner-pos)
+          (gosh-completion-do
+           sym
+           (gosh-env-filter
+            (lambda (x)
+              (or (null (cdr x))
+                  (and (cadr x) (atom (cadr x)))
+                  (memq (cadr x) '(procedure object nil))
+                  (and (consp (cadr x))
+                       (memq (caadr x) '(lambda syntax special)))))
+            env)))
+         ;; complete everything
+         (t
+          (gosh-completion-do sym (gosh-env-filter (lambda (x) t) env))))))))
 
 (defun gosh-complete-or-indent (&optional arg)
   (interactive "P")
@@ -2861,10 +2863,10 @@ Set this variable before open by `gosh-mode'."
 
 ;; keywords match to current context
 (defun gosh-ac-keywords-candidates ()
-  (let ((fnsym (gosh-parse--current-sexp-in-list)))
+  (let ((fnsym (gosh-parse--current-fnsexp-in-list)))
     (when (and (cadr fnsym) (> (cadr fnsym) 0))
       (let ((fn (caar fnsym))
-            (env (gosh-parse-current-env)))
+            (env (gosh-env-current)))
         (cond
          ((eq fn 'make)
           (gosh-ac-keywords-class-slot-candidates fnsym env))
@@ -2923,7 +2925,7 @@ Set this variable before open by `gosh-mode'."
 
 ;; all symbols
 (defun gosh-ac-symbol-candidates ()
-  (let ((env (gosh-parse-current-env))
+  (let ((env (gosh-env-current))
         (res '()))
     (gosh-map-env-symbols env inf
       (setq res (cons (symbol-name (car inf)) res)))
@@ -2931,7 +2933,7 @@ Set this variable before open by `gosh-mode'."
 
 ;; symbols that have lambda expression
 (defun gosh-ac-function-candidates ()
-  (let ((env (gosh-parse-current-env))
+  (let ((env (gosh-env-current))
         (res '()))
     (gosh-map-env-symbols env inf
       (when (and (consp (cadr inf))
@@ -2958,7 +2960,7 @@ Set this variable before open by `gosh-mode'."
           (save-restriction
             (narrow-to-region start end)
             ;; search opening paren
-            (while (re-search-forward "[[(]" nil t)
+            (while (re-search-forward "[\[\(]" nil t)
               (when (and (gosh-context-code-p)
                          ;; escaped parenthese
                          (not (eq (char-before (1- (point))) ?\\)))
@@ -3147,13 +3149,45 @@ Arg FORCE non-nil means forcely insert bracket."
                       (funcall match-to def-args args))
               return t)))))
 
+(defun gosh-opening--next-context (&optional count)
+  (save-excursion
+    (let ((c (or count 0))
+          (start (point)))
+      (while (and
+              (not (gosh-context-toplevel-p)) ; top level
+              (condition-case nil
+                  (progn
+                    (backward-sexp)
+                    t)
+                (scan-error
+                 (cond
+                  ((plusp c)
+                   (decf c)
+                   (skip-chars-backward "\s\t\n(["))
+                  ((looking-at "\\(?:\\sw\\|\\s_\\)")
+                   nil)
+                  (t
+                   (backward-char)
+                   t))))))
+      (skip-chars-backward "\s\t\n([")
+      (let* ((partial (buffer-substring-no-properties (point) start))
+             (parsed (parse-partial-sexp (point) start))
+             (parenthese (mapcar
+                          (lambda (x)
+                            (gosh-paren-against-char (char-after x)))
+                          (reverse (nth 9 parsed))))
+             (closing (concat parenthese))
+             (sexp (gosh-read-just-first
+                    (concat partial " *" closing))))
+        (and (consp sexp) sexp)))))
+
 (defun gosh-opening--bracket-p ()
   ;; retry 5 count backward current sexp
-  (loop with context
-        for i from 0 to 5
-        do (setq context (gosh-parse--current-context-for-opening i))
-        if (and context (gosh-opening--context-bracket-p context))
-        return t))
+  (ignore-errors
+    (loop for i from 0 to 5
+          if (let ((context (gosh-opening--next-context i)))
+               (and context (gosh-opening--context-bracket-p context)))
+          return t)))
 
 
 ;;;
@@ -3363,7 +3397,6 @@ PROCEDURE-SYMBOL ::= symbol
         (t e))))
    gosh-info-doc--env))
 
-;;TODO gosh-info-doc
 (defun gosh-info-doc-guess-module (symbol)
   (loop for e in gosh-info-doc--env
         if (assq symbol (cdr-safe e))
@@ -3434,7 +3467,7 @@ PROCEDURE-SYMBOL ::= symbol
           (setq res (nreverse res)))
       (error
        ;;FIXME: 
-       ;; (logger-info "%s: %s" cat text)
+       ;; (logger-debug "%s: %s" cat text)
        nil))
     (cond
      ((null res) res)
@@ -4251,7 +4284,7 @@ CHECK is function that accept no arg and return boolean."
   (dolist (key keywords)
     (let ((regexp (car key)))
       (when (and (stringp regexp) (string-match "^(" regexp))
-        (setcar key (concat "[[(]" (substring regexp 1)))))))
+        (setcar key (concat "[\[\(]" (substring regexp 1)))))))
 
 (defvar gosh-font-lock--keywords-2
   (let ((keywords (gosh-font-lock--clone-keywords scheme-font-lock-keywords-2)))
@@ -4442,11 +4475,11 @@ CHECK is function that accept no arg and return boolean."
           ;; jump is faild.
           (goto-char first)))
       ;; search toplevel definitions
-      (when (assq sym (gosh-parse--current-globals t))
+      (when (assq sym (gosh-env-current-globals t))
         (gosh-jump-to-def sym)
         (throw 'found t))
       ;; search base modules
-      (dolist (x (ignore-errors (gosh-parse--current-base-modules)))
+      (dolist (x (ignore-errors (gosh-env--current-base-modules)))
         (when (gosh-jump-to-module-def x sym)
           (throw 'found t)))
       ;; search imported modules
@@ -4456,7 +4489,7 @@ CHECK is function that accept no arg and return boolean."
                 (sym2 (or (and (listp m)
                                (intern-soft (substring (symbol-name sym) (length (cdr m)))))
                           sym)))
-            (when (memq sym2 (gosh-parse-exports-functions mf))
+            (when (memq sym2 (gosh-env-exports-functions mf))
               (when (gosh-jump-to-module-def mf sym2)
                 (throw 'found t))))))
       ;; jump to module (cursor point as a module name)
@@ -4488,6 +4521,7 @@ otherwise insert top level of the script."
     (save-excursion
       (goto-char (point-min))
       (cond
+       ;;TODO import
        ((re-search-forward (format "(use[\s\t\n]+\\_<%s\\_>" module) nil t)
         (cond
          ((gosh-context-code-p)
@@ -4916,6 +4950,9 @@ TODO but not supported with-module context."
     (gosh-completion-do sym cands)))
 
 
+;;;
+;;; Snatch filter (in gosh-inferior-mode)
+;;;
 
 (defvar gosh-snatch--filter-candidates nil)
 (defvar gosh-snatch--filter-string-stack nil)

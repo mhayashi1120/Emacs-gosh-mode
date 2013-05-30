@@ -18,8 +18,16 @@ VERSION = 0.3.0
 RELEASE_FILES = \
 	gosh-mode.el gosh-config.el gosh-const.el \
 	gosh-mode-test.el gosh-mode-make.el gosh-stub.el \
+	gosh-mode-pkg.el \
 	MAKE-CFG.el Makefile \
-	README
+	README.md
+
+PACKAGE = gosh-mode
+
+EXCLUDE_PACKAGE = \
+	gosh-mode-test.el gosh-mode-make.el \
+	MAKE-CFG.el Makefile \
+	README.md
 
 ARCHIVE_DIR_PREFIX = ..
 
@@ -45,16 +53,22 @@ uninstall:
 clean:
 	-$(RM) $(GOMI)
 
-release: archive
-	$(RM) -f $(ARCHIVE_DIR_PREFIX)/gosh-mode-$(VERSION).tar.bz2 $(ARCHIVE_DIR_PREFIX)/gosh-mode-$(VERSION).tar.gz
-	mv /tmp/gosh-mode-$(VERSION).tar.bz2 /tmp/gosh-mode-$(VERSION).tar.gz $(ARCHIVE_DIR_PREFIX)/
+release: archive package
+	$(RM) -f $(ARCHIVE_DIR_PREFIX)/$(PACKAGE)-$(VERSION).tar.bz2 $(ARCHIVE_DIR_PREFIX)/$(PACKAGE)-$(VERSION).tar.gz
+	mv /tmp/$(PACKAGE)-$(VERSION).tar /tmp/$(PACKAGE)-$(VERSION).tar.bz2 /tmp/$(PACKAGE)-$(VERSION).tar.gz $(ARCHIVE_DIR_PREFIX)/
 
-archive:
-	rm -rf /tmp/gosh-mode-$(VERSION)
-	mkdir /tmp/gosh-mode-$(VERSION)
-	cp -p $(RELEASE_FILES) /tmp/gosh-mode-$(VERSION)
-	chmod 644 /tmp/gosh-mode-$(VERSION)/*
-	cd /tmp ; tar cjf gosh-mode-$(VERSION).tar.bz2 gosh-mode-$(VERSION)
-	cd /tmp ; tar czf gosh-mode-$(VERSION).tar.gz gosh-mode-$(VERSION)
+archive: prepare
+	cd /tmp ; tar cjf $(PACKAGE)-$(VERSION).tar.bz2 $(PACKAGE)-$(VERSION)
+	cd /tmp ; tar czf $(PACKAGE)-$(VERSION).tar.gz $(PACKAGE)-$(VERSION)
 
+package: prepare
+	cd /tmp/$(PACKAGE)-$(VERSION) ; \
+	rm -rf $(EXCLUDE_PACKAGE) ; \
+	cd .. ; \
+	tar cf $(PACKAGE)-$(VERSION).tar $(PACKAGE)-$(VERSION)
 
+prepare:
+	rm -rf /tmp/$(PACKAGE)-$(VERSION)
+	mkdir /tmp/$(PACKAGE)-$(VERSION)
+	cp -pr $(RELEASE_FILES) /tmp/$(PACKAGE)-$(VERSION)
+	chmod 644 /tmp/$(PACKAGE)-$(VERSION)/*

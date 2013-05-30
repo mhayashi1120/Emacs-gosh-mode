@@ -1,10 +1,10 @@
 Edit gauche script on Emacs
-==================
+===========================
 
 Documentation
 -------------
 
-Nothing
+nil
 
 License
 -------
@@ -19,8 +19,6 @@ Now the most convenient way to install is
 git clone git@github.com:mhayashi1120/Emacs-gosh-mode.git /path/where/you/like
 
 (setq load-path (cons "/path/where/you/like" load-path))
-
-# make more sophisticated way in the future release. (ex: make install)
 
 .emacs Sample
 -------------

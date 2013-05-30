@@ -1,6 +1,27 @@
+;;; gosh-stub.el --- Programming language gauche stub editing tools.
 
-;;;TODO:
-;; * 
+;; Author: Masahiro Hayashi <mhayashi1120@gmail.com>
+;; URL: https://github.com/mhayashi1120/Emacs-gosh-mode/raw/master/gosh-stub.el
+
+;; This program is free software; you can redistribute it and/or
+;; modify it under the terms of the GNU General Public License as
+;; published by the Free Software Foundation; either version 3, or (at
+;; your option) any later version.
+
+;; This program is distributed in the hope that it will be useful, but
+;; WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+;; General Public License for more details.
+
+;; You should have received a copy of the GNU General Public License
+;; along with GNU Emacs; see the file COPYING.  If not, write to the
+;; Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+;; Boston, MA 02110-1301, USA.
+
+;;; Commentary:
+;;
+
+;;; Code:
 
 (eval-when-compile
   (require 'cl))
@@ -62,9 +83,12 @@
    (gosh-stub-font-lock-keywords 1 font-lock-keyword-face)
    ))
 
-(defvar gosh-stub-genstub-script
-  ;;TODO only default?
-  (locate-file "genstub" gosh-default-load-path))
+;;TODO only default?
+(defcustom gosh-stub-genstub-script
+  (locate-file "genstub" gosh-default-load-path)
+  "todo"
+  :group 'gosh-mode
+  :type 'file)
 
 (defun gosh-stub--process-buffer ()
   (let ((buf (get-buffer-create "*Gosh Stub*")))
@@ -135,7 +159,6 @@
   (let ((map (or gosh-stub-mode-map (make-sparse-keymap))))
 
     (define-key map "\C-c?" 'gosh-show-info)
-    ;;TODO change keybind
     (define-key map "\C-c\C-c" 'gosh-stub-genstub)
 
     (define-key map ")" 'gosh-closing-insert-paren)
@@ -164,6 +187,7 @@
   (run-mode-hooks 'gosh-stub-mode-hook))
 
 (defun gosh-stub-genstub ()
+  "Generate C code from current buffer and popup that code."
   (interactive)
   (when (and (buffer-modified-p)
              (y-or-n-p "Save buffer? "))
@@ -190,7 +214,6 @@
             (error "genstub failed"))))
       (message "%s done."(current-message)))))
 
-;;TODO prepare for gauche-dev
-;; (gosh-info-lookup-add-help 'gosh-stub-mode)
-
 (provide 'gosh-stub)
+
+;;; gosh-stub.el ends here

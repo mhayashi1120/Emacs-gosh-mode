@@ -1,3 +1,3 @@
-(define-package "gosh-mode" "0.2.1"
-  ""
+(define-package "gosh-mode" "0.3.0"
+  "Programming mode for Gauche."
   '())

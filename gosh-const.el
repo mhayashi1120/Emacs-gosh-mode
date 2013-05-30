@@ -1,9 +1,7 @@
-;;; gosh-const.el --- Gauche constant settings
+;;; gosh-const.el --- gosh-mode constant settings.
 
 ;; Author: Masahiro Hayashi <mhayashi1120@gmail.com>
-;; Keywords: lisp gauche scheme
 ;; URL: https://github.com/mhayashi1120/Emacs-gosh-mode/raw/master/gosh-const.el
-;; Emacs: GNU Emacs 22 or later
 
 ;; This program is free software; you can redistribute it and/or
 ;; modify it under the terms of the GNU General Public License as
@@ -103,26 +101,26 @@
 (defconst *gosh-scheme-r5rs-info*
   '((define (syntax (identifier value) undefined) "define a new variable")
     (set! (syntax (identifier value) undefined) "set the value of a variable")
-    (let (syntax (vars body \.\.\.)) "bind new local variables in parallel")
-    (let* (syntax (vars body \.\.\.)) "bind new local variables sequentially")
-    (letrec (syntax (vars body \.\.\.)) "bind new local variables recursively")
-    (lambda (syntax (params body \.\.\.)) "procedure syntax")
+    (let (syntax (vars body ...)) "bind new local variables in parallel")
+    (let* (syntax (vars body ...)) "bind new local variables sequentially")
+    (letrec (syntax (vars body ...)) "bind new local variables recursively")
+    (lambda (syntax (params body ...)) "procedure syntax")
     (if (syntax (cond then else)) "conditional evaluation")
-    (cond (syntax (clause \.\.\.)) "try each clause until one succeeds")
-    (case (syntax (expr clause \.\.\.)) "look for EXPR among literal lists")
+    (cond (syntax (clause ...)) "try each clause until one succeeds")
+    (case (syntax (expr clause ...)) "look for EXPR among literal lists")
     (delay (syntax (expr)) "create a promise to evaluate EXPR")
-    (and (syntax (expr \.\.\.)) "evaluate EXPRs while true, return last")
-    (or (syntax (expr \.\.\.)) "return the first true EXPR")
-    (begin (syntax (expr \.\.\.)) "evaluate each EXPR in turn and return the last")
-    (do (syntax (vars finish body \.\.\.)) "simple iterator")
+    (and (syntax (expr ...)) "evaluate EXPRs while true, return last")
+    (or (syntax (expr ...)) "return the first true EXPR")
+    (begin (syntax (expr ...)) "evaluate each EXPR in turn and return the last")
+    (do (syntax (vars finish body ...)) "simple iterator")
     (quote (syntax (expr)) "represent EXPR literally without evaluating it")
     (quasiquote (syntax (expr)) "quote literals allowing escapes")
     (unquote (syntax (expr)) "escape an expression inside quasiquote")
     (unquote-splicing (syntax (expr)) "escape and splice a list expression inside quasiquote")
-    (define-syntax (syntax (identifier body \.\.\.) undefined) "create a macro")
-    (let-syntax (syntax (syntaxes body \.\.\.)) "a local macro")
-    (letrec-syntax (syntax (syntaxes body \.\.\.)) "a local macro")
-    (syntax-rules (syntax (literals clauses \.\.\.) undefined) "simple macro language")
+    (define-syntax (syntax (identifier body ...) undefined) "create a macro")
+    (let-syntax (syntax (syntaxes body ...)) "a local macro")
+    (letrec-syntax (syntax (syntaxes body ...)) "a local macro")
+    (syntax-rules (syntax (literals clauses ...) undefined) "simple macro language")
     (eqv? (lambda (obj1 obj2) bool) "returns #t if OBJ1 and OBJ2 are the same object")
     (eq? (lambda (obj1 obj2) bool) "finer grained version of EQV?")
     (equal? (lambda (obj1 obj2) bool) "recursive equivalence")
@@ -135,28 +133,28 @@
     (integer? (lambda (obj) bool) "returns #t iff OBJ is an integer")
     (exact? (lambda (z) bool) "returns #t iff Z is exact")
     (inexact? (lambda (z) bool) "returns #t iff Z is inexact")
-    (= (lambda (z1 z2 \.\.\.) bool) "returns #t iff the arguments are all equal")
-    (< (lambda (x1 x2 \.\.\.) bool) "returns #t iff the arguments are monotonically increasing")
-    (> (lambda (x1 x2 \.\.\.) bool) "returns #t iff the arguments are monotonically decreasing")
-    (<= (lambda (x1 x2 \.\.\.) bool) "returns #t iff the arguments are monotonically nondecreasing")
-    (>= (lambda (x1 x2 \.\.\.) bool) "returns #t iff the arguments are monotonically nonincreasing")
+    (= (lambda (z1 z2 ...) bool) "returns #t iff the arguments are all equal")
+    (< (lambda (x1 x2 ...) bool) "returns #t iff the arguments are monotonically increasing")
+    (> (lambda (x1 x2 ...) bool) "returns #t iff the arguments are monotonically decreasing")
+    (<= (lambda (x1 x2 ...) bool) "returns #t iff the arguments are monotonically nondecreasing")
+    (>= (lambda (x1 x2 ...) bool) "returns #t iff the arguments are monotonically nonincreasing")
     (zero? (lambda (z) bool))
     (positive? (lambda (x1) bool))
     (negative? (lambda (x1) bool))
     (odd? (lambda (n) bool))
     (even? (lambda (n) bool))
-    (max (lambda (x1 x2 \.\.\.) x3) "returns the maximum of the arguments")
-    (min (lambda (x1 x2 \.\.\.) x3) "returns the minimum of the arguments")
-    (+ (lambda (z1 \.\.\.) z))
-    (* (lambda (z1 \.\.\.) z))
-    (- (lambda (z1 \.\.\.) z))
-    (/ (lambda (z1 \.\.\.) z))
+    (max (lambda (x1 x2 ...) x3) "returns the maximum of the arguments")
+    (min (lambda (x1 x2 ...) x3) "returns the minimum of the arguments")
+    (+ (lambda (z1 ...) z))
+    (* (lambda (z1 ...) z))
+    (- (lambda (z1 ...) z))
+    (/ (lambda (z1 ...) z))
     (abs (lambda (x1) x2) "returns the absolute value of X")
     (quotient (lambda (n1 n2) n) "integer division")
     (remainder (lambda (n1 n2) n) "same sign as N1")
     (modulo (lambda (n1 n2) n) "same sign as N2")
-    (gcd (lambda (n1 \.\.\.) n) "greatest common divisor")
-    (lcm (lambda (n2 \.\.\.) n) "least common multiple")
+    (gcd (lambda (n1 ...) n) "greatest common divisor")
+    (lcm (lambda (n2 ...) n) "least common multiple")
     (numerator (lambda (rational) n))
     (denominator (lambda (rational) n))
     (floor (lambda (x1) n) "largest integer not larger than X")
@@ -220,9 +218,9 @@
     (cddddr (lambda (pair) obj))
     (null? (lambda (obj) bool) "returns #t iff OBJ is the empty list")
     (list? (lambda (obj) bool) "returns #t iff OBJ is a proper list")
-    (list (lambda (obj \.\.\.) list) "returns a newly allocated list")
+    (list (lambda (obj ...) list) "returns a newly allocated list")
     (length (lambda (list) n))
-    (append (lambda (list \.\.\.) list) "concatenates the list arguments")
+    (append (lambda (list ...) list) "concatenates the list arguments")
     (reverse (lambda (list) list))
     (list-tail (lambda (list k) list) "returns the Kth cdr of LIST")
     (list-ref (lambda (list k) obj) "returns the Kth element of LIST")
@@ -257,7 +255,7 @@
     (char-downcase (lambda (ch) ch))
     (string? (lambda (obj) bool) "returns #t iff OBJ is a string")
     (make-string (lambda (k :optional ch) str) "a new string of length k")
-    (string (lambda (ch \.\.\.) str) "a new string made of the char arguments")
+    (string (lambda (ch ...) str) "a new string made of the char arguments")
     (string-length (lambda (str) n) "the number of characters in STR")
     (string-ref (lambda (str i) ch) "the Ith character of STR")
     (string-set! (lambda (str i ch) undefined) "set the Ith character of STR to CH")
@@ -272,14 +270,14 @@
     (string-ci<=? (lambda (str1 str2) bool))
     (string-ci>=? (lambda (str1 str2) bool))
     (substring (lambda (str start end) str))
-    (string-append (lambda (str \.\.\.) str) "concatenate the string arguments")
+    (string-append (lambda (str ...) str) "concatenate the string arguments")
     (string->list (lambda (str) list))
     (list->string (lambda (list) str))
     (string-copy (lambda (str) str))
     (string-fill! (lambda (str ch) undefined) "set every char in STR to CH")
     (vector? (lambda (obj) bool) "returns #t iff OBJ is a vector")
     (make-vector (lambda (len :optional fill) vec) "a new vector of K elements")
-    (vector (lambda (obj \.\.\.) vec))
+    (vector (lambda (obj ...) vec))
     (vector-length (lambda (vec) n) "the number of elements in VEC")
     (vector-ref (lambda (vec i) obj) "the Ith element of VEC")
     (vector-set! (lambda (vec i obj) undefined) "set the Ith element of VEC to OBJ")
@@ -287,12 +285,12 @@
     (list->vector (lambda (list) vec))
     (vector-fill! (lambda (vec obj) undefined) "set every element in VEC to OBJ")
     (procedure? (lambda (obj) bool) "returns #t iff OBJ is a procedure")
-    (apply (lambda ((lambda obj a) obj \.\.\.) a) "procedure application")
-    (map (lambda ((lambda (obj1 . obj2) a) list \.\.\.) (list a)) "a new list of PROC applied to every element of LIST")
-    (for-each (lambda ((lambda obj a) obj \.\.\.) undefined) "apply PROC to each element of LIST in order")
+    (apply (lambda ((lambda obj a) obj ...) a) "procedure application")
+    (map (lambda ((lambda (obj1 . obj2) a) list ...) (list a)) "a new list of PROC applied to every element of LIST")
+    (for-each (lambda ((lambda obj a) obj ...) undefined) "apply PROC to each element of LIST in order")
     (force (lambda (promise) obj) "force the delayed value of PROMISE")
     (call-with-current-continuation (lambda (proc) obj) "goto on steroids")
-    (values (lambda (obj \.\.\.)) "send multiple values to the calling continuation")
+    (values (lambda (obj ...)) "send multiple values to the calling continuation")
     (call-with-values (lambda (producer consumer) obj))
     (dynamic-wind (lambda (before-thunk thunk after-thunk) obj))
     (scheme-report-environment (lambda (int) env) "INT should be 5")
@@ -326,23 +324,23 @@
   [
    ;; SRFI 0
    ("Feature-based conditional expansion construct"
-    (cond-expand (syntax (clause \.\.\.))))
+    (cond-expand (syntax (clause ...))))
 
    ;; SRFI 1
    ("List Library"
     (xcons (lambda (object object) pair))
-    (cons* (lambda (object \.\.\.) pair))
+    (cons* (lambda (object ...) pair))
     (make-list (lambda (integer :optional object) list))
     (list-tabulate (lambda (integer procedure) list))
     (list-copy (lambda (list) list))
-    (circular-list (lambda (object \.\.\.) list))
+    (circular-list (lambda (object ...) list))
     (iota (lambda (integer :optional integer integer) list))
     (proper-list? (lambda (object) bool))
     (circular-list? (lambda (object) bool))
     (dotted-list? (lambda (object) bool))
     (not-pair? (lambda (object) bool))
     (null-list? (lambda (object) bool))
-    (list= (lambda (procedure list \.\.\.) bool))
+    (list= (lambda (procedure list ...) bool))
     (first (lambda (pair)))
     (second (lambda (pair)))
     (third (lambda (pair)))
@@ -366,32 +364,32 @@
     (last-pair (lambda (pair) pair))
     (length+ (lambda (object) n))
     (concatenate (lambda (list) list))
-    (append! (lambda (list \.\.\.) list))
+    (append! (lambda (list ...) list))
     (concatenate! (lambda (list) list))
     (reverse! (lambda (list) list))
     (append-reverse (lambda (list list) list))
     (append-reverse! (lambda (list list) list))
-    (zip (lambda (list \.\.\.) list))
+    (zip (lambda (list ...) list))
     (unzip1 (lambda (list) list))
     (unzip2 (lambda (list) list))
     (unzip3 (lambda (list) list))
     (unzip4 (lambda (list) list))
     (unzip5 (lambda (list) list))
-    (count (lambda ((lambda (obj1 . obj2)) list \.\.\.) n))
-    (fold (lambda ((lambda (obj1 obj2 . obj3) a) object list \.\.\.) a))
+    (count (lambda ((lambda (obj1 . obj2)) list ...) n))
+    (fold (lambda ((lambda (obj1 obj2 . obj3) a) object list ...) a))
     (unfold (lambda (procedure procedure procedure object :optional procedure) obj))
-    (pair-fold (lambda ((lambda obj a) object list \.\.\.) a))
-    (reduce (lambda ((lambda (obj1 obj2 . obj3) a) object list \.\.\.) a))
-    (fold-right (lambda ((lambda (obj1 obj2 . obj3) a) object list \.\.\.) a))
+    (pair-fold (lambda ((lambda obj a) object list ...) a))
+    (reduce (lambda ((lambda (obj1 obj2 . obj3) a) object list ...) a))
+    (fold-right (lambda ((lambda (obj1 obj2 . obj3) a) object list ...) a))
     (unfold-right (lambda (procedure procedure procedure object :optional object) obj))
-    (pair-fold-right (lambda ((lambda (obj1 obj2 . obj3) a) object list \.\.\.) a))
-    (reduce-right (lambda ((lambda (obj1 obj2 . obj3) a) object list \.\.\.) a))
-    (append-map (lambda ((lambda (obj1 . obj2)) list \.\.\.) list))
-    (append-map! (lambda ((lambda (obj1 . obj2)) list \.\.\.) list))
-    (map! (lambda ((lambda (obj1 . obj2)) list \.\.\.) list))
-    (pair-for-each (lambda ((lambda (obj1 . obj2)) list \.\.\.) undefined))
-    (filter-map (lambda ((lambda (obj1 . obj2)) list \.\.\.) list))
-    (map-in-order (lambda ((lambda (obj1 . obj2)) list \.\.\.) list))
+    (pair-fold-right (lambda ((lambda (obj1 obj2 . obj3) a) object list ...) a))
+    (reduce-right (lambda ((lambda (obj1 obj2 . obj3) a) object list ...) a))
+    (append-map (lambda ((lambda (obj1 . obj2)) list ...) list))
+    (append-map! (lambda ((lambda (obj1 . obj2)) list ...) list))
+    (map! (lambda ((lambda (obj1 . obj2)) list ...) list))
+    (pair-for-each (lambda ((lambda (obj1 . obj2)) list ...) undefined))
+    (filter-map (lambda ((lambda (obj1 . obj2)) list ...) list))
+    (map-in-order (lambda ((lambda (obj1 . obj2)) list ...) list))
     (filter (lambda ((lambda (obj1 . obj2)) list) list))
     (partition (lambda ((lambda (obj) bool) list) list))
     (remove (lambda ((lambda (obj1) bool) list) list))
@@ -400,9 +398,9 @@
     (remove! (lambda ((lambda (obj1) bool) list) list))
     (find (lambda ((lambda (obj1) bool) list) obj))
     (find-tail (lambda ((lambda (obj1) bool) list) obj))
-    (any (lambda ((lambda (obj1 . obj2) a) list \.\.\.) a))
-    (every (lambda ((lambda (obj1 . obj2) a) list \.\.\.) a))
-    (list-index (lambda ((lambda (obj1 . obj2)) list \.\.\.) (or bool integer)))
+    (any (lambda ((lambda (obj1 . obj2) a) list ...) a))
+    (every (lambda ((lambda (obj1 . obj2) a) list ...) a))
+    (list-index (lambda ((lambda (obj1 . obj2)) list ...) (or bool integer)))
     (take-while (lambda ((lambda (obj)) list) list))
     (drop-while (lambda ((lambda (obj)) list) list))
     (take-while! (lambda ((lambda (obj)) list) list))
@@ -418,25 +416,25 @@
     (alist-copy (lambda (alist) alist))
     (alist-delete (lambda (obj alist) alist))
     (alist-delete! (lambda (obj alist) alist))
-    (lset<= (lambda (procedure list \.\.\.) bool))
-    (lset= (lambda (procedure list \.\.\.) bool))
-    (lset-adjoin (lambda (procedure list object \.\.\.) list))
-    (lset-union (lambda (procedure list \.\.\.) list))
-    (lset-union! (lambda (procedure list \.\.\.) list))
-    (lset-intersection (lambda (procedure list \.\.\.) list))
-    (lset-intersection! (lambda (procedure list \.\.\.) list))
-    (lset-difference (lambda (procedure list \.\.\.) list))
-    (lset-difference! (lambda (procedure list \.\.\.) list))
-    (lset-xor (lambda (procedure list \.\.\.) list))
-    (lset-xor! (lambda (procedure list \.\.\.) list))
-    (lset-diff+intersection (lambda (procedure list \.\.\.) list))
-    (lset-diff+intersection! (lambda (procedure list \.\.\.) list))
+    (lset<= (lambda (procedure list ...) bool))
+    (lset= (lambda (procedure list ...) bool))
+    (lset-adjoin (lambda (procedure list object ...) list))
+    (lset-union (lambda (procedure list ...) list))
+    (lset-union! (lambda (procedure list ...) list))
+    (lset-intersection (lambda (procedure list ...) list))
+    (lset-intersection! (lambda (procedure list ...) list))
+    (lset-difference (lambda (procedure list ...) list))
+    (lset-difference! (lambda (procedure list ...) list))
+    (lset-xor (lambda (procedure list ...) list))
+    (lset-xor! (lambda (procedure list ...) list))
+    (lset-diff+intersection (lambda (procedure list ...) list))
+    (lset-diff+intersection! (lambda (procedure list ...) list))
 
     )
 
    ;; SRFI 2
    ("AND-LET*: an AND with local bindings, a guarded LET* special form"
-    (and-let* (syntax (bindings body \.\.\.))))
+    (and-let* (syntax (bindings body ...))))
 
    ()
 
@@ -445,7 +443,7 @@
 
     (u8vector? (lambda (obj) bool))
     (make-u8vector (lambda (size integer) u8vector))
-    (u8vector (lambda (integer \.\.\.) u8vector))
+    (u8vector (lambda (integer ...) u8vector))
     (u8vector-length (lambda (u8vector) n))
     (u8vector-ref (lambda (u8vector i) int))
     (u8vector-set! (lambda (u8vector i u8value) undefined))
@@ -454,7 +452,7 @@
 
     (s8vector? (lambda (obj) bool))
     (make-s8vector (lambda (size integer) s8vector))
-    (s8vector (lambda (integer \.\.\.) s8vector))
+    (s8vector (lambda (integer ...) s8vector))
     (s8vector-length (lambda (s8vector) n))
     (s8vector-ref (lambda (s8vector i) int))
     (s8vector-set! (lambda (s8vector i s8value) undefined))
@@ -463,7 +461,7 @@
 
     (u16vector? (lambda (obj) bool))
     (make-u16vector (lambda (size integer) u16vector))
-    (u16vector (lambda (integer \.\.\.)))
+    (u16vector (lambda (integer ...)))
     (u16vector-length (lambda (u16vector) n))
     (u16vector-ref (lambda (u16vector i) int))
     (u16vector-set! (lambda (u16vector i u16value) undefined))
@@ -472,7 +470,7 @@
 
     (s16vector? (lambda (obj) bool))
     (make-s16vector (lambda (size integer) s16vector))
-    (s16vector (lambda (integer \.\.\.) s16vector))
+    (s16vector (lambda (integer ...) s16vector))
     (s16vector-length (lambda (s16vector) n))
     (s16vector-ref (lambda (s16vector i) int))
     (s16vector-set! (lambda (s16vector i s16value) undefined))
@@ -481,7 +479,7 @@
 
     (u32vector? (lambda (obj) bool))
     (make-u32vector (lambda (size integer) u32vector))
-    (u32vector (lambda (integer \.\.\.) u32vector))
+    (u32vector (lambda (integer ...) u32vector))
     (u32vector-length (lambda (u32vector) n))
     (u32vector-ref (lambda (u32vector i) int))
     (u32vector-set! (lambda (u32vector i u32value) undefined))
@@ -490,7 +488,7 @@
 
     (s32vector? (lambda (obj) bool))
     (make-s32vector (lambda (size integer) s32vector))
-    (s32vector (lambda (integer \.\.\.) s32vector))
+    (s32vector (lambda (integer ...) s32vector))
     (s32vector-length (lambda (s32vector) n))
     (s32vector-ref (lambda (s32vector i) int))
     (s32vector-set! (lambda (s32vector i s32value) undefined))
@@ -499,7 +497,7 @@
 
     (u64vector? (lambda (obj) bool))
     (make-u64vector (lambda (size integer) u64vector))
-    (u64vector (lambda (integer \.\.\.) u64vector))
+    (u64vector (lambda (integer ...) u64vector))
     (u64vector-length (lambda (u64vector) n))
     (u64vector-ref (lambda (u64vector i) int))
     (u64vector-set! (lambda (u64vector i u64value) undefined))
@@ -508,7 +506,7 @@
 
     (s64vector? (lambda (obj) bool))
     (make-s64vector (lambda (size integer) s64vector))
-    (s64vector (lambda (integer \.\.\.) s64vector))
+    (s64vector (lambda (integer ...) s64vector))
     (s64vector-length (lambda (s64vector) n))
     (s64vector-ref (lambda (s64vector i) int))
     (s64vector-set! (lambda (s64vector i s64value) undefined))
@@ -517,7 +515,7 @@
 
     (f32vector? (lambda (obj) bool))
     (make-f32vector (lambda (size integer) f32vector))
-    (f32vector (lambda (number \.\.\.) f32vector))
+    (f32vector (lambda (number ...) f32vector))
     (f32vector-length (lambda (f32vector) n))
     (f32vector-ref (lambda (f32vector i) int))
     (f32vector-set! (lambda (f32vector i f32value) undefined))
@@ -526,7 +524,7 @@
 
     (f64vector? (lambda (obj) bool))
     (make-f64vector (lambda (size integer) f64vector))
-    (f64vector (lambda (number \.\.\.) f64vector))
+    (f64vector (lambda (number ...) f64vector))
     (f64vector-length (lambda (f64vector) n))
     (f64vector-ref (lambda (f64vector i) int))
     (f64vector-set! (lambda (f64vector i f64value) undefined))
@@ -536,7 +534,7 @@
 
    ;; SRFI 5
    ("A compatible let form with signatures and rest arguments"
-    (let (syntax (bindings body \.\.\.))))
+    (let (syntax (bindings body ...))))
 
    ;; SRFI 6
    ("Basic String Ports"
@@ -546,16 +544,16 @@
 
    ;; SRFI 7
    ("Feature-based program configuration language"
-    (program (syntax (clause \.\.\.)))
+    (program (syntax (clause ...)))
     (feature-cond (syntax (clause))))
 
    ;; SRFI 8
    ("receive: Binding to multiple values"
-    (receive (syntax (identifiers producer body \.\.\.))))
+    (receive (syntax (identifiers producer body ...))))
 
    ;; SRFI 9
    ("Defining Record Types"
-    (define-record-type (syntax (name constructor-name pred-name fields \.\.\.))))
+    (define-record-type (syntax (name constructor-name pred-name fields ...))))
 
    ;; SRFI 10
    ("Sharp-Comma External Form"
@@ -563,8 +561,8 @@
 
    ;; SRFI 11
    ("Syntax for receiving multiple values"
-    (let-values (syntax (bindings body \.\.\.)))
-    (let-values* (syntax (bindings body \.\.\.))))
+    (let-values (syntax (bindings body ...)))
+    (let-values* (syntax (bindings body ...))))
 
    ()
 
@@ -639,7 +637,7 @@
     (string->list (lambda (str :optional start end) list))
     (string-concatenate (lambda (string-list) str))
     (string-concatenate/shared (lambda (string-list) str))
-    (string-append/shared (lambda (str \.\.\.) str))
+    (string-append/shared (lambda (str ...) str))
     (string-concatenate-reverse (lambda (string-list :optional final-string end) str))
     (string-concatenate-reverse/shared (lambda (string-list :optional final-string end) str))
     (xsubstring (lambda (str from :optional to start end) str))
@@ -656,8 +654,8 @@
    ;; SRFI 14
    ("Character-Set Library"
     (char-set? (lambda (cset) bool))
-    (char-set= (lambda (cset \.\.\.) bool))
-    (char-set<= (lambda (cset \.\.\.) bool))
+    (char-set= (lambda (cset ...) bool))
+    (char-set<= (lambda (cset ...) bool))
     (char-set-hash (lambda (cset :optional int) int))
     (char-set-cursor (lambda (cset) cursor))
     (char-set-ref (lambda (cset cursor) ch))
@@ -669,7 +667,7 @@
     (char-set-for-each (lambda (proc cset) undefined))
     (char-set-map (lambda (proc cset) cset))
     (char-set-copy (lambda (cset) cset))
-    (char-set (lambda (ch \.\.\.) cset))
+    (char-set (lambda (ch ...) cset))
     (list->char-set (lambda (list :optional obj) cset))
     (list->char-set! (lambda (list cset) cset))
     (string->char-set (lambda (str :optional cset) cset))
@@ -684,24 +682,24 @@
     (char-set-contains? (lambda (cset ch) bool))
     (char-set-every (lambda (proc cset) obj))
     (char-set-any (lambda (proc cset) obj))
-    (char-set-adjoin (lambda (cset ch \.\.\.) cset))
-    (char-set-delete (lambda (cset ch \.\.\.) cset))
-    (char-set-adjoin! (lambda (cset ch \.\.\.) cset))
-    (char-set-delete! (lambda (cset ch \.\.\.) cset))
+    (char-set-adjoin (lambda (cset ch ...) cset))
+    (char-set-delete (lambda (cset ch ...) cset))
+    (char-set-adjoin! (lambda (cset ch ...) cset))
+    (char-set-delete! (lambda (cset ch ...) cset))
     (char-set->list (lambda (cset) list))
     (char-set->string (lambda (cset) str))
     (char-set-complement (lambda (cset) cset))
-    (char-set-union (lambda (cset \.\.\.) cset))
-    (char-set-intersection (lambda (cset \.\.\.) cset))
-    (char-set-xor (lambda (cset \.\.\.) cset))
-    (char-set-difference (lambda (cset \.\.\.) cset))
-    (char-set-diff+intersection (lambda (cset \.\.\.) cset))
+    (char-set-union (lambda (cset ...) cset))
+    (char-set-intersection (lambda (cset ...) cset))
+    (char-set-xor (lambda (cset ...) cset))
+    (char-set-difference (lambda (cset ...) cset))
+    (char-set-diff+intersection (lambda (cset ...) cset))
     (char-set-complement! (lambda (cset) cset))
-    (char-set-union! (lambda (cset \.\.\.) cset))
-    (char-set-intersection! (lambda (cset \.\.\.) cset))
-    (char-set-xor! (lambda (cset \.\.\.) cset))
-    (char-set-difference! (lambda (cset \.\.\.) cset))
-    (char-set-diff+intersection! (lambda (cset \.\.\.) cset))
+    (char-set-union! (lambda (cset ...) cset))
+    (char-set-intersection! (lambda (cset ...) cset))
+    (char-set-xor! (lambda (cset ...) cset))
+    (char-set-difference! (lambda (cset ...) cset))
+    (char-set-diff+intersection! (lambda (cset ...) cset))
     (char-set:lower-case char-set)
     (char-set:upper-case char-set)
     (char-set:letter char-set)
@@ -724,7 +722,7 @@
 
    ;; SRFI 16
    ("Syntax for procedures of variable arity"
-    (case-lambda (syntax (clauses \.\.\.) procedure)))
+    (case-lambda (syntax (clauses ...) procedure)))
 
    ;; SRFI 17
    ("Generalized set!"
@@ -869,7 +867,7 @@
 
    ;; SRFI 23
    ("Error reporting mechanism"
-    (error (lambda (reason-string arg \.\.\.))))
+    (error (lambda (reason-string arg ...))))
 
    ()
 
@@ -877,21 +875,21 @@
    ("Multi-dimensional Array Primitives"
     (array? (lambda (obj)))
     (make-array (lambda (shape :optional init)))
-    (shape (lambda (bound \.\.\.)))
-    (array (lambda (shape obj \.\.\.)))
+    (shape (lambda (bound ...)))
+    (array (lambda (shape obj ...)))
     (array-rank (lambda (array)))
     (array-start (lambda (array)))
     (array-end (lambda (array)))
     (array-shape (lambda (array)))
-    (array-ref (lambda (array i \.\.\.)))
-    (array-set! (lambda (array obj \.\.\.) undefined))
+    (array-ref (lambda (array i ...)))
+    (array-set! (lambda (array obj ...) undefined))
     (share-array (lambda (array shape proc)))
     )
 
    ;; SRFI 26
    ("Notation for Specializing Parameters without Currying"
-    (cut (syntax (obj \.\.\.)))
-    (cute (lambda (obj \.\.\.))))
+    (cut (syntax (obj ...)))
+    (cute (lambda (obj ...))))
 
    ;; SRFI 27
    ("Sources of Random Bits"
@@ -910,7 +908,7 @@
 
    ;; SRFI 28
    ("Basic Format Strings"
-    (format (lambda (port-or-boolean format-string arg \.\.\.))))
+    (format (lambda (port-or-boolean format-string arg ...))))
 
    ;; SRFI 29
    ("Localization"
@@ -929,7 +927,7 @@
 
    ;; SRFI 31
    ("A special form for recursive evaluation"
-    (rec (syntax (name body \.\.\.) procedure)))
+    (rec (syntax (name body ...) procedure)))
 
    ()
 
@@ -937,7 +935,7 @@
 
    ;; SRFI 34
    ("Exception Handling for Programs"
-    (guard (syntax (clauses \.\.\.)))
+    (guard (syntax (clauses ...)))
     (raise (lambda (obj)))
     )
 
@@ -949,10 +947,10 @@
     (condition? (lambda (obj)))
     (condition-has-type? (lambda (condition condition-type)))
     (condition-ref (lambda (condition field-name)))
-    (make-compound-condition (lambda (condition \.\.\.)))
+    (make-compound-condition (lambda (condition ...)))
     (extract-condition (lambda (condition condition-type)))
-    (define-condition-type (syntax (name parent pred-name fields \.\.\.)))
-    (condition (syntax (type-field-binding \.\.\.)))
+    (define-condition-type (syntax (name parent pred-name fields ...)))
+    (condition (syntax (type-field-binding ...)))
     )
 
    ;; SRFI 36
@@ -974,9 +972,9 @@
    ;; SRFI 37
    ("args-fold: a program argument processor"
     (args-fold
-     (arg-list option-list unrecognized-option-proc operand-proc seed \.\.\.))
-    (option-processor (lambda (option name arg seeds \.\.\.)))
-    (operand-processor (lambda (operand seeds \.\.\.)))
+     (arg-list option-list unrecognized-option-proc operand-proc seed ...))
+    (option-processor (lambda (option name arg seeds ...)))
+    (operand-processor (lambda (operand seeds ...)))
     (option (lambda (name-list required-arg? optional-arg? option-proc)))
     (option-names (lambda (option)))
     (option-required-arg? (lambda (option)))
@@ -993,7 +991,7 @@
    ;; SRFI 39
    ("Parameter objects"
     (make-parameter (lambda (init-value :optional converter)))
-    (parameterize (syntax (bindings body \.\.\.))))
+    (parameterize (syntax (bindings body ...))))
 
    ;; SRFI 40
    ("A Library of Streams"
@@ -1005,10 +1003,10 @@
     (stream-car (lambda (stream)))
     (stream-cdr (lambda (stream)))
     (stream-delay (syntax (expr)))
-    (stream (lambda (obj \.\.\.)))
+    (stream (lambda (obj ...)))
     (stream-unfoldn (lambda (generator-proc seed n)))
-    (stream-map (lambda (proc stream \.\.\.)))
-    (stream-for-each (lambda (proc stream \.\.\.) undefined))
+    (stream-map (lambda (proc stream ...)))
+    (stream-for-each (lambda (proc stream ...) undefined))
     (stream-filter (lambda (pred stream)))
     )
 
@@ -1044,28 +1042,28 @@
 
    ;; SRFI 43
    ("Vector Library"
-    (vector-unfold (f length initial-seed \.\.\.))
-    (vector-unfold-right (lambda (f length initial-seed \.\.\.)))
+    (vector-unfold (f length initial-seed ...))
+    (vector-unfold-right (lambda (f length initial-seed ...)))
     (vector-tabulate (lambda (f size)))
     (vector-copy (lambda (vec :optional start end fill)))
     (vector-reverse-copy (lambda (vec :optional start end)))
-    (vector-append (lambda (vec \.\.\.)))
+    (vector-append (lambda (vec ...)))
     (vector-concatenate (lambda (vector-list)))
     (vector-empty? (lambda (obj)))
-    (vector= (lambda (eq-proc vec \.\.\.)))
-    (vector-fold (lambda (kons knil vec \.\.\.)))
-    (vector-fold-right (lambda (kons knil vec \.\.\.)))
-    (vector-map (lambda (f vec \.\.\.)))
-    (vector-map! (lambda (f vec \.\.\.)))
-    (vector-for-each (lambda (f vec \.\.\.) undefined))
-    (vector-count (lambda (pred vec \.\.\.)))
-    (vector-index (lambda (pred vec \.\.\.)))
-    (vector-index-right (lambda (pred vec \.\.\.)))
-    (vector-skip (lambda (pred vec \.\.\.)))
-    (vector-skip-right (lambda (pred vec \.\.\.)))
+    (vector= (lambda (eq-proc vec ...)))
+    (vector-fold (lambda (kons knil vec ...)))
+    (vector-fold-right (lambda (kons knil vec ...)))
+    (vector-map (lambda (f vec ...)))
+    (vector-map! (lambda (f vec ...)))
+    (vector-for-each (lambda (f vec ...) undefined))
+    (vector-count (lambda (pred vec ...)))
+    (vector-index (lambda (pred vec ...)))
+    (vector-index-right (lambda (pred vec ...)))
+    (vector-skip (lambda (pred vec ...)))
+    (vector-skip-right (lambda (pred vec ...)))
     (vector-binary-search (lambda (vec value cmp-proc)))
-    (vector-any (lambda (pred vec \.\.\.)))
-    (vector-every (lambda (pred vec \.\.\.)))
+    (vector-any (lambda (pred vec ...)))
+    (vector-every (lambda (pred vec ...)))
     (vector-swap! (lambda (vec i j) undefined))
     (vector-reverse! (lambda (vec :optional start end) undefined))
     (vector-copy! (lambda (target-vec t-start source-vec :optional start end) undefined))
@@ -1092,7 +1090,7 @@
 
    ;; SRFI 47
    ("Array"
-    (make-array (lambda (prototype k \.\.\.)))
+    (make-array (lambda (prototype k ...)))
     (ac64 (lambda (:optional z)))
     (ac32 (lambda (:optional z)))
     (ar64 (lambda (:optional x1)))
@@ -1106,17 +1104,17 @@
     (au16 (lambda (:optional n)))
     (au8 (lambda (:optional n)))
     (at1 (lambda (:optional bool)))
-    (make-shared-array (lambda (array mapper k \.\.\.)))
+    (make-shared-array (lambda (array mapper k ...)))
     (array-rank (lambda (obj)))
     (array-dimensions (lambda (array)))
-    (array-in-bounds? (lambda (array k \.\.\.)))
-    (array-ref (lambda (array k \.\.\.)))
-    (array-set! (lambda (array obj k \.\.\.)))
+    (array-in-bounds? (lambda (array k ...)))
+    (array-ref (lambda (array k ...)))
+    (array-set! (lambda (array obj k ...)))
     )
 
    ;; SRFI 48
    ("Intermediate Format Strings"
-    (format (lambda (port-or-boolean format-string arg \.\.\.))))
+    (format (lambda (port-or-boolean format-string arg ...))))
 
    ;; SRFI 49
    ("Indentation-sensitive syntax"
@@ -1143,7 +1141,7 @@
 
    ;; SRFI 54
    ("Formatting"
-    (cat (lambda (obj \.\.\.))))
+    (cat (lambda (obj ...))))
 
    ;; SRFI 55
    ("require-extension"
@@ -1179,9 +1177,9 @@
 
    ;; SRFI 60
    ("Integers as Bits"
-    (bitwise-and (lambda (n \.\.\.) int))
-    (bitwise-ior (lambda (n \.\.\.) int))
-    (bitwise-xor (lambda (n \.\.\.) int))
+    (bitwise-and (lambda (n ...) int))
+    (bitwise-ior (lambda (n ...) int))
+    (bitwise-xor (lambda (n ...) int))
     (bitwise-not (lambda (n) int))
     (bitwise-if (lambda (mask n m) int))
     (any-bits-set? (lambda (n m) bool))
@@ -1222,12 +1220,12 @@
     (test-read-eval-string (lambda (string)))
     (test-begin (syntax (suite-name :optional count)))
     (test-end (syntax (suite-name)))
-    (test-group (syntax (suite-name decl-or-expr \.\.\.)))
-    (test-group-with-cleanup (syntax (suite-name decl-or-expr \.\.\.)))
+    (test-group (syntax (suite-name decl-or-expr ...)))
+    (test-group-with-cleanup (syntax (suite-name decl-or-expr ...)))
     (test-match-name (lambda (name)))
     (test-match-nth (lambda (n :optional count)))
-    (test-match-any (lambda (specifier \.\.\.)))
-    (test-match-all (lambda (specifier \.\.\.)))
+    (test-match-any (lambda (specifier ...)))
+    (test-match-all (lambda (specifier ...)))
     (test-skip (syntax (specifier)))
     (test-expect-fail (syntax (specifier)))
     (test-runner? (lambda (obj)))
@@ -1237,8 +1235,8 @@
     (test-runner-null (lambda ()))
     (test-runner-create (lambda ()))
     (test-runner-factory (lambda (:optional factory)))
-    (test-apply (syntax (runner specifier \.\.\.)))
-    (test-with-runner (syntax (runner decl-or-expr \.\.\.)))
+    (test-apply (syntax (runner specifier ...)))
+    (test-with-runner (syntax (runner decl-or-expr ...)))
     (test-result-kind (lambda (:optional runner)))
     (test-passed? (lambda (:optional runner)))
     (test-result-ref (lambda (runner prop-name (:optional default))))
@@ -1277,7 +1275,7 @@
    ;; SRFI 66
    ("Octet Vectors"
     (make-u8vector (lambda (len n)))
-    (u8vector (lambda (n \.\.\.)))
+    (u8vector (lambda (n ...)))
     (u8vector->list (lambda (u8vector)))
     (list->u8vector (lambda (octet-list)))
     (u8vector-length u8vector)
