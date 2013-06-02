@@ -44,7 +44,6 @@
 (require 'scheme)
 (require 'cmuscheme)
 (require 'info-look)
-(require 'flymake)
 
 (defvar system-type)
 (defvar path-separator)
@@ -118,14 +117,25 @@
   (intern-soft name gosh-obarray))
 
 (defun gosh-symbol-eq (symbol1 symbol2)
-  (let ((name1 (symbol-name symbol1))
-        (name2 (symbol-name symbol2)))
-    (eq (gosh-intern name1) (gosh-intern name2))))
+  (and (gosh-symbol-p symbol1)
+       (gosh-symbol-p symbol2)
+       (let ((name1 (gosh-symbol-name symbol1))
+             (name2 (gosh-symbol-name symbol2)))
+         (equal name1 name2))))
 
-(defun gosh-symbol-p (symbol)
-  (and symbol
-       ;;TODO nil in scheme symbol
-       (symbolp symbol)))
+(defun gosh-symbol-name (symbol)
+  (or
+   (and symbol (symbolp symbol) (symbol-name symbol))
+   (and (gosh-object-p symbol)
+        (eq (gosh-object-type symbol) 'symbol)
+        (gosh-object-value symbol))))
+
+;;TODO consider change symbolp -> gosh-symbol-p
+(defun gosh-symbol-p (obj)
+  (or (and obj
+           (symbolp obj))
+      (and (gosh-object-p obj)
+           (eq (gosh-object-type obj) 'symbol))))
 
 (defun gosh-intern-safe (obj)
   (cond
@@ -352,7 +362,7 @@ This function come from apel"
 ;; documentation.
 
 (defun gosh-scheme-translate-type (type)
-  (if (not (symbolp type))
+  (if (not (gosh-symbol-p type))
       type
     (case type
       ((pred proc thunk handler dispatch producer consumer f fn g kons)
@@ -948,7 +958,7 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
     (unless full
       (error "Unable recognize as gosh command %s" command))
     (or (assoc full gosh-command-alist)
-        (let* ((output (gosh--call-command->string full full "-V"))
+        (let* ((output (gosh--initialize-command->string full full "-V"))
                (ver (when (string-match "version[\s\t]+\\([0-9][0-9.]+\\)" output)
                       (match-string 1 output)))
                (type (cond
@@ -956,7 +966,7 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
                       ((string-match "cygwin$" output) 'cygwin)
                       (t 'unix)))
                (sep (case type (mingw32 ";") (t ":")))
-               (repo (let* ((res (gosh--call-command->string full "gauche-config" "--syslibdir"))
+               (repo (let* ((res (gosh--initialize-command->string full "gauche-config" "--syslibdir"))
                             (res (substring res 0 -1))) ;remove trailing newline
                        (let* ((dir (file-name-directory res))
                               (dir2 (file-name-directory
@@ -1002,28 +1012,34 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
   (gosh-ac-initialize)
   (gosh-info-initialize))
 
-(defun gosh--call-command->string (gosh command &rest args)
+;; called when `unload-feature'
+(defun gosh-mode-unload-function ()
+  ;; No unload now.
+  )
+
+(defun gosh--initialize-command->string (gosh command &rest args)
   (let ((dir (file-name-directory gosh)))
     (with-temp-buffer
-      (apply 'call-process (expand-file-name command dir) nil (current-buffer) nil args)
+      (apply 'call-process (expand-file-name command dir)
+             nil (current-buffer) nil args)
       (buffer-string))))
-
-(defun gosh--call->sexp (script)
-  (with-temp-buffer
-    (let ((args (list "-b" "-e" script)))
-      (unless (= (apply 'call-process gosh-default-command nil t nil
-                        args) 0)
-        (error "TODO")))
-    (goto-char (point-min))
-    ;;TODO only first?
-    (gosh-read)))
 
 (defun gosh--check-command (command)
   (let ((full (executable-find command)))
     (when (and full (string-match "/gosh\\(\\.exe\\)?$" full))
       full)))
 
-(defun gosh-available-modules (&optional full)
+(defun gosh--call-command->sexp (script &optional command)
+  (with-temp-buffer
+    (let ((args (list "-b" "-e" script)))
+      (unless (= (apply 'call-process (or command gosh-default-command-internal) nil t nil
+                        args) 0)
+        (error "TODO")))
+    (goto-char (point-min))
+    ;;TODO only first?
+    (gosh-read)))
+
+(defun gosh-available-modules ()
   "All module symbols in *load-path*"
   (let ((path (gosh-load-path)))
     (gosh-append-map
@@ -1031,14 +1047,13 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
        (let ((len (length (directory-file-name dir))))
          (mapcar
           (lambda (f)
-            (if full
-                f
-              (subst-char-in-string
-               ?/ ?. (file-name-sans-extension (substring f (+ 1 len))))))
+            (subst-char-in-string
+             ?/ ?. (file-name-sans-extension (substring f (+ 1 len)))))
           (gosh-directory-tree-files dir "\\.scm$"))))
      path)))
 
-(defun gosh--module->file (mod)
+(defun gosh-module->file (mod)
+  ;;TODO gosh may allow non suffix file.
   (let* ((file (concat (subst-char-in-string ?. ?/ (symbol-name mod)) ".scm"))
          (dir
           (gosh-any-file-in-path
@@ -1047,7 +1062,7 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
     (when dir
       (expand-file-name file dir))))
 
-(defun gosh--file->module (file)
+(defun gosh-file->module (file)
   (setq file (expand-file-name file))
   (catch 'found
     (dolist (path (gosh-load-path))
@@ -1071,48 +1086,10 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
 
 (defun gosh-exact-load-path (command &optional system-only)
   (let ((process-environment (copy-sequence process-environment))
-        (list '())
         (args '()))
     (when system-only
       (setenv "GAUCHE_LOAD_PATH" nil))
-    (setq args (list "-b" "-e" "(map print *load-path*)"))
-    (with-temp-buffer
-      (apply 'call-process command nil (current-buffer) nil args)
-      (goto-char (point-min))
-      (while (not (eobp))
-        (let ((file (buffer-substring (line-beginning-position) (line-end-position))))
-          (setq list (cons file list)))
-        (forward-line 1))
-      (nreverse list))))
-
-(defun gosh-guessed-module-files (importers symnm)
-  (let (1st 2nd 3rd)
-    (let ((prefix (if (string-match "\\`\\([^-]+\\)" symnm)
-                      (match-string 1 symnm)
-                    symnm))
-          (words (split-string symnm "\\b" t)))
-      (dolist (modname (gosh-available-modules))
-        (let* ((module (intern modname))
-               ;; module full name as a key of matching to SYMNM
-               (keys (split-string modname "[.]"))
-               (file (gosh--module->file module))
-               (import-as (assq module importers))
-               (modprefix (nth 1 import-as)))
-          (cond
-           ((and modprefix
-                 (not (string= modprefix "")))
-            ;; symbol start with imported prefix
-            (when (gosh-string-prefix-p modprefix symnm)
-              (push (cons file modprefix) 1st))
-            ;;TODO destructive
-            (setq importers (delq import-as importers)))
-           ((member prefix keys)
-            (push file 2nd))
-           ((gosh-intersection words keys)
-            (push file 2nd))))))
-    (dolist (importer importers)
-      (push (gosh--module->file (car importer)) 3rd))
-    (delq nil (append 1st 2nd 3rd))))
+    (gosh--call-command->sexp "(write *load-path*)" command)))
 
 (defun gosh-current-executable ()
   (or (gosh-mode-get :executable)
@@ -1406,7 +1383,7 @@ d:/home == /cygdrive/d/home
            (fnsexp (car-safe ctx))
            (index (1- (length fnsexp))))
       (unless (and (consp fnsexp)
-                   (symbolp (car fnsexp)))
+                   (gosh-symbol-p (car fnsexp)))
         (setq fnsexp nil))
       (list fnsexp (max index 0)))))
 
@@ -1466,7 +1443,7 @@ d:/home == /cygdrive/d/home
 (defun gosh-extract--match-clause-vars (x)
   (cond
    ((null x) '())
-   ((symbolp x)
+   ((gosh-symbol-p x)
     (if (memq x '(_ ___ ...))
         '()
       (list (list x))))
@@ -1568,14 +1545,14 @@ d:/home == /cygdrive/d/home
 
 (defun gosh-extract--let-vars (alist vars)
   (loop for x in vars
-        if (and (consp x) (symbolp (car x)))
+        if (and (consp x) (gosh-symbol-p (car x)))
         do (gosh-extract--put-var alist (car x) nil)))
 
 (defun gosh-extract--typed-vars (alist vars)
   (loop for x in vars
-        if (and (consp x) (symbolp (car x)))
+        if (and (consp x) (gosh-symbol-p (car x)))
         do (gosh-extract--put-var alist (car x) (cdr x))
-        else if (and (atom x) (symbolp x))
+        else if (and (atom x) (gosh-symbol-p x))
         do (gosh-extract--put-var alist x nil)))
 
 (defun gosh-extract--simple-args (alist vars)
@@ -1585,7 +1562,7 @@ d:/home == /cygdrive/d/home
          ((atom x)
           (gosh-extract--put-var alist x nil))
          ((keywordp (car x)))
-         ((symbolp (car x))
+         ((gosh-symbol-p (car x))
           (gosh-extract--put-var alist (car x) nil))
          ((consp (car x))
           (gosh-extract--put-var alist (caar x) (cdar x))))))
@@ -1600,7 +1577,7 @@ d:/home == /cygdrive/d/home
                  (mapcar
                   (lambda (d)
                     (cond
-                     ((symbolp (car d))
+                     ((gosh-symbol-p (car d))
                       (let* ((dname (symbol-name (car d)))
                              (fullsym (intern (concat prefix dname))))
                         (cons fullsym (cdr d))))
@@ -1610,6 +1587,8 @@ d:/home == /cygdrive/d/home
     res))
 
 (defun gosh-extract-importers (forms)
+  ;; IMPORTERS ::= { IMPORTER } ;
+  ;; IMPORTER  ::= MODULE , PREFIX ;
   (gosh-append-map 'gosh-extract--importer forms))
 
 (defun gosh-extract--importer (sexp)
@@ -1623,7 +1602,7 @@ d:/home == /cygdrive/d/home
      (let* ((module (nth 1 sexp))
             (gprefix (cadr (memq :prefix sexp)))
             (prefix (cond
-                     ((and gprefix (symbolp gprefix))
+                     ((and gprefix (gosh-symbol-p gprefix))
                       (symbol-name gprefix))
                      ((stringp gprefix)
                       gprefix)
@@ -1736,10 +1715,10 @@ d:/home == /cygdrive/d/home
                            res))))))
          (export-handler
           (lambda (form)
-            (setq res (nconc (cdr form) res))))
+            (setq res (append (cdr form) res))))
          (export-all-handler
           (lambda ()
-            (setq res (nconc
+            (setq res (append
                        (mapcar
                         'car
                         (or env (gosh-extract-globals forms nil)))
@@ -1768,7 +1747,7 @@ d:/home == /cygdrive/d/home
     res))
 
 (defun gosh-extract-exported-symbols (forms)
-  (let* ((env (gosh-extract-globals forms nil))
+  (let* ((env (gosh-extract-globals forms))
          (exports (gosh-extract-exports forms t env))
          (res '()))
     ;; if source file execute dynamic load.
@@ -1784,6 +1763,33 @@ d:/home == /cygdrive/d/home
         (unless (memq x res)
           (setq res (cons x res)))))
     res))
+
+(defconst gosh-extract-dynamic-load-exports-format
+  (concat
+   "(begin"
+   "(dynamic-load \"%s\")"
+   "(write (hash-table-map"
+   "(module-table (find-module '%s)) (^ (s _) s))))"))
+
+(defun gosh-extract-dynamic-library-exports (forms)
+  (let ((res '())
+        module)
+    (dolist (form forms)
+      (cond
+       ((and (eq (car-safe form) 'dynamic-load) module)
+        ;;TODO not consider module differences
+        (let ((dll-name (nth 1 form)))
+          (setq res
+                (append
+                 res
+                 (gosh--call-command->sexp
+                  (format gosh-extract-dynamic-load-exports-format dll-name module))))))
+       ((eq (car-safe form) 'select-module)
+        ;; FIXME: may be appended to other module.
+        (setq module (nth 1 form)))
+       (t nil)))
+    res))
+
 
 ;;
 ;; Parsed cache
@@ -1832,23 +1838,23 @@ TODO key should be module-file?? multiple executable make complex.")
         ;; (re)compute module as forms
         (let ((res (gosh-with-find-file file
                      (gosh-parse-read-forms)))
-              (module (gosh--file->module file)))
+              (module (gosh-file->module file)))
           (gosh-cache--push file module cached res)
           res))))
 
 (defun gosh-cache-module-forms (module)
-  (let ((file (gosh--module->file module)))
+  (let ((file (gosh-module->file module)))
     (gosh-cache-file-forms file)))
 
 ;; Gather export symbols of MOD.
 (defun gosh-cache-module-export-env (module)
   (let ((mname (symbol-name module)))
     (cond
-     ((and (symbolp module) (string-match "^srfi-\\([0-9]+\\)$" mname))
+     ((and (gosh-symbol-p module) (string-match "^srfi-\\([0-9]+\\)$" mname))
       (let ((srfi-n (string-to-number (match-string 1 mname))))
         (gosh-env--srfi-exports srfi-n)))
      (t
-      (let* ((file (gosh--module->file module))
+      (let* ((file (gosh-module->file module))
              (cached (and file (gosh-cache--pull file gosh-cache--module-export-env))))
         (or (gosh-cache--get cached)
             ;; (re)compute module exports
@@ -1859,7 +1865,7 @@ TODO key should be module-file?? multiple executable make complex.")
 
 ;; Gather module all definitions which is derived by child module.
 (defun gosh-cache-module-global-env (module)
-  (let* ((file (gosh--module->file module))
+  (let* ((file (gosh-module->file module))
          (cached (and file (gosh-cache--pull file gosh-cache--file-global-env))))
     (or (gosh-cache--get cached)
         ;; (re)compute module exports
@@ -1867,6 +1873,10 @@ TODO key should be module-file?? multiple executable make complex.")
                (res (gosh-extract-globals forms t)))
           (gosh-cache--push file module cached res)
           res))))
+
+;;TODO
+(defun gosh-cache-lookup-symbol (symbol)
+  )
 
 ;;
 ;; env
@@ -1877,7 +1887,7 @@ TODO key should be module-file?? multiple executable make complex.")
   (let ((syms (gosh-extract-exported-symbols forms))
         (modules (gosh-extract-base-modules forms)))
     (dolist (mod modules)
-      (let ((file (gosh--module->file mod))
+      (let ((file (gosh-module->file mod))
             (base-forms (gosh-cache-module-forms mod)))
         (setq syms (append (gosh-extract-exports base-forms nil nil) syms))))
     syms))
@@ -1927,7 +1937,7 @@ TODO key should be module-file?? multiple executable make complex.")
     (lambda (env)
       (mapc
        (lambda (,var)
-         (when (symbolp (car ,var))
+         (when (gosh-symbol-p (car ,var))
            ,@form))
        env))
     ,env))
@@ -2270,13 +2280,13 @@ Set this variable before open by `gosh-mode'."
       (when (and (vectorp x)
                  (> (length x) 0)
                  (let ((sym (aref x 0)))
-                   (and (symbolp sym)
+                   (and (gosh-symbol-p sym)
                         (string-match "\\.\\.\\.$" (symbol-name sym)))))
         (throw 'found x)))
     ;; vector SEXP to list
     (let ((last (car (last (append sexp nil)))))
       (when (and last
-                 (symbolp last)
+                 (gosh-symbol-p last)
                  (string-match "\\.\\.\\.$" (symbol-name last)))
         (throw 'found last)))
     nil))
@@ -2409,7 +2419,7 @@ Set this variable before open by `gosh-mode'."
          (concat
           "Number: "
           (gosh-eldoc--sexp->string type)))
-        ((symbolp type)
+        ((gosh-symbol-p type)
          (let ((spec (gosh-env-lookup env type)))
            ;; ignore `max-lisp-eval-depth' error
            (or (gosh-eldoc--find-and-print-string spec env highlight)
@@ -2434,7 +2444,7 @@ Set this variable before open by `gosh-mode'."
 (defun gosh-completion-do (str coll &optional strs pred)
   (let* ((coll (mapcar (lambda (x)
                          (cond
-                          ((symbolp x) (list (symbol-name x)))
+                          ((gosh-symbol-p x) (list (symbol-name x)))
                           ((stringp x) (list x))
                           (t x)))
                        coll))
@@ -2502,8 +2512,8 @@ Set this variable before open by `gosh-mode'."
          (or (eq a1 b1)             ; and they're the same
              (eq a1 'object)        ; ... or a can return anything
              (eq b1 'object)        ; ... or b can receive anything
-             (if (symbolp a1)
-                 (if (symbolp b1)
+             (if (gosh-symbol-p a1)
+                 (if (gosh-symbol-p b1)
                      (case a1           ; ... or the types overlap
                        ((number complex real rational integer)
                         (memq b1 '(number complex real rational integer)))
@@ -2569,8 +2579,8 @@ Set this variable before open by `gosh-mode'."
 
 ;;TODO name
 (defun gosh-param-list-match-p (p1 p2)
-  (or (and (symbolp p1) (not (null p1)))
-      (and (symbolp p2) (not (null p2)))
+  (or (and (gosh-symbol-p p1) (not (null p1)))
+      (and (gosh-symbol-p p2) (not (null p2)))
       (and (null p1) (null p2))
       (and (consp p1) (consp p2)
            (gosh-param-list-match-p (cdr p1) (cdr p2)))))
@@ -2775,15 +2785,15 @@ Set this variable before open by `gosh-mode'."
   (let ((module (gosh-test--update-module)))
     (gosh-test--invoke-process module)))
 
-(defun gosh-test-popup-result-at-point ()
-  "Show test result if there is."
+(defun gosh-test-print-result-at-point ()
+  "Print test result if there is."
   (interactive)
   (cond
    ((null (gosh-mode-get :modeline-test-result))
     (message "Current module is not tested yet."))
    (t
     (let ((msgs (loop for o in (overlays-at (point))
-                      if (overlay-get o 'flymake-overlay)
+                      if (gosh-test--mark-p o)
                       collect (overlay-get o 'help-echo))))
       (cond
        (msgs
@@ -2795,8 +2805,8 @@ Set this variable before open by `gosh-mode'."
        (t
         (message "No error at point.")))))))
 
-(defun gosh-test-popup-result ()
-  "Show all test error results in this buffer."
+(defun gosh-test-view-result ()
+  "View all test error results in this buffer."
   (interactive)
   (cond
    ((null (gosh-mode-get :modeline-test-result))
@@ -3256,14 +3266,14 @@ Arg FORCE non-nil means forcely insert bracket."
 (defvar gosh--smart-indent-alist nil
   "Pseudo EBNF is below.
 
-ALIST ::= { MODULE | PROCEDURE }
-MODULE ::= MODULE-SYMBOL , { PROCEDURE }
-PROCEDURE ::= REGEXP , LEVEL | PROCEDURE-SYMBOL , LEVEL
+ALIST     ::= { MODULE | PROCEDURE } ;
+MODULE    ::= MODULE-SYMBOL , { PROCEDURE } ;
+PROCEDURE ::= REGEXP , LEVEL | PROCEDURE-SYMBOL , LEVEL ;
 
-LEVEL ::= number
-REGEXP ::= string
-MODULE-SYMBOL ::= symbol
-PROCEDURE-SYMBOL ::= symbol
+LEVEL            ::= number ;
+REGEXP           ::= string ;
+MODULE-SYMBOL    ::= symbol ;
+PROCEDURE-SYMBOL ::= symbol ;
 ")
 
 (defun gosh-smart-indent-rule (procedure-symbol-or-regexp level &optional module)
@@ -3525,6 +3535,11 @@ PROCEDURE-SYMBOL ::= symbol
 ;;; test functions
 ;;;
 
+(defface gosh-test-errline
+  '((t :inherit error))
+  "Face used for marking error lines."
+  :group 'gosh-mode)
+
 (defvar gosh-test--modeline-format
   `(
     " "
@@ -3595,24 +3610,15 @@ PROCEDURE-SYMBOL ::= symbol
                      (setq fin (match-end 1)))
                    (condition-case err
                        (gosh-test--make-error
-                        beg fin msg 'flymake-errline)
+                        beg fin msg)
                      (error
                       (gosh-test--make-error
-                       beg fin msg 'flymake-errline)))))))))
+                       beg fin msg)))))))))
 
-(defun gosh-test--make-error (beg end tooltip-text face)
-  "Allocate a flymake overlay in range BEG and END."
-  ;;TODO
-  (when (not (flymake-region-has-flymake-overlays beg end))
-    (let ((ov (make-overlay beg end nil t t)))
-      (overlay-put ov 'face face)
-      (overlay-put ov 'help-echo tooltip-text)
-      (overlay-put ov 'flymake-overlay t)
-      (overlay-put ov 'priority 100)
-      (overlay-put ov 'evaporate t)
-      ;;TODO what is fringe
-      ;; (overlay-put ov 'before-string 'fringe)
-      ov)))
+(defun gosh-test--make-error (beg end tooltip-text)
+  "Allocate a error marker in range BEG and END."
+  (unless (gosh-test--region-has-mark-p beg end)
+    (gosh-test--mark beg end tooltip-text)))
 
 (defun gosh-test--update-modeline ()
   (let* ((prev-module (gosh-mode-get :tested-module))
@@ -3710,14 +3716,34 @@ PROCEDURE-SYMBOL ::= symbol
           (forward-line -1))
         (gosh-test--make-error
          (point) (line-end-position)
-         text 'flymake-errline))))))
+         text))))))
 
 (defun gosh-test--clear-errors ()
   (save-restriction
     (widen)
     (dolist (ov (overlays-in (point-min) (point-max)))
-      (when (flymake-overlay-p ov)
+      (when (gosh-test--mark-p ov)
         (delete-overlay ov)))))
+
+(defun gosh-test--mark (start end tooltip-text)
+  (let ((ov (make-overlay start end nil t t)))
+    (overlay-put ov 'face 'gosh-test-errline)
+    (overlay-put ov 'help-echo tooltip-text)
+    (overlay-put ov 'gosh-test-mark t)
+    (overlay-put ov 'priority 100)
+    (overlay-put ov 'evaporate t)
+    ;;TODO what is fringe
+    ;; (overlay-put ov 'before-string 'fringe)
+    ov))
+
+(defun gosh-test--region-has-mark-p (start end)
+  (loop for ov in (overlays-in start end)
+        when (gosh-test--mark-p ov)
+        return t))
+
+(defun gosh-test--mark-p (obj)
+  (and (overlayp obj)
+       (overlay-get obj 'gosh-test-mark)))
 
 (defun gosh-test--process-sentinel (proc event)
   (unless (eq (process-status proc) 'run)
@@ -4146,8 +4172,8 @@ CHECK is function that accept no arg and return boolean."
     (define-key map "\C-c\M-r" 'gosh-refactor-rename-symbol)
     ;; (define-key map "\C-c\er" 'gosh-refactor-rename-symbol-afaiui)
     ;; TODo consider key bindings
-    (define-key map "\C-c\C-p" 'gosh-test-popup-result)
-    ;; (define-key map "\C-c\C-p" 'gosh-test-popup-result-at-point)
+    (define-key map "\C-c\C-v" 'gosh-test-view-result)
+    (define-key map "\C-c\C-p" 'gosh-test-print-result-at-point)
 
     (define-key map ")" 'gosh-paren-insert-close)
     (define-key map "]" 'gosh-paren-insert-close-bracket)
@@ -4228,7 +4254,6 @@ This mode is originated from `scheme-mode' but specialized to edit Gauche code."
          (setq gosh-mode--context (list ,key ,val)))
        ,val)))
 
-;;TODO rename
 (defun gosh-mode--after-change (start end old-len)
   ;;check executable
   (when (< end 255)
@@ -4467,11 +4492,10 @@ This mode is originated from `scheme-mode' but specialized to edit Gauche code."
          (gosh-jump-to-globaldef sym))))))
 
 (defun gosh-jump-to-module-globaldef (module symbol forms)
-  (when (assq symbol (gosh-extract-globals forms t))
-    (let* ((mf (or (and (stringp module) module)
-                   (gosh--module->file module)))
-           (buf (get-file-buffer mf)))
-      (set-buffer (or buf (gosh--find-file-noselect mf)))
+  (when (assq symbol (gosh-cache-module-global-env module))
+    (let* ((mod-file (gosh-module->file module))
+           (buf (get-file-buffer mod-file)))
+      (set-buffer (or buf (gosh--find-file-noselect mod-file)))
       (when (gosh-jump-to-globaldef symbol)
         (switch-to-buffer (current-buffer))
         t))))
@@ -4546,18 +4570,18 @@ This mode is originated from `scheme-mode' but specialized to edit Gauche code."
         (when (gosh-jump-to-module-globaldef x sym forms)
           (throw 'found t)))
       ;; search imported modules
-      ;;TODO refactor
       (let ((importers (gosh-extract-importers forms)))
-        (dolist (mod (gosh-guessed-module-files importers symnm))
-          (let ((mod-file (or (and (stringp mod) mod) (car mod)))
-                (sym2 (or (and (listp mod)
-                               (intern-soft (substring symnm (length (cdr mod)))))
-                          sym)))
+        (dolist (importer importers)
+          (let* ((module (nth 0 importer))
+                 (modprefix (nth 1 importer))
+                 (mod-file (gosh-module->file module))
+                 (symnm2 (substring symnm (length modprefix)))
+                 (sym2 (intern-soft symnm2)))
             (when (memq sym2 (gosh-env-exports-functions mod-file))
-              (when (gosh-jump-to-module-globaldef mod-file sym2 forms)
+              (when (gosh-jump-to-module-globaldef module sym2 forms)
                 (throw 'found t))))))
       ;; jump to module (cursor point as a module name)
-      (let ((file (gosh--module->file sym)))
+      (let ((file (gosh-module->file sym)))
         (when file
           (switch-to-buffer (gosh--find-file-noselect file))
           (throw 'found t)))
@@ -5050,15 +5074,6 @@ TODO but not supported with-module context."
     (error
      ;; step through if error.
      (setq gosh-snatch--filter-candidates t))))
-
-
-;;;;
-;;;; cleanup
-;;;;
-
-(defun gosh-mode-unload-function ()
-  ;;TODO
-  )
 
 
 
