@@ -181,8 +181,8 @@
 (define-abbrev-table 'gosh-stub-mode-abbrev-table ())
 
 ;;;###autoload
-(define-derived-mode gosh-stub-mode scheme-mode
-  "Gosh Stub"
+(define-derived-mode gosh-stub-mode scheme-mode "Gosh Stub"
+  "Major mode for editing Gauche stub code."
   (use-local-map gosh-stub-mode-map)
   (run-mode-hooks 'gosh-stub-mode-hook))
 

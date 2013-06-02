@@ -21,6 +21,9 @@
 ;;; Commentary:
 ;;
 
+;; This module provides quick configurations for user. todo
+;; 
+
 ;;; Code:
 
 ;; Most recent version is following
@@ -115,6 +118,7 @@
 (autoload 'gosh-run "gosh-mode" nil t)
 
 (add-to-list 'interpreter-mode-alist '("gosh" . gosh-mode))
+
 (add-to-list 'auto-mode-alist '("\\.scm\\'" . gosh-mode))
 
 (add-hook 'gosh-mode-hook
@@ -168,13 +172,15 @@
 ;; entry point of configurations
 (defun gosh-config-loading ()
   (gosh-initialize)
-  (gosh-config--scheme-specialize)
   (gosh-config--define-general-indent))
 
-(if (featurep 'gosh-mode)
-    (gosh-config-loading)
-  (eval-after-load 'gosh-mode
-    `(gosh-config-loading)))
+;; add hook after load substance of major-mode
+(eval-after-load 'gosh-mode
+  `(gosh-config-loading))
+
+;; TODO allowance to after loading `gosh-mode'
+(when (featurep 'gosh-mode)
+  (gosh-config-loading))
 
 ;; for package (ELPA)
 ;;;###autoload (require 'gosh-config)
