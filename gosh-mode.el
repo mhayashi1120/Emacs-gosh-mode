@@ -937,7 +937,7 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
    " (close-output-port port)))"
    ))
 
-(defconst gosh-backend-eval-guard-format
+(defconst gosh-eval-guard-format
   (concat
    "(guard (e "
    " (else (print \"%s\" "
@@ -4602,57 +4602,57 @@ otherwise insert top level of the script."
 
 
 ;;;
-;;; Sticky minor mode
+;;; Eval minor mode
 ;;;
 
-(defvar gosh-sticky-mode-map nil)
+(defvar gosh-eval-mode-map nil)
 
-(let ((map (or gosh-sticky-mode-map (make-sparse-keymap))))
+(let ((map (or gosh-eval-mode-map (make-sparse-keymap))))
 
   (define-key map "\C-c\C-b" 'gosh-eval-buffer)
   (define-key map "\C-c\C-n" 'gosh-eval-region)
-  (define-key map "\C-x\C-e" 'gosh-send-last-sexp)
+  (define-key map "\C-x\C-e" 'gosh-eval-last-sexp)
   (define-key map "\M-:" 'gosh-eval-expression)
   (define-key map "\M-\C-x" 'gosh-eval-defun)
 
-  (setq gosh-sticky-mode-map map))
+  (setq gosh-eval-mode-map map))
 
-(define-minor-mode gosh-sticky-mode
+(define-minor-mode gosh-eval-mode
   "Gosh sticky process mode.
 Evaluate s-expression, syntax check, etc."
-  nil nil gosh-sticky-mode-map
-  (if gosh-sticky-mode
-      (add-hook 'gosh-mode-timer-functions 'gosh-sticky-backend-watcher nil t)
-    (remove-hook 'gosh-mode-timer-functions 'gosh-sticky-backend-watcher t))
-  (gosh-sticky-backend-switch-context))
+  nil nil gosh-eval-mode-map
+  (if gosh-eval-mode
+      (add-hook 'gosh-mode-timer-functions 'gosh-eval-backend-watcher nil t)
+    (remove-hook 'gosh-mode-timer-functions 'gosh-eval-backend-watcher t))
+  (gosh-eval-backend-switch-context))
 
-(defun gosh-sticky-mode-on ()
-  (gosh-sticky-mode 1))
+(defun gosh-eval-mode-on ()
+  (gosh-eval-mode 1))
 
-(defun gosh-sticky-mode-off ()
-  (gosh-sticky-mode -1))
+(defun gosh-eval-mode-off ()
+  (gosh-eval-mode -1))
 
-(defun gosh-backend-eval (sexp-string)
+(defun gosh-eval (sexp-string)
   ;;TODO unbaranced parenthese must be error before send.
   (let* ((hash (concat (md5 sexp-string) " ")) ;; hash string is separator.
-         (proc (gosh-backend-check-process))
-         (output-file (process-get proc 'gosh-backend-output-file))
+         (proc (gosh-eval-check-process))
+         (output-file (process-get proc 'gosh-eval-output-file))
          (eval-form
-          (format gosh-backend-eval-guard-format hash
+          (format gosh-eval-guard-format hash
                   (format
                    gosh-eval-expression-command-format
                    output-file
                    sexp-string)))
          result)
-    (setq result (gosh-backend-low-level-eval eval-form proc))
+    (setq result (gosh-eval-low-level-action eval-form proc))
     (if (string-match (concat "^" hash "\\(.*\\)") result)
-        (signal 'gosh-backend-error (list (match-string 1 result)))
+        (signal 'gosh-eval-error (list (match-string 1 result)))
       result)))
 
-(defun gosh-backend-eval-get-output ()
-  ;; call after executing `gosh-backend-eval'
-  (let* ((proc (gosh-backend-check-process))
-         (file (process-get proc 'gosh-backend-output-file)))
+(defun gosh-eval-get-output ()
+  ;; call after executing `gosh-eval'
+  (let* ((proc (gosh-eval-check-process))
+         (file (process-get proc 'gosh-eval-output-file)))
     ;; ignore huge file. not concern about error.
     (with-temp-buffer
       (let* ((cs (process-coding-system proc))
@@ -4660,12 +4660,12 @@ Evaluate s-expression, syntax check, etc."
         (insert-file-contents file)
         (buffer-string)))))
 
-(defun gosh-backend-low-level-eval (sexp-string &optional process)
-  (let* ((proc (or process (gosh-backend-check-process)))
+(defun gosh-eval-low-level-action (sexp-string &optional process)
+  (let* ((proc (or process (gosh-eval-check-process)))
          start end)
     (with-current-buffer (process-buffer proc)
-      (gosh-backend-wait-locking proc)
-      (process-put proc 'gosh-backend-locking t)
+      (gosh-eval-wait-locking proc)
+      (process-put proc 'gosh-eval-locking t)
       (unwind-protect
           (progn
             (setq start (point-max))
@@ -4673,21 +4673,21 @@ Evaluate s-expression, syntax check, etc."
             (let ((inhibit-quit t))
               ;; wait output from command
               (while (= start (point-max))
-                (gosh-backend-wait proc))
+                (gosh-eval-wait proc))
               ;; wait return prompt from process.
-              (while (not (gosh-backend-prompt-match))
-                (gosh-backend-wait proc))
+              (while (not (gosh-eval-prompt-match))
+                (gosh-eval-wait proc))
               ;;remove trailing newline
               (setq end (1- (match-beginning 0))))
             (unless end
               (signal 'quit nil)))
-        (process-put proc 'gosh-backend-locking nil))
+        (process-put proc 'gosh-eval-locking nil))
       (buffer-substring start end))))
 
-(put 'gosh-backend-error 'error-conditions '(gosh-backend-error error))
-(put 'gosh-backend-error 'error-message "Gosh error")
+(put 'gosh-eval-error 'error-conditions '(gosh-eval-error error))
+(put 'gosh-eval-error 'error-message "Gosh error")
 
-(defvar gosh-backend-suppress-discard-input nil)
+(defvar gosh-eval-suppress-discard-input nil)
 
 ;; Should use `sleep-for' not `sit-for'.
 ;; To indicate differences, compare following two examples.
@@ -4701,42 +4701,41 @@ Evaluate s-expression, syntax check, etc."
 ;;   (message "%s.%s" (format-time-string "%c") (nth 2 (current-time)))
 ;;   (sleep-for 0.5))
 
-(defun gosh-backend-wait-locking (proc)
-  (while (process-get proc 'gosh-backend-locking)
-    (unless gosh-backend-suppress-discard-input
+(defun gosh-eval-wait-locking (proc)
+  (while (process-get proc 'gosh-eval-locking)
+    (unless gosh-eval-suppress-discard-input
       (discard-input))
     (sleep-for 0.1)))
 
-(defun gosh-backend-wait (proc)
+(defun gosh-eval-wait (proc)
   (sleep-for 0.1)
-  (unless gosh-backend-suppress-discard-input
+  (unless gosh-eval-suppress-discard-input
     (discard-input))
   (when quit-flag
     (kill-process proc)
     (setq inhibit-quit nil)
     (signal 'quit nil)))
 
-(defvar gosh-backend-prompt-string-regexp "\ngosh>[\s\t]*$")
-(defvar gosh-backend-prompt-regexp "^gosh>[\s\t]*\\'")
-(defconst gosh-backend-process-buffer-format " *Gosh-mode<%s>* ")
-(defvar gosh-backend-process-alist nil)
+(defvar gosh-eval-prompt-regexp "^gosh>[\s\t]*\\'")
+(defconst gosh-eval-process-buffer-format " *Gosh-mode<%s>* ")
+(defvar gosh-eval-process-alist nil)
 
-(defun gosh-backend-prompt-match ()
+(defun gosh-eval-prompt-match ()
   (save-excursion
     (goto-char (point-max))
     (forward-line 0)
-    (looking-at gosh-backend-prompt-regexp)))
+    (looking-at gosh-eval-prompt-regexp)))
 
-(defun gosh-backend-process-filter (proc event)
+(defun gosh-eval-process-filter (proc event)
   (with-current-buffer (process-buffer proc)
     (goto-char (point-max))
     (insert event)))
 
-(defun gosh-backend-active-process (&optional command)
+(defun gosh-eval-active-process (&optional command)
   (let* ((command (or command gosh-default-command-internal))
          proc)
     (cond
-     ((and (setq proc (cdr (assoc command gosh-backend-process-alist)))
+     ((and (setq proc (cdr (assoc command gosh-eval-process-alist)))
            (eq (process-status proc) 'run))
       proc)
      (proc
@@ -4744,31 +4743,31 @@ Evaluate s-expression, syntax check, etc."
       nil)
      (t nil))))
 
-(defun gosh-backend-check-process ()
+(defun gosh-eval-check-process ()
   (unless gosh-default-command-internal
     (error "Assert"))
   ;;TODO switch by executable
   (let* ((command gosh-default-command-internal)
-         (proc (gosh-backend-active-process command)))
+         (proc (gosh-eval-active-process command)))
     (unless proc
-      (let* ((buffer (gosh-backend-process-buffer command))
+      (let* ((buffer (gosh-eval-process-buffer command))
              (dir default-directory))
         (with-current-buffer buffer
           (unless (file-directory-p default-directory)
             (cd dir))
           (setq proc (start-process "Gosh backend" buffer command "-i"))
-          (set-process-filter proc 'gosh-backend-process-filter)
-          (gosh-set-alist 'gosh-backend-process-alist command proc)
+          (set-process-filter proc 'gosh-eval-process-filter)
+          (gosh-set-alist 'gosh-eval-process-alist command proc)
           ;; wait for first prompt
-          (while (not (gosh-backend-prompt-match))
+          (while (not (gosh-eval-prompt-match))
             (sleep-for 0.1)))))
-    (let ((file (process-get proc 'gosh-backend-output-file)))
+    (let ((file (process-get proc 'gosh-eval-output-file)))
       (unless (and file (file-exists-p file))
-        (process-put proc 'gosh-backend-output-file (make-temp-file "gosh-mode-output-"))))
+        (process-put proc 'gosh-eval-output-file (make-temp-file "gosh-mode-output-"))))
     proc))
 
-(defun gosh-backend-process-buffer (command)
-  (let ((buffer (get-buffer-create (format gosh-backend-process-buffer-format command))))
+(defun gosh-eval-process-buffer (command)
+  (let ((buffer (get-buffer-create (format gosh-eval-process-buffer-format command))))
     (with-current-buffer buffer
       (kill-all-local-variables)
       (erase-buffer))
@@ -4781,42 +4780,42 @@ Evaluate s-expression, syntax check, etc."
 ;;    sys-putenv
 ;;    evaluate sexp contains sys-putenv...
 ;;    no sys-unsetenv ...
-(defun gosh-sticky-backend-switch-context ()
-  (let* ((proc (gosh-backend-check-process))
+(defun gosh-eval-backend-switch-context ()
+  (let* ((proc (gosh-eval-check-process))
          (file (gosh-mode--maybe-temp-file))
          (directory (expand-file-name default-directory)))
     (unless (file-directory-p directory)
       (error "Directory is not exist"))
-    ;; filter is `gosh-sticky-switch-context-filter' means now switching context
-    (when (and (not (eq (process-filter proc) 'gosh-sticky-switch-context-filter))
-               (or (not (eq (process-get proc 'gosh-backend-current-buffer)
+    ;; filter is `gosh-eval-switch-context-filter' means now switching context
+    (when (and (not (eq (process-filter proc) 'gosh-eval-switch-context-filter))
+               (or (not (eq (process-get proc 'gosh-eval-current-buffer)
                             (current-buffer)))
-                   (null (process-get proc 'gosh-backend-switched-time))
+                   (null (process-get proc 'gosh-eval-switched-time))
                    (null (gosh-mode-get :modtime))
                    (>= (gosh-mode-get :modtime)
-                       (process-get proc 'gosh-backend-switched-time))))
-      (set-process-filter proc 'gosh-sticky-switch-context-filter)
-      (process-put proc 'gosh-backend-current-buffer (current-buffer))
-      (process-put proc 'gosh-backend-switched-time (float-time))
-      (process-put proc 'gosh-backend-locking t)
+                       (process-get proc 'gosh-eval-switched-time))))
+      (set-process-filter proc 'gosh-eval-switch-context-filter)
+      (process-put proc 'gosh-eval-current-buffer (current-buffer))
+      (process-put proc 'gosh-eval-switched-time (float-time))
+      (process-put proc 'gosh-eval-locking t)
       (process-send-string proc (format "(sys-chdir \"%s\")\n" directory))
       proc)))
 
-(defun gosh-sticky-backend-chdir ()
+(defun gosh-eval-backend-chdir ()
   (let* ((edir (expand-file-name default-directory))
          (gdir (funcall gosh-default-path-e2g edir)))
     (unless (file-directory-p edir)
       (error "Directory is not exist"))
-    (gosh-backend-low-level-eval (format "(sys-chdir \"%s\")\n" gdir))))
+    (gosh-eval-low-level-action (format "(sys-chdir \"%s\")\n" gdir))))
 
-(defun gosh-sticky-switch-context-filter (proc event)
+(defun gosh-eval-switch-context-filter (proc event)
   (with-current-buffer (process-buffer proc)
     (goto-char (point-max))
     (insert event)
-    (when (gosh-backend-prompt-match)
+    (when (gosh-eval-prompt-match)
       ;; restore filter and unlock buffer to be enable evaluate expression
-      (set-process-filter proc 'gosh-backend-process-filter)
-      (process-put proc 'gosh-backend-locking nil))))
+      (set-process-filter proc 'gosh-eval-process-filter)
+      (process-put proc 'gosh-eval-locking nil))))
 
 (defvar gosh-read-expression-history nil)
 
@@ -4828,13 +4827,13 @@ Evaluate s-expression, syntax check, etc."
     (let (result output)
       (condition-case err
           (progn
-            (setq result (gosh-backend-eval form))
-            (setq output (gosh-backend-eval-get-output)))
-        (gosh-backend-error
-         (setq output (gosh-backend-eval-get-output))
+            (setq result (gosh-eval form))
+            (setq output (gosh-eval-get-output)))
+        (gosh-eval-error
+         (setq output (gosh-eval-get-output))
          ;;emulate emacs error..
          (message "%s" output)
-         (signal 'gosh-backend-error (cdr err))))
+         (signal 'gosh-eval-error (cdr err))))
       (if suppress-message
           (message "%s" output)
         (message "%s%s" output result)))))
@@ -4850,10 +4849,10 @@ Evaluate s-expression, syntax check, etc."
             (format "(begin (select-module %s) %s)\n"
                     module
                     (buffer-substring start end)))
-      (let ((result (gosh-backend-low-level-eval sexp)))
+      (let ((result (gosh-eval-low-level-action sexp)))
         ;; FIXME toplevel form error message probablly contains newline...
         (when (string-match "\n" result)
-          (signal 'gosh-backend-error (list (format "%s" result))))
+          (signal 'gosh-eval-error (list (format "%s" result))))
         (message "%s" result)))))
 
 (defun gosh-eval--send-region (start end)
@@ -4863,20 +4862,20 @@ Evaluate s-expression, syntax check, etc."
     (gosh-eval-expression (buffer-substring start end))))
 
 (defun gosh-eval--check-backend ()
-  (unless gosh-sticky-mode
-    (error "Command disabled when `gosh-sticky-mode' is disabled"))
-  (if (gosh-backend-active-process)
+  (unless gosh-eval-mode
+    (error "Command disabled when `gosh-eval-mode' is disabled"))
+  (if (gosh-eval-active-process)
       ;; backend already activated
-      (gosh-sticky-backend-chdir)
+      (gosh-eval-backend-chdir)
     ;; backend deactivated then activate and load current file.
-    ;; this case block several seconds in `gosh-backend-eval'
-    (gosh-sticky-backend-switch-context)))
+    ;; this case block several seconds in `gosh-eval'
+    (gosh-eval-backend-switch-context)))
 
-(defun gosh-sticky-backend-watcher ()
-  (unless (gosh-backend-active-process)
-    (gosh-sticky-backend-switch-context)))
+(defun gosh-eval-backend-watcher ()
+  (unless (gosh-eval-active-process)
+    (gosh-eval-backend-switch-context)))
 
-(defun gosh-send-last-sexp ()
+(defun gosh-eval-last-sexp ()
   "Send the previous sexp to the sticky backend process.
 That sexp evaluated at current module. The module may not be loaded.
 Execute \\[gosh-eval-buffer] if you certain the buffer is a reliable code.
@@ -4915,7 +4914,7 @@ And print value in the echo area.
   (gosh-eval--check-backend)
   (gosh--processing-message "Evaluating buffer..."
     (let ((file (gosh-mode--maybe-temp-file)))
-      (gosh-backend-eval (format "(load \"%s\")\n" file)))))
+      (gosh-eval (format "(load \"%s\")\n" file)))))
 
 (defun gosh-eval-region (start end)
   "Evaluate current region at current context."
@@ -4927,7 +4926,7 @@ And print value in the echo area.
           (progn
             (let ((coding-system-for-write buffer-file-coding-system))
               (write-region start end file nil 'no-msg))
-            (gosh-backend-eval (format "(load \"%s\")\n" file)))
+            (gosh-eval (format "(load \"%s\")\n" file)))
         (delete-file file)))))
 
 
@@ -4997,11 +4996,11 @@ TODO but not supported with-module context."
         (sym (gosh-complete-symbol-name-at-point)))
     (gosh-completion-do sym cands)))
 
-
-;;;
-;;; Snatch filter (in gosh-inferior-mode)
-;;;
+;;
+;; Snatch filter (in gosh-inferior-mode)
+;;
 
+(defvar gosh-snatch--prompt-regexp "\ngosh>[\s\t]*$")
 (defvar gosh-snatch--filter-candidates nil)
 (defvar gosh-snatch--filter-string-stack nil)
 
@@ -5030,7 +5029,7 @@ TODO but not supported with-module context."
       (progn
         (setq gosh-snatch--filter-string-stack
               (concat gosh-snatch--filter-string-stack event))
-        (when (string-match gosh-backend-prompt-string-regexp gosh-snatch--filter-string-stack)
+        (when (string-match gosh-snatch--prompt-regexp gosh-snatch--filter-string-stack)
           ;; read scheme '() to nil but to finish up the filter change to `t'
           (setq gosh-snatch--filter-candidates
                 (or
