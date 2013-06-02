@@ -32,7 +32,7 @@
   ;;; symbol
   (should (equal (gosh-read-first-from-string "a") 'a))
   (should (equal (gosh-read-first-from-string "#:a") [uninterned-symbol "a"]))
-  (should (equal (gosh-read-first-from-string "nil") [symbol nil]))
+  (should (equal (gosh-read-first-from-string "nil") [symbol "nil"]))
 
   ;;; number
   (should (equal (gosh-read-first-from-string "1") 1))

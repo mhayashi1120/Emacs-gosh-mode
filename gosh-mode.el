@@ -311,10 +311,10 @@ This function come from apel"
 
 ;; list -> list
 ;; number -> number or gosh-object[number]
-;; vector -> gosh-object[vector] 
+;; vector -> gosh-object [vector]
 ;; string -> string
 ;; interporate-string -> string
-;; regexp -> gosh-object[regexp]
+;; regexp -> gosh-object [regexp]
 
 (defun gosh-object-p (obj)
   (and (vectorp obj) (= (length obj) 2)))
@@ -460,8 +460,9 @@ This function come from apel"
      (t
       (when gosh-reader--fold-case
         (setq text (downcase text)))
+      ;; To avoid misunderstand as empty list '()
       (if (string= text "nil")
-          (gosh-object 'symbol nil)
+          (gosh-object 'symbol "nil")
         (intern text))))))
 
 (defun gosh-reader-ignore ()
@@ -896,17 +897,6 @@ This function come from apel"
 COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
   )
 
-;; base/super module definitions + import module exported definitions
-;; string-copy: for resolving shared structure.
-(defconst gosh-module-imports-command-string
-  (concat
-   "(apply append "
-   "(hash-table-map (module-table (current-module)) "
-   " (lambda (sym gloc) (string-copy (symbol->string sym)))) "
-   "(map (lambda (mod) (map (lambda (sym) "
-   " (string-copy (symbol->string sym))) (module-exports mod))) "
-   " (module-imports (current-module))))\n"))
-
 (defvar gosh-autoload-modules
   '(null user gauche scheme))
 
@@ -926,25 +916,6 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
   (concat
    "(if-let1 m (find-module '%s)(hash-table-clear! (module-table m)))"
    ))
-
-;; info 6.20.3 section
-(defconst gosh-eval-expression-command-format
-  (concat
-   "(let1 port (open-output-file \"%s\") "
-   "(unwind-protect "
-   " (begin (standard-output-port port) (standard-error-port port) "
-   " (begin0 (with-output-to-port port (lambda () %s)))) "
-   " (close-output-port port)))"
-   ))
-
-(defconst gosh-eval-guard-format
-  (concat
-   "(guard (e "
-   " (else (print \"%s\" "
-   " (or "
-   " (and (slot-exists? e 'message) (slot-ref e 'message))"
-   " \"ERROR\""
-   " )))) %s)\n"))
 
 ;; bound only `let' form
 ;; (defvar gosh-delegate-command)
@@ -1036,6 +1007,16 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
     (with-temp-buffer
       (apply 'call-process (expand-file-name command dir) nil (current-buffer) nil args)
       (buffer-string))))
+
+(defun gosh--call->sexp (script)
+  (with-temp-buffer
+    (let ((args (list "-b" "-e" script)))
+      (unless (= (apply 'call-process gosh-default-command nil t nil
+                        args) 0)
+        (error "TODO")))
+    (goto-char (point-min))
+    ;;TODO only first?
+    (gosh-read)))
 
 (defun gosh--check-command (command)
   (let ((full (executable-find command)))
@@ -1558,7 +1539,8 @@ d:/home == /cygdrive/d/home
               ((define define-constant)
                ;;TODO if inner definitions
                ;; (gosh-extract--put-var vars (car (nth 1 sexp)) 
-               (gosh-extract--simple-args vars (cdr (nth 1 sexp))))
+               (when (consp (nth 1 sexp))
+                 (gosh-extract--simple-args vars (cdr (nth 1 sexp)))))
               ((define-in-module)
                ;;TODO test
                (gosh-extract--simple-args vars (cdr (nth 2 sexp))))
@@ -1871,7 +1853,7 @@ TODO key should be module-file?? multiple executable make complex.")
         (or (gosh-cache--get cached)
             ;; (re)compute module exports
             (let* ((forms (gosh-cache-module-forms module))
-                   (res (gosh-env-file-exports file forms)))
+                   (res (gosh-env-file-exports forms)))
               (gosh-cache--push file module cached res)
               res)))))))
 
@@ -2977,7 +2959,7 @@ Set this variable before open by `gosh-mode'."
 ;;; Parenthese / Bracket handling (from quack)
 ;;;
 
-(defun gosh-closing--balance-all-paren ()
+(defun gosh-paren--balance-all-paren ()
   "Balance all closing parenthese"
   (let ((state (gosh-paren--current-status)))
     (when (eq state 'balanced)
@@ -3002,7 +2984,7 @@ Set this variable before open by `gosh-mode'."
                       (delete-char -1)
                       (insert closing))))))))))))
 
-(defun gosh-closing--insert (force default-close)
+(defun gosh-paren--insert-closing (force default-close)
   (insert default-close)
   (unless force
     (let ((start (gosh--scan-sexps (point) -1)))
@@ -3017,21 +2999,21 @@ Set this variable before open by `gosh-mode'."
           (unless (eq actual-open opening)
             (delete-region (1- (point)) (point))
             (insert closing)))
-        (gosh-closing--balance-all-paren)))))
+        (gosh-paren--balance-all-paren)))))
   (when blink-paren-function
     (funcall blink-paren-function)))
 
-(defun gosh-closing-insert-paren (&optional force)
+(defun gosh-paren-insert-close (&optional force)
   "Close opening parenthese or bracket.
 Arg FORCE non-nil means forcely insert parenthese."
   (interactive "P")
-  (gosh-closing--insert force ?\)))
+  (gosh-paren--insert-closing force ?\)))
 
-(defun gosh-closing-insert-bracket (&optional force)
+(defun gosh-paren-insert-close-bracket (&optional force)
   "Close opening parenthese or bracket.
 Arg FORCE non-nil means forcely insert bracket."
   (interactive "P")
-  (gosh-closing--insert force ?\]))
+  (gosh-paren--insert-closing force ?\]))
 
 (defun gosh-paren--current-status ()
   (save-excursion
@@ -3058,7 +3040,7 @@ Arg FORCE non-nil means forcely insert bracket."
              ((minusp (car part)) 'unbalanced)
              (t 'opening)))))))))
 
-(defun gosh-opening--insert (force default-open)
+(defun gosh-paren--insert-open (force default-open)
   (insert default-open)
   ;; status after insert open char.
   (let ((state (gosh-paren--current-status)))
@@ -3082,13 +3064,13 @@ Arg FORCE non-nil means forcely insert bracket."
        ((eq state 'balanced)
         ;; insert and backward with checking paren
         (backward-char)
-        (gosh-opening--switch-paren)
+        (gosh-paren--switch-open)
         ;; move to after inserted point
         (forward-char))
        ((eq state 'opening)
         (when (save-excursion
                 (backward-char)
-                (when (gosh-opening--bracket-p)
+                (when (gosh-paren--bracket-p)
                   (delete-char 1)
                   (insert "[")
                   t))
@@ -3105,7 +3087,7 @@ Arg FORCE non-nil means forcely insert bracket."
              ;; notify if scan-sexps succeed and unmatched parenthese
              (funcall blink-paren-function))))))
 
-(defun gosh-opening--switch-paren ()
+(defun gosh-paren--switch-open ()
   (let ((open (char-after))
         (next (gosh--scan-sexps (point) 1)))
     (when (and next (eq (char-syntax open) ?\())
@@ -3116,18 +3098,18 @@ Arg FORCE non-nil means forcely insert bracket."
           (insert against)
           (backward-char))))))
 
-(defun gosh-opening-insert-paren (&optional force)
+(defun gosh-paren-insert-open (&optional force)
   "Insert opening paren and notify if there is unmatched bracket."
   (interactive "P")
-  (gosh-opening--insert force ?\())
+  (gosh-paren--insert-open force ?\())
 
-(defun gosh-opening-insert-bracket (&optional force)
+(defun gosh-paren-insert-open-bracket (&optional force)
   "Insert opening bracket and notify if there is unmatched parenthese."
   (interactive "P")
-  (gosh-opening--insert force ?\[))
+  (gosh-paren--insert-open force ?\[))
 
 ;; TODO move to gosh-config
-(defvar gosh-opening--auto-bracket-alist
+(defvar gosh-paren--auto-bracket-alist
   '(
     (fluid-let (*))
     (do (*))
@@ -3158,7 +3140,7 @@ Arg FORCE non-nil means forcely insert bracket."
     ))
 
 ;; `*' point to the cursor position.
-(defun gosh-opening--context-bracket-p (context)
+(defun gosh-paren--context-bracket-p (context)
   (let (match-to)
     (let ((match-to
           (lambda (def args)
@@ -3172,12 +3154,12 @@ Arg FORCE non-nil means forcely insert bracket."
                                (not (funcall a1 (car a2))))
                   return nil))))
       (let ((proc (car context)) (args (cdr context)))
-        (loop for (def-name . def-args) in gosh-opening--auto-bracket-alist
+        (loop for (def-name . def-args) in gosh-paren--auto-bracket-alist
               if (and (eq def-name proc)
                       (funcall match-to def-args args))
               return t)))))
 
-(defun gosh-opening--next-context (&optional count)
+(defun gosh-paren--next-context (&optional count)
   (save-excursion
     (let ((c (or count 0))
           (start (point)))
@@ -3209,12 +3191,12 @@ Arg FORCE non-nil means forcely insert bracket."
                     (concat partial " *" closing))))
         (and (consp sexp) sexp)))))
 
-(defun gosh-opening--bracket-p ()
+(defun gosh-paren--bracket-p ()
   ;; retry 5 count backward current sexp
   (ignore-errors
     (loop for i from 0 to 5
-          if (let ((context (gosh-opening--next-context i)))
-               (and context (gosh-opening--context-bracket-p context)))
+          if (let ((context (gosh-paren--next-context i)))
+               (and context (gosh-paren--context-bracket-p context)))
           return t)))
 
 
@@ -3529,6 +3511,14 @@ PROCEDURE-SYMBOL ::= symbol
   (info-initialize)
   (gosh-info-doc-initialize)
   (gosh-info-lookup-initialize))
+
+(defun gosh-info-show-index (symbol-name)
+  "Popup `info' buffer"
+  (interactive
+   (let ((sym (gosh-parse-symbol-at-point)))
+     (list (symbol-name sym))))
+  (let (message-log-max)
+    (info-lookup-symbol symbol-name)))
 
 
 ;;;
@@ -4149,20 +4139,20 @@ CHECK is function that accept no arg and return boolean."
     (set-keymap-parent map scheme-mode-map)
 
     (define-key map "\M-\C-i" 'gosh-smart-complete)
-    (define-key map "\C-c\M-I" 'gosh-import-module-maybe)
-    (define-key map "\C-c\C-j" 'gosh-jump-thingatpt)
+    (define-key map "\C-c\M-I" 'gosh-mode-import-module-maybe)
+    (define-key map "\C-c\C-j" 'gosh-mode-jump)
     (define-key map "\C-c\C-u" 'gosh-test-module)
-    (define-key map "\C-c?" 'gosh-show-info)
+    (define-key map "\C-c?" 'gosh-info-show-index)
     (define-key map "\C-c\M-r" 'gosh-refactor-rename-symbol)
     ;; (define-key map "\C-c\er" 'gosh-refactor-rename-symbol-afaiui)
     ;; TODo consider key bindings
     (define-key map "\C-c\C-p" 'gosh-test-popup-result)
     ;; (define-key map "\C-c\C-p" 'gosh-test-popup-result-at-point)
 
-    (define-key map ")" 'gosh-closing-insert-paren)
-    (define-key map "]" 'gosh-closing-insert-bracket)
-    (define-key map "(" 'gosh-opening-insert-paren)
-    (define-key map "[" 'gosh-opening-insert-bracket)
+    (define-key map ")" 'gosh-paren-insert-close)
+    (define-key map "]" 'gosh-paren-insert-close-bracket)
+    (define-key map "(" 'gosh-paren-insert-open)
+    (define-key map "[" 'gosh-paren-insert-open-bracket)
 
     (setq gosh-mode-map map)))
 
@@ -4504,7 +4494,7 @@ This mode is originated from `scheme-mode' but specialized to edit Gauche code."
 ;; command
 ;;
 
-(defun gosh-sort-sexp-region (start end)
+(defun gosh-mode-sort-sexp-region (start end)
   "Sort sexp between START and END."
   (interactive "r")
   (save-excursion
@@ -4537,7 +4527,7 @@ This mode is originated from `scheme-mode' but specialized to edit Gauche code."
                 (insert "\n")))))))))
 
 ;;TODO FIXME: more sophistecated algorithm
-(defun gosh-jump-thingatpt ()
+(defun gosh-mode-jump ()
   "Jump to current symbol definition.
 "
   (interactive)
@@ -4573,7 +4563,7 @@ This mode is originated from `scheme-mode' but specialized to edit Gauche code."
           (throw 'found t)))
       (message "Not found definition %s" sym))))
 
-(defun gosh-import-module-maybe ()
+(defun gosh-mode-import-module-maybe ()
   "Import a new module if missing.
 
 if define-module is exists then insert statement to the form of `define-module'
@@ -4592,18 +4582,29 @@ otherwise insert top level of the script."
       (error "Module for `%s' is not found" sym))
     (gosh-mode--import-module mod-target cur-module)))
 
-(defun gosh-show-info (symbol-name)
-  "Popup `info' buffer"
-  (interactive
-   (let ((sym (gosh-parse-symbol-at-point)))
-     (list (symbol-name sym))))
-  (let (message-log-max)
-    (info-lookup-symbol symbol-name)))
-
 
 ;;;
 ;;; Eval minor mode
 ;;;
+
+;; info 6.20.3 section
+(defconst gosh-eval-expression-command-format
+  (concat
+   "(let1 port (open-output-file \"%s\") "
+   "(unwind-protect "
+   " (begin (standard-output-port port) (standard-error-port port) "
+   " (begin0 (with-output-to-port port (lambda () %s)))) "
+   " (close-output-port port)))"
+   ))
+
+(defconst gosh-eval-guard-format
+  (concat
+   "(guard (e "
+   " (else (print \"%s\" "
+   " (or "
+   " (and (slot-exists? e 'message) (slot-ref e 'message))"
+   " \"ERROR\""
+   " )))) %s)\n"))
 
 (defvar gosh-eval-mode-map nil)
 
@@ -4857,7 +4858,7 @@ Evaluate s-expression, syntax check, etc."
 
 (defun gosh-eval--send-region (start end)
   (save-excursion
-    ;; evaluate at end module context
+    ;; evaluate at end module context <- TODO ???? what module mean?
     (goto-char end)
     (gosh-eval-expression (buffer-substring start end))))
 
@@ -4934,13 +4935,24 @@ And print value in the echo area.
 ;;; inferior mode
 ;;;
 
+;; base/super module definitions + import module exported definitions
+;; string-copy: to resolve shared structure.
+(defconst gosh-inferier--imports-command-format
+  (concat
+   "(apply append "
+   "(hash-table-map (module-table (current-module)) "
+   " (lambda (sym gloc) (string-copy (symbol->string sym)))) "
+   "(map (lambda (mod) (map (lambda (sym) "
+   " (string-copy (symbol->string sym))) (module-exports mod))) "
+   " (module-imports (current-module))))\n"))
+
 (defvar gosh-inferior-mode-map nil)
 
 (unless gosh-inferior-mode-map
   (let ((map (make-sparse-keymap)))
 
     (define-key map "\M-\C-i" 'gosh-smart-complete)
-    (define-key map "\C-c?" 'gosh-show-info)
+    (define-key map "\C-c?" 'gosh-info-show-index)
     (define-key map "\C-i" 'gosh-inferior-smart-complete)
 
     (setq gosh-inferior-mode-map map)))
@@ -4980,7 +4992,7 @@ And print value in the echo area.
 
 (defun gosh-inferier--import-candidates (proc)
   "Gather symbols from PROC current-module context"
-  (gosh-snatch-process-candidates proc gosh-module-imports-command-string))
+  (gosh-snatch-process-candidates proc gosh-inferier--imports-command-format))
 
 (defvar gosh-inferior--autoload-functions nil)
 (defun gosh-inferior--autoload-functions (proc)
@@ -5040,9 +5052,9 @@ TODO but not supported with-module context."
      (setq gosh-snatch--filter-candidates t))))
 
 
-;;;
-;;; cleanup
-;;;
+;;;;
+;;;; cleanup
+;;;;
 
 (defun gosh-mode-unload-function ()
   ;;TODO

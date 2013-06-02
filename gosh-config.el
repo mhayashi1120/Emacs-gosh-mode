@@ -126,7 +126,7 @@
             (make-local-variable 'lisp-indent-function)
             (setq lisp-indent-function 'gosh-smart-indent)))
 
-(add-hook 'gosh-mode-hook 'gosh-sticky-mode-on)
+(add-hook 'gosh-mode-hook 'gosh-eval-mode-on)
 (add-hook 'gosh-mode-hook 'turn-on-eldoc-mode)
 
 (add-hook 'gosh-inferior-mode-hook 'turn-on-eldoc-mode)
