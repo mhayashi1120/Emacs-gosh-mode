@@ -132,8 +132,7 @@
 
 ;;TODO consider change symbolp -> gosh-symbol-p
 (defun gosh-symbol-p (obj)
-  (or (and obj
-           (symbolp obj))
+  (or (and obj (symbolp obj))
       (and (gosh-object-p obj)
            (eq (gosh-object-type obj) 'symbol))))
 
@@ -352,80 +351,6 @@ This function come from apel"
                   ))
     (error "Not a supported type %s" type))
   (vector type value))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; This is rather complicated because we want to auto-generate
-;; docstring summaries from the type information, which means
-;; inferring various types from common names.  The benefit is that you
-;; don't have to input the same information twice, and can often
-;; cut&paste&munge procedure descriptions from the original
-;; documentation.
-
-;;TODO make obsolete.
-;; this function detect type by name of symbol. fuck!
-(defun gosh-scheme-translate-type (type)
-  (cond
-   ((not (gosh-symbol-p type))
-    type)
-   (t
-    (case type
-      ((pred proc thunk handler dispatch producer consumer f fn g kons)
-       'procedure)
-      ((num) 'number)
-      ((z) 'complex)
-      ((x1 x2 x3 y timeout seconds nanoseconds) 'real)
-      ((i j k n m int index size count len length bound nchars start end
-          pid uid gid fd fileno errno)
-       'integer)
-      ((ch) 'char)
-      ((str name pattern) 'string)
-      ((file path pathname) 'filename)
-      ((dir dirname) 'directory)
-      ((sym id identifier) 'symbol)
-      ((ls lis lst alist lists) 'list)
-      ((vec) 'vector)
-      ((exc excn err error) 'exception)
-      ((ptr) 'pointer)
-      ((bool) 'boolean)
-      ((env) 'environment)
-      ((char string boolean number complex real integer procedure char-set
-             port input-port output-port pair list vector array stream hash-table
-             thread mutex condition-variable time exception date duration locative
-             random-source state condition condition-type queue pointer
-             u8vector s8vector u16vector s16vector u32vector s32vector
-             u64vector s64vector f32vector f64vector undefined symbol
-             block filename directory mmap listener environment non-procedure
-             read-table continuation blob generic method class regexp regmatch
-             sys-stat fdset)
-       type)
-      ((parent seed option mode) 'non-procedure)
-      (t
-       (let* ((str (gosh-symbol-name type))
-              (i (string-match "-?[0-9]+$" str)))
-         (cond
-          (i
-           (gosh-scheme-translate-type (intern (substring str 0 i))))
-          ((setq i (string-match "-\\([^-]+\\)$" str))
-           (gosh-scheme-translate-type (intern (substring str (+ i 1)))))
-          ((string-match "\\?$" str)
-           'boolean)
-          (t
-           'object))))))))
-
-(defun gosh-predicate->type (pred)
-  (case pred
-    ((even? odd?) 'integer)
-    ((char-upper-case? char-lower-case?
-                       char-alphabetic? char-numeric? char-whitespace?)
-     'char)
-    (t
-     ;; catch all the `type?' predicates with pattern matching
-     ;; ... we could be smarter if the env was passed
-     (let ((str (symbol-name pred)))
-       (if (string-match "\\?$" str)
-           (gosh-scheme-translate-type
-            (intern (substring str 0 (- (length str) 1))))
-         'object)))))
 
 
 ;;;
@@ -1354,10 +1279,6 @@ d:/home == /cygdrive/d/home
     (t
      (gosh-read))))
 
-(defun gosh-parse--skip-backward-quoting ()
-  (when (memq (char-before) '(?\# ?\' ?\`))
-    (backward-char)))
-
 ;;TODO
 ;; (let* ([aa #f)) (valid-proc _))
 ;; Above case raise invalid-read-syntax error. 
@@ -1366,14 +1287,14 @@ d:/home == /cygdrive/d/home
   (save-excursion
     (let ((res '())
           (prev nil))
-      (gosh-parse--skip-backward-quoting)
+      (backward-prefix-chars)
       (while (and (not (gosh-context-toplevel-p))
                   (or (null max)
                       (< (length res) max)))
         (let ((end (point)))
           (gosh-beginning-of-list)
           (let ((paren-start (char-after)))
-            (gosh-parse--skip-backward-quoting)
+            (backward-prefix-chars)
             (let* ((paren-end (gosh-paren-against-char paren-start))
                    (s (buffer-substring-no-properties (point) end))
                    (sexp (gosh-read-first-from-string (concat s `(,paren-end))))
@@ -1435,7 +1356,7 @@ d:/home == /cygdrive/d/home
            (forward-line 0)
            (setq start (point))))))))
 
-(defun gosh-parse-read-forms ()
+(defun gosh-parse-read-all ()
   (save-excursion
     (goto-char (point-min))
     (let ((res '())
@@ -1848,7 +1769,7 @@ TODO key should be module-file?? multiple executable make complex.")
     (or (gosh-cache--get cached)
         ;; (re)compute module as forms
         (let ((res (gosh-with-find-file file
-                     (gosh-parse-read-forms)))
+                     (gosh-parse-read-all)))
               (module (gosh-file->module file)))
           (gosh-cache--push file module cached res)
           res))))
@@ -1919,7 +1840,7 @@ TODO key should be module-file?? multiple executable make complex.")
   ;; r5rs
   (let* ((env (list *gosh-scheme-r5rs-info*))
          ;;TODO use cache
-         (forms (gosh-parse-read-forms)) 
+         (forms (gosh-parse-read-all)) 
          (importers (gosh-extract-importers forms)))
     ;;TODO gather applicants non imported module.
     ;;TODO get all of cached symbols
@@ -2104,9 +2025,22 @@ TODO key should be module-file?? multiple executable make complex.")
   "Face used to momentary message."
   :group 'gosh-mode)
 
+(defface gosh-momentary-warning-face
+  '((t (:inherit font-lock-warning-face)))
+  "Face used to momentary warning."
+  :group 'gosh-mode)
+
 (defun gosh-momentary-message (msg)
   "Show temporary message to current point.
-referenced mew-complete.el"
+Import from mew-complete.el"
+  (gosh-momentary-message-0 msg 'gosh-momentary-message-face))
+
+(defun gosh-momentary-warning (msg)
+  "Show temporary warning to current point.
+Import from mew-complete.el"
+  (gosh-momentary-message-0 msg 'gosh-momentary-warning-face))
+
+(defun gosh-momentary-message-0 (msg face)
   (let ((wait-msec (max (* (length msg) 0.05) 0.5))
         (modified (buffer-modified-p))
         (inhibit-read-only t)
@@ -2118,7 +2052,7 @@ referenced mew-complete.el"
       (set-buffer-modified-p modified)
       (setq end (point)))
     (let ((inhibit-quit t))
-      (gosh-momentary-message--overlay start end)
+      (gosh-momentary-message--overlay start end face)
       (sit-for wait-msec)
       (delete-region start end)
       (set-buffer-modified-p modified)
@@ -2127,12 +2061,12 @@ referenced mew-complete.el"
         (setq quit-flag nil)
         (setq unread-command-events (list 7))))))
 
-(defun gosh-momentary-message--overlay (start end)
+(defun gosh-momentary-message--overlay (start end face)
   (let ((ov gosh-momentary-message--overlay))
     (unless ov
       (setq ov (make-overlay (point-min) (point-min))))
     (overlay-put ov 'priority 1)
-    (overlay-put ov 'face 'gosh-momentary-message-face)
+    (overlay-put ov 'face (or face 'gosh-momentary-message-face))
     (move-overlay ov start end (current-buffer))
     (setq gosh-momentary-message--overlay ov)))
 
@@ -2477,7 +2411,7 @@ Set this variable before open by `gosh-mode'."
       (gosh-momentary-message "[Sole completion]"))
      ((null completion)
       (ding)
-      (gosh-momentary-message "[No completion]"))
+      (gosh-momentary-warning "[No completion]"))
      ((not (string= str completion))
       (let ((all (all-completions str (append strs coll) pred))
             (prefix-p (gosh-string-prefix-p completion completion1)))
@@ -2522,56 +2456,57 @@ Set this variable before open by `gosh-mode'."
 ;; checking return values:
 ;;   a should be capable of returning instances of b
 (defun gosh-completion--type-match-p (a b)
-  (let ((a1 (gosh-scheme-translate-type a))
-        (b1 (gosh-scheme-translate-type b)))
-    (and (not (eq a1 'undefined))   ; check a *does* return something
-         (or (eq a1 b1)             ; and they're the same
-             (eq a1 'object)        ; ... or a can return anything
-             (eq b1 'object)        ; ... or b can receive anything
-             (if (gosh-symbol-p a1)
-                 (if (gosh-symbol-p b1)
-                     (case a1           ; ... or the types overlap
-                       ((number complex real rational integer)
-                        (memq b1 '(number complex real rational integer)))
-                       ((port input-port output-port)
-                        (memq b1 '(port input-port output-port)))
-                       ((pair list)
-                        (memq b1 '(pair list)))
-                       ((non-procedure)
-                        (not (eq 'procedure b1))))
-                   (and
-                    (consp b1)
-                    (if (eq 'or (car b1))
-                        ;; type unions
-                        (gosh-find
-                         (lambda (x)
-                           (gosh-completion--type-match-p
-                            a1 (gosh-scheme-translate-type x)))
-                         (cdr b1))
-                      (let ((b2 (gosh-translate-special-type b1)))
-                        (and (not (equal b1 b2))
-                             (gosh-completion--type-match-p a1 b2))))))
-               (and (consp a1)
-                    (case (car a1)
-                      ((or)
-                       ;; type unions
-                       (gosh-find
-                        (lambda (x)
-                          (gosh-completion--type-match-p (gosh-scheme-translate-type x) b1))
-                        (cdr a1)))
-                      ((lambda)
-                       ;; procedures
-                       (or (eq 'procedure b1)
-                           (and (consp b1)
-                                (eq 'lambda (car b1))
-                                (gosh-param-list-match-p (cadr a1)
-                                                         (cadr b1)))))
-                      (t
-                       ;; other special types
-                       (let ((a2 (gosh-translate-special-type a1))
-                             (b2 (gosh-translate-special-type b1)))
-                         (and (or (not (equal a1 a2)) (not (equal b1 b2)))
-                              (gosh-completion--type-match-p a2 b2)))))))))))
+  (let ((a1 (gosh-complete--guess-type a))
+        (b1 (gosh-complete--guess-type b)))
+    (cond
+     ((eq a1 'undefined) nil)        ; check a *does* return something
+     ((eq a1 b1) t)                  ; and they're the same
+     ((eq a1 'object) t)             ; ... or a can return anything
+     ((eq b1 'object) t)             ; ... or b can receive anything
+     ((symbolp a1)
+      (if (symbolp b1)
+          (case a1                      ; ... or the types overlap
+            ((number complex real rational integer)
+             (memq b1 '(number complex real rational integer)))
+            ((port input-port output-port)
+             (memq b1 '(port input-port output-port)))
+            ((pair list)
+             (memq b1 '(pair list)))
+            ((non-procedure)
+             (not (eq 'procedure b1))))
+        (and
+         (consp b1)
+         (if (eq 'or (car b1))
+             ;; type unions
+             (gosh-find
+              (lambda (x)
+                (gosh-completion--type-match-p
+                 a1 (gosh-complete--guess-type x)))
+              (cdr b1))
+           (let ((b2 (gosh-complete--translate-special b1)))
+             (and (not (equal b1 b2))
+                  (gosh-completion--type-match-p a1 b2)))))))
+     ((consp a1)
+      (case (car a1)
+        ((or)
+         ;; type unions
+         (gosh-find
+          (lambda (x)
+            (gosh-completion--type-match-p (gosh-complete--guess-type x) b1))
+          (cdr a1)))
+        ((lambda)
+         ;; procedures
+         (or (eq 'procedure b1)
+             (and (consp b1)
+                  (eq 'lambda (car b1))
+                  (gosh-complete--param-list-match-p (cadr a1)
+                                                     (cadr b1)))))
+        (t
+         ;; other special types
+         (let ((a2 (gosh-complete--translate-special a1))
+               (b2 (gosh-complete--translate-special b1)))
+           (and (or (not (equal a1 a2)) (not (equal b1 b2)))
+                (gosh-completion--type-match-p a2 b2)))))))))
 
 (defun gosh-completion--lookup-type (spec pos)
   (let ((i 1)
@@ -2585,24 +2520,22 @@ Set this variable before open by `gosh-mode'."
        ((= i pos)
         (setq type (car spec))
         (setq spec nil))
-       ((and (consp (cdr spec)) (eq '\.\.\. (cadr spec)))
+       ((and (consp (cdr spec)) (eq '... (cadr spec)))
         (setq type (car spec))
         (setq spec nil)))
       (setq spec (cdr spec))
       (incf i))
     (and type
-         (gosh-scheme-translate-type type))))
+         (gosh-complete--guess-type type))))
 
-;;TODO name
-(defun gosh-param-list-match-p (p1 p2)
-  (or (and (gosh-symbol-p p1) (not (null p1)))
-      (and (gosh-symbol-p p2) (not (null p2)))
+(defun gosh-complete--param-list-match-p (p1 p2)
+  (or (gosh-symbol-p p1)
+      (gosh-symbol-p p2)
       (and (null p1) (null p2))
       (and (consp p1) (consp p2)
-           (gosh-param-list-match-p (cdr p1) (cdr p2)))))
+           (gosh-complete--param-list-match-p (cdr p1) (cdr p2)))))
 
-;;TODO name
-(defun gosh-translate-special-type (x)
+(defun gosh-complete--translate-special (x)
   (if (not (consp x))
       x
     (case (car x)
@@ -2618,7 +2551,7 @@ Set this variable before open by `gosh-mode'."
                  (point))))
     (buffer-substring-no-properties start end)))
 
-(defun gosh-complete-file-name (trans sym)
+(defun gosh-complete-file-name (_ sym)
   (let* ((file (file-name-nondirectory sym))
          (dir (file-name-directory sym))
          (res (file-name-all-completions file (or dir "."))))
@@ -2626,7 +2559,7 @@ Set this variable before open by `gosh-mode'."
         (mapcar (lambda (f) (concat dir f)) res)
       res)))
 
-(defun gosh-complete-directory-name (trans sym)
+(defun gosh-complete-directory-name (_ sym)
   (let* ((file (file-name-nondirectory sym))
          (dir (file-name-directory sym))
          (res (file-name-all-completions file (or dir ".")))
@@ -2651,6 +2584,65 @@ Set this variable before open by `gosh-mode'."
         (trans (and (consp cmpl) (cadr cmpl))))
     (funcall func trans sym)))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; This is rather complicated because we want to auto-generate
+;; docstring summaries from the type information, which means
+;; inferring various types from common names.  The benefit is that you
+;; don't have to input the same information twice, and can often
+;; cut&paste&munge procedure descriptions from the original
+;; documentation.
+
+;;TODO make obsolete.
+;; this function detect type by name of symbol. fuck!
+(defun gosh-complete--guess-type (type)
+  (cond
+   ((not (gosh-symbol-p type))
+    type)
+   (t
+    (case type
+      ((pred proc thunk handler dispatch producer consumer f fn g kons)
+       'procedure)
+      ((num) 'number)
+      ((z) 'complex)
+      ((x1 x2 x3 y timeout seconds nanoseconds) 'real)
+      ((i j k n m int index size count len length bound nchars start end
+          pid uid gid fd fileno errno)
+       'integer)
+      ((ch) 'char)
+      ((str name pattern) 'string)
+      ((file path pathname) 'filename)
+      ((dir dirname) 'directory)
+      ((sym id identifier) 'symbol)
+      ((ls lis lst alist lists) 'list)
+      ((vec) 'vector)
+      ((exc excn err error) 'exception)
+      ((ptr) 'pointer)
+      ((bool) 'boolean)
+      ((env) 'environment)
+      ((char string boolean number complex real integer procedure char-set
+             port input-port output-port pair list vector array stream hash-table
+             thread mutex condition-variable time exception date duration locative
+             random-source state condition condition-type queue pointer
+             u8vector s8vector u16vector s16vector u32vector s32vector
+             u64vector s64vector f32vector f64vector undefined symbol
+             block filename directory mmap listener environment non-procedure
+             read-table continuation blob generic method class regexp regmatch
+             sys-stat fdset)
+       type)
+      ((parent seed option mode) 'non-procedure)
+      (t
+       (let* ((str (gosh-symbol-name type))
+              (i (string-match "-?[0-9]+$" str)))
+         (cond
+          (i
+           (gosh-complete--guess-type (intern (substring str 0 i))))
+          ((setq i (string-match "-\\([^-]+\\)$" str))
+           (gosh-complete--guess-type (intern (substring str (+ i 1)))))
+          ((string-match "\\?$" str)
+           'boolean)
+          (t
+           'object))))))))
+
 (defun gosh-smart-complete (&optional arg)
   (interactive "P")
   (let ((sym (gosh-complete-symbol-name-at-point))
@@ -2661,9 +2653,9 @@ Set this variable before open by `gosh-mode'."
           (if in-str-p (gosh-beginning-of-string))
           (cons (gosh-env-current t) (gosh-enclosing-2-sexp-prefixes)))
       (let* ((outer-spec (gosh-env-lookup env outer-proc))
-             (outer-type (gosh-scheme-translate-type (cadr outer-spec)))
+             (outer-type (gosh-complete--guess-type (cadr outer-spec)))
              (inner-spec (gosh-env-lookup env inner-proc))
-             (inner-type (gosh-scheme-translate-type (cadr inner-spec))))
+             (inner-type (gosh-complete--guess-type (cadr inner-spec))))
         (cond
          ;; return all env symbols when a prefix arg is given
          (arg
@@ -2741,15 +2733,15 @@ Set this variable before open by `gosh-mode'."
                                                     outer-pos)))
                              (and (consp outer-param-type)
                                   (eq 'flags (car outer-param-type))
-                                  (memq (gosh-scheme-translate-type param-type)
+                                  (memq (gosh-complete--guess-type param-type)
                                         '(number complex real rational integer))
-                                  (memq (gosh-scheme-translate-type (caddr inner-type))
+                                  (memq (gosh-complete--guess-type (caddr inner-type))
                                         '(number complex real rational integer))
                                   (cdr outer-param-type))))))
                  (base-type (if set-or-flags
                                 (if (and (consp param-type)
                                          (eq 'set (car param-type)))
-                                    (gosh-scheme-translate-type (cadr param-type))
+                                    (gosh-complete--guess-type (cadr param-type))
                                   'integer)
                               param-type))
                  (base-completions
@@ -2830,7 +2822,7 @@ Set this variable before open by `gosh-mode'."
       (let ((syntaxes '("use" "import" "select-module"
                         "with-module" "extend" "define-in-module")))
         (ac-define-source gosh-modules
-          `((candidates . gosh-ac-module-candidates)
+          `((candidates . gosh-available-modules)
             (symbol . "m")
             (prefix . ,(concat "(" (regexp-opt syntaxes) "[\s\t\n]+\\(\\(?:\\sw\\|\\s_\\)+\\)"))
             (requires . 1)
@@ -2937,9 +2929,6 @@ Set this variable before open by `gosh-mode'."
                    (eq (car body) 'lambda))
           (setq res (cons (symbol-name (car inf)) res)))))
     res))
-
-(defun gosh-ac-module-candidates ()
-  (gosh-available-modules))
 
 
 ;;;
@@ -3224,7 +3213,7 @@ Arg FORCE non-nil means forcely insert bracket."
              (method (and (not (assq function-sym (gosh-extract-local-vars)))
                           (get function-sym 'scheme-indent-function)))
              (importers (gosh-extract-importers
-                         (gosh-parse-read-forms)))
+                         (gosh-parse-read-all)))
              indent)
         (cond
          ((setq indent (gosh--smart-indent-assoc-symbol function-sym function importers))
@@ -4574,7 +4563,7 @@ This mode is originated from `scheme-mode' but specialized to edit Gauche code."
   (interactive)
   (let* ((sym (gosh-parse-symbol-at-point))
          (symnm (symbol-name sym))
-         (forms (gosh-parse-read-forms)))
+         (forms (gosh-parse-read-all)))
     (catch 'found
       ;; search local variable
       (when (gosh-jump-to-localdef sym)

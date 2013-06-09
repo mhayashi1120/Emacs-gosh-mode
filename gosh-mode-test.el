@@ -108,22 +108,22 @@
     (with-temp-buffer
       (insert "(let (()) (()))")
       (funcall parenthese 2)
-      (should (equal (gosh-opening--next-context) `(let *)))
+      (should (equal (gosh-paren--next-context) `(let *)))
       (funcall parenthese 3)
-      (should (equal (gosh-opening--next-context) `(let (*)))))
+      (should (equal (gosh-paren--next-context) `(let (*)))))
     (with-temp-buffer
       (insert "(case a () ())")
       (funcall parenthese 2)
-      (should (equal (gosh-opening--next-context) `(case a *)))
+      (should (equal (gosh-paren--next-context) `(case a *)))
       (funcall parenthese 3)
       ;;TODO () is '() in scheme world..
-      (should (equal (gosh-opening--next-context) `(case a nil *))))
+      (should (equal (gosh-paren--next-context) `(case a nil *))))
     (with-temp-buffer
       (insert "(case a [(a)] )")
       (funcall parenthese 2)
-      (should (equal (gosh-opening--next-context) `(case a *)))
+      (should (equal (gosh-paren--next-context) `(case a *)))
       (forward-char)
-      (should (equal (gosh-opening--next-context) `(case a (*)))))))
+      (should (equal (gosh-paren--next-context) `(case a (*)))))))
 
 (ert-deftest gosh-mode-test--with-bracket ()
   :tags '(gosh-mode)
@@ -133,15 +133,15 @@
            (let gosh-symbol-p (*))
            (guard (gosh-symbol-p *))
            )))
-    (should (equal (gosh-opening--context-bracket-p '(let loop ((*)))) nil))
-    (should (equal (gosh-opening--context-bracket-p '(let loop (*))) t))
-    (should (equal (gosh-opening--context-bracket-p '(let (*))) t))
-    (should (equal (gosh-opening--context-bracket-p '(let ((*)))) nil))
-    (should (equal (gosh-opening--context-bracket-p '(let loop ((a "")) *)) nil))
-    (should (equal (gosh-opening--context-bracket-p '(guard (e *))) t))
-    (should (equal (gosh-opening--context-bracket-p '(guard (e (else *)))) nil))
-    (should (equal (gosh-opening--context-bracket-p '(guard (e (any proc) (else *)))) nil))
-    (should (equal (gosh-opening--context-bracket-p '(guard (e (any proc) *))) t))))
+    (should (equal (gosh-paren--context-bracket-p '(let loop ((*)))) nil))
+    (should (equal (gosh-paren--context-bracket-p '(let loop (*))) t))
+    (should (equal (gosh-paren--context-bracket-p '(let (*))) t))
+    (should (equal (gosh-paren--context-bracket-p '(let ((*)))) nil))
+    (should (equal (gosh-paren--context-bracket-p '(let loop ((a "")) *)) nil))
+    (should (equal (gosh-paren--context-bracket-p '(guard (e *))) t))
+    (should (equal (gosh-paren--context-bracket-p '(guard (e (else *)))) nil))
+    (should (equal (gosh-paren--context-bracket-p '(guard (e (any proc) (else *)))) nil))
+    (should (equal (gosh-paren--context-bracket-p '(guard (e (any proc) *))) t))))
 
 (defun gosh-mode-test-BoL (case)
   (let* ((data (split-string case " -> "))
@@ -162,7 +162,7 @@
 (defun gosh-mode-test-parse-local-vars (sexp result)
   (should 
    (equal
-    (gosh-mode-test-funcall-in-sexp 'gosh-parse--current-local-vars sexp)
+    (gosh-mode-test-funcall-in-sexp 'gosh-extract-local-vars sexp)
     result)))
 
 (ert-deftest gosh-mode-test--BoL ()
@@ -246,12 +246,12 @@
   :tags '(gosh-mode)
   (should (equal (gosh-mode-test-with gosh-mode-test-code1
                    (let ((forms (gosh-parse-read-forms)))
-                     (gosh-env--current-exports forms)))
+                     (gosh-extract-exports forms)))
                  '(hoge  hoge-rest hoge-opt hoge-key hoge-key-opt)))
   (should (equal
            (gosh-mode-test-with  gosh-mode-test-code1
              (let ((forms (gosh-parse-read-forms)))
-               (gosh-env-current-globals forms)))
+               (gosh-extract-globals forms)))
            '((hoge-key-opt (lambda (:optional arg1 (arg2 \#f) :key (key1 \#f) key2)))
              (hoge-key (lambda (:key (key1 \#f) key2)))
              (hoge-opt (lambda (:optional arg1 (arg2 \#f))))
