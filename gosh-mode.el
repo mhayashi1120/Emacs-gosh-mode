@@ -1530,15 +1530,15 @@ d:/home == /cygdrive/d/home
                       (gosh-append-map 'cdr (cdr sexp))))
     ((use import)
      (gosh-and* ((module (nth 1 sexp))
-                 ((gosh-symbol-p module))
-                 (gprefix (cadr (memq :prefix sexp)))
-                 (prefix (cond
-                          ((and gprefix (gosh-symbol-p gprefix))
-                           (symbol-name gprefix))
-                          ((stringp gprefix)
-                           gprefix)
-                          (t ""))))
-       (list (list module prefix))))
+                 ((gosh-symbol-p module)))
+       (let* ((gprefix (cadr (memq :prefix sexp)))
+              (prefix (cond
+                       ((and gprefix (gosh-symbol-p gprefix))
+                        (symbol-name gprefix))
+                       ((stringp gprefix)
+                        gprefix)
+                       (t ""))))
+         (list (list module prefix)))))
     ((require)
      (gosh-and* ((mpath (nth 1 sexp))
                  ((stringp mpath))
@@ -1754,6 +1754,10 @@ TODO key should be module-file?? multiple executable make complex.")
               ;; cached time
               (ctime (nth 2 hit)))
           (> mtime ctime)))
+      (setcdr hit nil))
+     ((let ((buf (get-file-buffer file)))
+        (and buf (buffer-modified-p buf)))
+      ;;TODO consider using :modtime property
       (setcdr hit nil)))
     hit))
 
@@ -1840,7 +1844,10 @@ TODO key should be module-file?? multiple executable make complex.")
   ;; r5rs
   (let* ((env (list *gosh-scheme-r5rs-info*))
          ;;TODO use cache
-         (forms (gosh-parse-read-all)) 
+         (forms (or
+                 (and buffer-file-name 
+                      (gosh-cache-file-forms buffer-file-name))
+                 (gosh-parse-read-all)))
          (importers (gosh-extract-importers forms)))
     ;;TODO gather applicants non imported module.
     ;;TODO get all of cached symbols
@@ -2358,8 +2365,6 @@ Set this variable before open by `gosh-mode'."
           (and (consp (cddr type))
                (not (memq (caddr type) '(obj object)))
                (concat " => " (gosh-eldoc--sexp->string (caddr type))))))
-        ((and (consp type) (eq (car type) 'special))
-         (gosh-eldoc--sexp->string (car spec)))
         ((stringp type)
          (concat
           "String: \""
@@ -2391,7 +2396,7 @@ Set this variable before open by `gosh-mode'."
 ;;; Completion
 ;;;
 
-(defun gosh-completion-do (str coll &optional strs pred)
+(defun gosh-complete-expand (str coll &optional strs pred)
   (let* ((coll (mapcar (lambda (x)
                          (cond
                           ((gosh-symbol-p x) (list (gosh-symbol-name x)))
@@ -2455,7 +2460,7 @@ Set this variable before open by `gosh-mode'."
 
 ;; checking return values:
 ;;   a should be capable of returning instances of b
-(defun gosh-completion--type-match-p (a b)
+(defun gosh-complete--type-match-p (a b)
   (let ((a1 (gosh-complete--guess-type a))
         (b1 (gosh-complete--guess-type b)))
     (cond
@@ -2480,19 +2485,19 @@ Set this variable before open by `gosh-mode'."
              ;; type unions
              (gosh-find
               (lambda (x)
-                (gosh-completion--type-match-p
+                (gosh-complete--type-match-p
                  a1 (gosh-complete--guess-type x)))
               (cdr b1))
            (let ((b2 (gosh-complete--translate-special b1)))
              (and (not (equal b1 b2))
-                  (gosh-completion--type-match-p a1 b2)))))))
+                  (gosh-complete--type-match-p a1 b2)))))))
      ((consp a1)
       (case (car a1)
         ((or)
          ;; type unions
          (gosh-find
           (lambda (x)
-            (gosh-completion--type-match-p (gosh-complete--guess-type x) b1))
+            (gosh-complete--type-match-p (gosh-complete--guess-type x) b1))
           (cdr a1)))
         ((lambda)
          ;; procedures
@@ -2506,16 +2511,16 @@ Set this variable before open by `gosh-mode'."
          (let ((a2 (gosh-complete--translate-special a1))
                (b2 (gosh-complete--translate-special b1)))
            (and (or (not (equal a1 a2)) (not (equal b1 b2)))
-                (gosh-completion--type-match-p a2 b2)))))))))
+                (gosh-complete--type-match-p a2 b2)))))))))
 
-(defun gosh-completion--lookup-type (spec pos)
+(defun gosh-complete--lookup-type (spec pos)
   (let ((i 1)
         (type nil))
     (while (and (consp spec) (<= i pos))
       (cond
        ((eq :optional (car spec))
-        (if (and (= i pos) (consp (cdr spec)))
-            (setq type (cadr spec)))
+        (when (and (= i pos) (consp (cdr spec)))
+          (setq type (cadr spec)))
         (setq i (+ pos 1)))
        ((= i pos)
         (setq type (car spec))
@@ -2536,13 +2541,11 @@ Set this variable before open by `gosh-mode'."
            (gosh-complete--param-list-match-p (cdr p1) (cdr p2)))))
 
 (defun gosh-complete--translate-special (x)
-  (if (not (consp x))
-      x
-    (case (car x)
-      ((list string) (car x))
-      ((set special) (cadr x))
-      ((flags) 'integer)
-      (t x))))
+  (case (car-safe x)
+    ((list string) (car x))
+    ((set) (cadr x))
+    ((flags) 'integer)
+    (t x)))
 
 (defun gosh-complete-symbol-name-at-point ()
   (let ((end (point))
@@ -2599,49 +2602,53 @@ Set this variable before open by `gosh-mode'."
    ((not (gosh-symbol-p type))
     type)
    (t
-    (case type
-      ((pred proc thunk handler dispatch producer consumer f fn g kons)
-       'procedure)
-      ((num) 'number)
-      ((z) 'complex)
-      ((x1 x2 x3 y timeout seconds nanoseconds) 'real)
-      ((i j k n m int index size count len length bound nchars start end
-          pid uid gid fd fileno errno)
-       'integer)
-      ((ch) 'char)
-      ((str name pattern) 'string)
-      ((file path pathname) 'filename)
-      ((dir dirname) 'directory)
-      ((sym id identifier) 'symbol)
-      ((ls lis lst alist lists) 'list)
-      ((vec) 'vector)
-      ((exc excn err error) 'exception)
-      ((ptr) 'pointer)
-      ((bool) 'boolean)
-      ((env) 'environment)
-      ((char string boolean number complex real integer procedure char-set
-             port input-port output-port pair list vector array stream hash-table
-             thread mutex condition-variable time exception date duration locative
-             random-source state condition condition-type queue pointer
-             u8vector s8vector u16vector s16vector u32vector s32vector
-             u64vector s64vector f32vector f64vector undefined symbol
-             block filename directory mmap listener environment non-procedure
-             read-table continuation blob generic method class regexp regmatch
-             sys-stat fdset)
-       type)
-      ((parent seed option mode) 'non-procedure)
-      (t
-       (let* ((str (gosh-symbol-name type))
-              (i (string-match "-?[0-9]+$" str)))
-         (cond
-          (i
-           (gosh-complete--guess-type (intern (substring str 0 i))))
-          ((setq i (string-match "-\\([^-]+\\)$" str))
-           (gosh-complete--guess-type (intern (substring str (+ i 1)))))
-          ((string-match "\\?$" str)
-           'boolean)
-          (t
-           'object))))))))
+    (let ((name (gosh-symbol-name type)))
+      ;; (case type
+      ;;   ((pred proc thunk handler dispatch producer consumer f fn g kons)
+      ;;    'procedure)
+      ;;   ((num) 'number)
+      ;;   ((z) 'complex)
+      ;;   ((x1 x2 x3 y timeout seconds nanoseconds) 'real)
+      ;;   ((i j k n m int index size count len length bound nchars start end
+      ;;       pid uid gid fd fileno errno)
+      ;;    'integer)
+      ;;   ((ch) 'char)
+      ;;   ((str name pattern) 'string)
+      ;;   ((file path pathname) 'filename)
+      ;;   ((dir dirname) 'directory)
+      ;;   ((sym id identifier) 'symbol)
+      ;;   ((ls lis lst alist lists) 'list)
+      ;;   ((vec) 'vector)
+      ;;   ((exc excn err error) 'exception)
+      ;;   ((ptr) 'pointer)
+      ;;   ((bool) 'boolean)
+      ;;   ((env) 'environment)
+      ;;   ((char string boolean number complex real integer procedure char-set
+      ;;          port input-port output-port pair list vector array stream hash-table
+      ;;          thread mutex condition-variable time exception date duration locative
+      ;;          random-source state condition condition-type queue pointer
+      ;;          u8vector s8vector u16vector s16vector u32vector s32vector
+      ;;          u64vector s64vector f32vector f64vector undefined symbol
+      ;;          block filename directory mmap listener environment non-procedure
+      ;;          read-table continuation blob generic method class regexp regmatch
+      ;;          sys-stat fdset)
+      ;;    type)
+      ;;   ((parent seed option mode) 'non-procedure)
+      (cond
+       ((string-match "file\\|path" name) 'filename)
+       ((string-match "dir\\|directory\\|dirname" name) 'filename)
+       (t
+        (let* ((i (string-match "-?[0-9]+$" name)))
+          ;;TODO "nil-1" fufufu
+          (cond
+           (i
+            (gosh-complete--guess-type (intern (substring name 0 i))))
+           ((setq i (string-match "-\\([^-]+\\)$" name))
+            (gosh-complete--guess-type (intern (substring name (+ i 1)))))
+           ((string-match "\\?$" name)
+            'boolean)
+           (t
+            'object)))))))))
 
 (defun gosh-smart-complete (&optional arg)
   (interactive "P")
@@ -2659,30 +2666,20 @@ Set this variable before open by `gosh-mode'."
         (cond
          ;; return all env symbols when a prefix arg is given
          (arg
-          (gosh-completion-do sym (gosh-env-filter (lambda (x) t) env)))
+          (gosh-complete-expand sym (gosh-env-filter (lambda (x) t) env)))
          ;; allow different types of strings
          (in-str-p
           (let* ((param-type
                   (and (consp inner-type)
                        (eq 'lambda (car inner-type))
-                       (gosh-completion--lookup-type (cadr inner-type) inner-pos)))
+                       (gosh-complete--lookup-type (cadr inner-type) inner-pos)))
                  (completer (or (gosh-complete-in-string param-type)
                                 '(gosh-complete-file-name
                                   file-name-nondirectory))))
-            (gosh-completion-do
+            (gosh-complete-expand
              ;;(if (consp completer) (funcall (cadr completer) sym) sym)
              sym
              (gosh-complete-apply-string-completer completer sym))))
-         ;; outer special
-         ((and (consp outer-type)
-               (eq 'special (car outer-type))
-               (cadddr outer-type))
-          (gosh-completion-do sym (funcall (cadddr outer-type) sym)))
-         ;; inner special
-         ((and (consp inner-type)
-               (eq 'special (car inner-type))
-               (caddr inner-type))
-          (gosh-completion-do sym (funcall (caddr inner-type) sym)))
          ;; completing inner procedure, complete procedures with a
          ;; matching return type
          ((and (consp outer-type)
@@ -2694,12 +2691,12 @@ Set this variable before open by `gosh-mode'."
                         (consp inner-type)
                         (eq 'lambda (car inner-type))
                         (let ((param-type
-                               (gosh-completion--lookup-type (cadr inner-type) inner-pos)))
+                               (gosh-complete--lookup-type (cadr inner-type) inner-pos)))
                           (and (consp param-type)
                                (eq 'lambda (car param-type))
                                (eq (caddr inner-type) (caddr param-type)))))))
-          (let ((want-type (gosh-completion--lookup-type (cadr outer-type) outer-pos)))
-            (gosh-completion-do
+          (let ((want-type (gosh-complete--lookup-type (cadr outer-type) outer-pos)))
+            (gosh-complete-expand
              sym
              (gosh-env-filter
               (lambda (x)
@@ -2709,7 +2706,7 @@ Set this variable before open by `gosh-mode'."
                            (or (and (eq 'syntax (car type))
                                     (not (eq 'undefined (caddr type))))
                                (and (eq 'lambda (car type))
-                                    (gosh-completion--type-match-p (caddr type)
+                                    (gosh-complete--type-match-p (caddr type)
                                                        want-type)))))))
               env))))
          ;; completing a normal parameter
@@ -2717,7 +2714,7 @@ Set this variable before open by `gosh-mode'."
                (not (zerop inner-pos))
                (consp inner-type)
                (eq 'lambda (car inner-type)))
-          (let* ((param-type (gosh-completion--lookup-type (cadr inner-type) inner-pos))
+          (let* ((param-type (gosh-complete--lookup-type (cadr inner-type) inner-pos))
                  (set-or-flags
                   (or (and (consp param-type)
                            (case (car param-type)
@@ -2729,7 +2726,7 @@ Set this variable before open by `gosh-mode'."
                            (consp outer-type)
                            (eq 'lambda (car outer-type))
                            (let ((outer-param-type
-                                  (gosh-completion--lookup-type (cadr outer-type)
+                                  (gosh-complete--lookup-type (cadr outer-type)
                                                     outer-pos)))
                              (and (consp outer-param-type)
                                   (eq 'flags (car outer-param-type))
@@ -2748,20 +2745,20 @@ Set this variable before open by `gosh-mode'."
                   (gosh-env-filter
                    (lambda (x)
                      (and (not (and (consp (cadr x)) (eq 'syntax (caadr x))))
-                          (gosh-completion--type-match-p (cadr x) base-type)))
+                          (gosh-complete--type-match-p (cadr x) base-type)))
                    env))
                  (str-completions
                   (let ((completer (gosh-complete-in-string base-type)))
                     (and
                      completer
                      (gosh-complete-apply-string-completer completer sym)))))
-            (gosh-completion-do
+            (gosh-complete-expand
              sym
              (append set-or-flags base-completions)
              str-completions)))
          ;; completing a function
          ((zerop inner-pos)
-          (gosh-completion-do
+          (gosh-complete-expand
            sym
            (gosh-env-filter
             (lambda (x)
@@ -2769,11 +2766,11 @@ Set this variable before open by `gosh-mode'."
                   (and (cadr x) (atom (cadr x)))
                   (memq (cadr x) '(procedure object nil))
                   (and (consp (cadr x))
-                       (memq (caadr x) '(lambda syntax special)))))
+                       (memq (caadr x) '(lambda syntax)))))
             env)))
          ;; complete everything
          (t
-          (gosh-completion-do sym (gosh-env-filter (lambda (x) t) env))))))))
+          (gosh-complete-expand sym (gosh-env-filter (lambda (x) t) env))))))))
 
 (defun gosh-complete-or-indent (&optional arg)
   (interactive "P")
@@ -3443,7 +3440,7 @@ PROCEDURE-SYMBOL ::= symbol ;
       (setq res (cons (nreverse in-module) res)))
     (nreverse res)))
 
-(defun gosh-info-doc--text-to-signature (cat text)
+(defun gosh-info-doc--text-to-signature (category text)
   (let ((res '()))
     (condition-case nil
         (with-temp-buffer
@@ -3457,25 +3454,25 @@ PROCEDURE-SYMBOL ::= symbol ;
           (setq res (nreverse res)))
       (error
        ;;FIXME: 
-       ;; (logger-debug "%s: %s" cat text)
+       ;; (logger-debug "%s: %s" category text)
        nil))
     (cond
      ((null res) res)
-     ((member cat '("function" "method" "generic function"))
+     ((member category '("function" "method" "generic function"))
       `(,(car-safe res) (lambda ,(cdr-safe res))))
-     ((member cat '("macro" "special form"))
+     ((member category '("macro" "special form"))
       `(,(car-safe res) (syntax ,(cdr-safe res))))
-     ((member cat '("class" "condition type" "builtin class"))
+     ((member category '("class" "condition type" "builtin class"))
       ;; slots and super is `nil'
       `(,(car-safe res) (class nil nil)))
-     ((member cat '("ec qualifier"))
+     ((member category '("ec qualifier"))
       ;;TODO
       nil)
-     ((member cat '("module"))
+     ((member category '("module"))
       (car-safe res))
-     ((member cat '("constant" "variable" "parameter"))
+     ((member category '("constant" "variable" "parameter"))
       `(,(car-safe res) ,(car-safe (cdr-safe res))))
-     ((member cat '("program clause" "command option"
+     ((member category '("program clause" "command option"
                     "environment variable" "reader syntax"
                     "record type" "generic application"
                     "builtin module"))
@@ -4967,7 +4964,7 @@ And print value in the echo area.
 
 ;; base/super module definitions + import module exported definitions
 ;; string-copy: to resolve shared structure.
-(defconst gosh-inferier--imports-command-format
+(defconst gosh-inferior--imports-command-format
   (concat
    "(apply append "
    "(hash-table-map (module-table (current-module)) "
@@ -4999,7 +4996,7 @@ And print value in the echo area.
   (when (featurep 'auto-complete)
     (add-to-list 'ac-sources 'ac-source-gosh-inferior-symbols))
   (setq major-mode 'gosh-inferior-mode)
-  (setq mode-name "Inferier Gosh")
+  (setq mode-name "Inferior Gosh")
   ;; clear
   (setq gosh-inferior--autoload-functions nil)
   (set-keymap-parent gosh-inferior-mode-map inferior-scheme-mode-map)
@@ -5018,11 +5015,11 @@ And print value in the echo area.
             (gosh-inferior--autoload-functions proc)))
     (append
      gosh-inferior--autoload-functions
-     (gosh-inferier--import-candidates proc))))
+     (gosh-inferior--import-candidates proc))))
 
-(defun gosh-inferier--import-candidates (proc)
+(defun gosh-inferior--import-candidates (proc)
   "Gather symbols from PROC current-module context"
-  (gosh-snatch-process-candidates proc gosh-inferier--imports-command-format))
+  (gosh-snatch-process-candidates proc gosh-inferior--imports-command-format))
 
 (defvar gosh-inferior--autoload-functions nil)
 (defun gosh-inferior--autoload-functions (proc)
@@ -5036,7 +5033,7 @@ TODO but not supported with-module context."
   (interactive)
   (let ((cands (gosh-inferior-symbol-candidates))
         (sym (gosh-complete-symbol-name-at-point)))
-    (gosh-completion-do sym cands)))
+    (gosh-complete-expand sym cands)))
 
 ;;
 ;; Snatch filter (in gosh-inferior-mode)
