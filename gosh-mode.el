@@ -822,7 +822,7 @@ This function come from apel"
   "Gauche program name."
   :group 'gosh-mode
   :type 'string
-  :set 'gosh-set-default-command
+  :set 'gosh-default-set-command
   :initialize (lambda (s v) (set s v)))
 
 (defvar gosh-default-command-internal nil)
@@ -916,7 +916,7 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
      (list command)))
   (gosh-default-initialize command))
 
-(defun gosh-set-default-command (dummy value)
+(defun gosh-default-set-command (dummy value)
   (gosh-default-initialize value))
 
 (defun gosh-default-initialize (&optional default-command)
@@ -940,8 +940,10 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
 
 ;; called when `unload-feature'
 (defun gosh-mode-unload-function ()
-  ;; No unload now.
-  )
+  (remove-hook 'kill-emacs-hook 'gosh-mode--cleanup-all)
+  (gosh-mode--cleanup-all))
+
+(add-hook 'kill-emacs-hook 'gosh-mode--cleanup-all)
 
 (defun gosh--initialize-command->string (gosh command &rest args)
   (let ((dir (file-name-directory gosh)))
@@ -955,23 +957,23 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
     (when (and full (string-match "/gosh\\(\\.exe\\)?$" full))
       full)))
 
-(defun gosh-call->sexp (script &optional command)
+(defun gosh-call-process->sexp (script &optional command)
   (with-temp-buffer
     (let ((args (list "-b" "-e" script)))
-      (unless (= (apply 'gosh-call-internal command args) 0)
+      (unless (= (apply 'gosh-call-process-1 command args) 0)
         (error "TODO")))
     (goto-char (point-min))
     ;;TODO only first?
     (gosh-read)))
 
-(defun gosh-call (&rest args)
-  (apply 'call-process nil nil t nil args))
+(defun gosh-call-process (&rest args)
+  (apply 'gosh-call-process-1 nil args))
 
-(defun gosh-call-internal (command &rest args)
+(defun gosh-call-process-1 (command &rest args)
   (apply 'call-process (or command gosh-default-command-internal) nil t nil
          args))
 
-(defun gosh-start (name buffer &rest args)
+(defun gosh-start-process (name buffer &rest args)
   (apply 'start-process name buffer
          gosh-default-command-internal
          args))
@@ -1026,7 +1028,7 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
         (args '()))
     (when system-only
       (setenv "GAUCHE_LOAD_PATH" nil))
-    (gosh-call->sexp "(write *load-path*)" command)))
+    (gosh-call-process->sexp "(write *load-path*)" command)))
 
 (defun gosh-current-executable ()
   (or (gosh-mode-get :executable)
@@ -1722,14 +1724,13 @@ d:/home == /cygdrive/d/home
           (setq res
                 (append
                  res
-                 (gosh-call->sexp
+                 (gosh-call-process->sexp
                   (format gosh-extract-dynamic-load-exports-format dll-name module))))))
        ((eq (car-safe form) 'select-module)
         ;; FIXME: may be appended to other module.
         (setq module (nth 1 form)))
        (t nil)))
     res))
-
 
 ;;
 ;; Parsed cache
@@ -3640,7 +3641,7 @@ PROCEDURE-SYMBOL ::= symbol ;
     (gosh-mode-put :modeline-load-status
       '(:propertize "Checking" face gosh-modeline-working-face))
     (gosh-mode-put :test-time (float-time))
-    (setq proc (gosh-start "Gosh test" result-buf
+    (setq proc (gosh-start-process "Gosh test" result-buf
                            "-i" "-u" "gauche.test"
                            "-l" file
                            "-e" (format "(test-module '%s)" module)))
@@ -4294,12 +4295,25 @@ This mode is originated from `scheme-mode' but specialized to edit Gauche code."
         (write-region (point-min) (point-max) file nil 'no-msg)))
     file))
 
-;;TODO kill-emacs-hook
+(defvar gosh-mode-cleanup-buffer-hook nil)
+(defvar gosh-mode-cleanup-hook nil)
+
 (defun gosh-mode--cleanup-buffer ()
   (let ((file (gosh-mode-get :temp-file)))
     (when (and file (file-exists-p file))
       (ignore-errors
-        (delete-file file)))))
+        (delete-file file))))
+  (run-hooks 'gosh-mode-cleanup-buffer-hook))
+
+(defun gosh-mode--cleanup-all ()
+  (dolist (buf (buffer-list))
+    (when (eq (buffer-local-value 'major-mode buf) 'gosh-mode)
+      (with-current-buffer buf
+        (gosh-mode--cleanup-buffer)
+        (remove-hook 'kill-buffer-hook 'gosh-mode--cleanup-buffer t))))
+
+  ;; delegate procedure
+  (run-hooks 'gosh-mode-cleanup-hook))
 
 (defun gosh-mode--insert-use-statement (module)
   (forward-line 0)
@@ -4705,9 +4719,9 @@ Evaluate s-expression, syntax check, etc."
                    sexp-string)))
          result)
     (setq result (gosh-eval-low-level-action eval-form proc))
-    (if (string-match (concat "^" hash "\\(.*\\)") result)
-        (signal 'gosh-eval-error (list (match-string 1 result)))
-      result)))
+    (when (string-match (concat "^" hash "\\(.*\\)") result)
+      (signal 'gosh-eval-error (list (match-string 1 result))))
+    result))
 
 (defun gosh-eval-get-output ()
   ;; call after executing `gosh-eval'
@@ -4751,6 +4765,13 @@ Evaluate s-expression, syntax check, etc."
   (gosh-eval-low-level-action
    (format gosh-eval-unload-user-module-format
            gosh-default-command-internal)))
+
+(defun gosh-eval-cleanup ()
+  (loop for (_ proc . _) in gosh-eval-process-alist
+        do (when (process-live-p proc)
+             (delete-process proc))))
+
+(add-hook 'gosh-mode-cleanup-hook 'gosh-eval-cleanup)
 
 (defvar gosh-eval-suppress-discard-input nil)
 
@@ -4796,6 +4817,12 @@ Evaluate s-expression, syntax check, etc."
     (goto-char (point-max))
     (insert event)))
 
+(defun gosh-eval-process-sentinel (proc event)
+  (when (memq (process-status proc) '(exit signal))
+    (let ((file (process-get proc 'gosh-eval-output-file)))
+      (when (and file (file-exists-p file))
+        (delete-file file)))))
+
 (defun gosh-eval-active-process (&optional command)
   (let* ((command (or command gosh-default-command-internal))
          proc)
@@ -4815,13 +4842,14 @@ Evaluate s-expression, syntax check, etc."
   (let* ((key gosh-default-command-internal)
          (proc (gosh-eval-active-process key)))
     (unless proc
-      (let* ((buffer (gosh-eval-process-buffer key))
+      (let* ((buffer (gosh-eval--create-process-buffer key))
              (dir default-directory))
         (with-current-buffer buffer
           (unless (file-directory-p default-directory)
             (cd dir))
-          (setq proc (gosh-start "Gosh backend" buffer "-i"))
+          (setq proc (gosh-start-process "Gosh backend" buffer "-i"))
           (set-process-filter proc 'gosh-eval-process-filter)
+          (set-process-sentinel proc 'gosh-eval-process-sentinel)
           (gosh-set-alist 'gosh-eval-process-alist key proc)
           ;; wait for first prompt
           (while (not (gosh-eval-prompt-match))
@@ -4833,7 +4861,7 @@ Evaluate s-expression, syntax check, etc."
         (process-put proc 'gosh-eval-output-file file)))
     proc))
 
-(defun gosh-eval-process-buffer (command)
+(defun gosh-eval--create-process-buffer (command)
   (let ((buffer (get-buffer-create (format gosh-eval-process-buffer-format command))))
     (with-current-buffer buffer
       (kill-all-local-variables)
@@ -4945,8 +4973,7 @@ Evaluate s-expression, syntax check, etc."
 (defun gosh-eval-last-sexp ()
   "Send the previous sexp to the sticky backend process.
 That sexp evaluated at current module. The module may not be loaded.
-Execute \\[gosh-eval-buffer] if you certain the buffer is a reliable code.
-"
+Execute \\[gosh-eval-buffer] if you certain the buffer is a reliable code."
   (interactive)
   (gosh-eval--check-backend)
   (if (gosh-parse-last-expression-define-p)
@@ -4964,9 +4991,7 @@ That sexp evaluated at current module"
 
 (defun gosh-eval-expression (eval-expression-arg)
   "Evaluate EVAL-EXPRESSION-ARG at current module.
-And print value in the echo area.
-
-"
+And print value in the echo area."
   (interactive
    (list (let ((minibuffer-completing-symbol t))
            (read-from-minibuffer "Gosh Eval: "
