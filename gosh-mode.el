@@ -1126,16 +1126,14 @@ d:/home == /cygdrive/d/home
         (cons ?\" (match-beginning 0)))))))
 
 (defun gosh-context-comment-p (&optional point)
-  (save-excursion
-    (let ((context (parse-partial-sexp (point-min) (or point (point)))))
-      (when (and context (nth 4 context))
-        (cons (nth 4 context) (nth 8 context))))))
+  (let ((context (parse-partial-sexp (point-min) (or point (point)))))
+    (when (and context (nth 4 context))
+      (cons (nth 4 context) (nth 8 context)))))
 
 (defun gosh-context-code-p (&optional point)
-  (save-excursion
-    (let ((context (parse-partial-sexp (point-min) (or point (point)))))
-      (and (not (nth 3 context))
-           (not (nth 4 context))))))
+  (let ((context (parse-partial-sexp (point-min) (or point (point)))))
+    (and (not (nth 3 context))
+         (not (nth 4 context)))))
 
 (defun gosh-context-toplevel-p (&optional point)
   (not (nth 9 (parse-partial-sexp (point-min) (or point (point))))))
@@ -1296,8 +1294,13 @@ d:/home == /cygdrive/d/home
 (defun gosh-parse--current-context (&optional max)
   (save-excursion
     (let ((res '())
-          (prev nil))
-      (backward-prefix-chars)
+          (prev nil)
+          (comment (gosh-context-comment-p)))
+      (cond
+       (comment
+        (goto-char (cdr comment)))
+       (t
+        (backward-prefix-chars)))
       (while (and (not (gosh-context-toplevel-p))
                   (or (null max)
                       (< (length res) max)))
@@ -3641,10 +3644,11 @@ PROCEDURE-SYMBOL ::= symbol ;
     (gosh-mode-put :modeline-load-status
       '(:propertize "Checking" face gosh-modeline-working-face))
     (gosh-mode-put :test-time (float-time))
-    (setq proc (gosh-start-process "Gosh test" result-buf
-                           "-i" "-u" "gauche.test"
-                           "-l" file
-                           "-e" (format "(test-module '%s)" module)))
+    (setq proc (gosh-start-process
+                "Gosh test" result-buf
+                "-i" "-u" "gauche.test"
+                "-l" file
+                "-e" (format "(test-module '%s)" module)))
     (set-process-sentinel proc 'gosh-test--process-sentinel)
     (set-process-filter proc 'gosh-test--process-filter)
     (process-put proc 'gosh-test-source-buffer test-buffer)
@@ -4303,17 +4307,19 @@ This mode is originated from `scheme-mode' but specialized to edit Gauche code."
     (when (and file (file-exists-p file))
       (ignore-errors
         (delete-file file))))
-  (run-hooks 'gosh-mode-cleanup-buffer-hook))
+  (ignore-errors
+    (run-hooks 'gosh-mode-cleanup-buffer-hook))
+  (remove-hook 'kill-buffer-hook 'gosh-mode--cleanup-buffer t))
 
 (defun gosh-mode--cleanup-all ()
-  (dolist (buf (buffer-list))
-    (when (eq (buffer-local-value 'major-mode buf) 'gosh-mode)
-      (with-current-buffer buf
-        (gosh-mode--cleanup-buffer)
-        (remove-hook 'kill-buffer-hook 'gosh-mode--cleanup-buffer t))))
+  (ignore-errors
+    (dolist (buf (buffer-list))
+      (when (eq (buffer-local-value 'major-mode buf) 'gosh-mode)
+        (with-current-buffer buf
+          (gosh-mode--cleanup-buffer))))
 
-  ;; delegate procedure
-  (run-hooks 'gosh-mode-cleanup-hook))
+    ;; delegate procedure
+    (run-hooks 'gosh-mode-cleanup-hook)))
 
 (defun gosh-mode--insert-use-statement (module)
   (forward-line 0)
