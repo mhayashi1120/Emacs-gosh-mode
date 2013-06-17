@@ -1057,7 +1057,7 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
 ;; For cygwin path
 ;;
 
-(defcustom gosh-cygwin-cygdrive "/cygdrive/"
+(defcustom gosh-cygwin-cygdrive nil
   "Path alias of Windows drive prefixed path in Cygwin.
 
 c:/Windows == /cygdrive/c/Windows
@@ -1068,12 +1068,34 @@ d:/home == /cygdrive/d/home
   :set (lambda (s v) (set s (file-name-as-directory v)))
   :initialize (lambda (s v) (set s v)))
 
-(defcustom gosh-cygwin-directory "c:/cygwin/"
+(unless gosh-cygwin-cygdrive
+  (setq gosh-cygwin-cygdrive
+        (cond
+         ((executable-find "cygpath")
+          (with-temp-buffer
+            (let ((drive (or (getenv "SystemDrive") "c:")))
+              (call-process "cygpath" nil t nil "--unix" drive)
+              (goto-char (point-min))
+              (and (re-search-forward (format "^\\(/.*/\\)%s$" (substring drive 0 1)) nil t)
+                   (match-string 1)))))
+         (t "/cygdrive/"))))
+
+(defcustom gosh-cygwin-directory nil
   "Cygwin installed directory."
   :group 'gosh-mode
   :type 'directory
   :set (lambda (s v) (set s (file-name-as-directory (expand-file-name v))))
   :initialize (lambda (s v) (set s v)))
+
+(unless gosh-cygwin-directory
+  (setq gosh-cygwin-directory
+        (cond
+         ((executable-find "cygpath")
+          (with-temp-buffer
+            (call-process "cygpath" nil t nil "--windows" "/")
+            (goto-char (point-min))
+            (buffer-substring (point-min) (line-end-position))))
+         (t "c:\\cygwin"))))
 
 (defun gosh-cygpath->emacs-path (path)
   (let ((cygdrive gosh-cygwin-cygdrive)
@@ -1081,10 +1103,10 @@ d:/home == /cygdrive/d/home
         (case-fold-search t))
     (cond
      ((string-match
-       (format "^\\(?:%s\\)\\([a-zA-Z]\\)/\\(.*\\)"
+       (format "\\`\\(?:%s\\)\\([a-zA-Z]\\)/\\(.*\\)"
                (regexp-quote cygdrive)) path)
       (format "%s:/%s" (match-string 1 path) (match-string 2 path)))
-     ((string-match "^/" path)
+     ((string-match "\\`/" path)
       (expand-file-name (substring path 1) installed))
      (t
       path))))
@@ -1097,11 +1119,11 @@ d:/home == /cygdrive/d/home
     (cond
      ((not (file-name-absolute-p path))
       path)
-     ((string-match (concat "^" (regexp-quote installed) "\\(.*\\)") abspath)
+     ((string-match (concat "\\`" (regexp-quote installed) "\\(.*\\)") abspath)
       (concat "/" (match-string 1 abspath)))
-     ((string-match "^\\([a-zA-Z]\\):/\\(.*\\)" abspath)
+     ((string-match "\\`\\([a-zA-Z]\\):/\\(.*\\)" abspath)
       (format "%s%s/%s" cygdrive (match-string 1 abspath) (match-string 2 abspath)))
-     ((string-match "^/" abspath)
+     ((string-match "\\`/" abspath)
       (expand-file-name (substring abspath 1) installed))
      (t
       path))))
