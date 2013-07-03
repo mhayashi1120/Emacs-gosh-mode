@@ -175,6 +175,12 @@
   (gosh-mode-test-BoL "( let _()  -> _(let()")
   (gosh-mode-test-BoL "(func \"AA(_)\"  -> _(func \"AA()\"")
   (gosh-mode-test-BoL "(func #`\"AA(_)\" -> _(func #`\"AA()\"")
+  (gosh-mode-test-BoL "(sxpath '(@ a _b)  -> (sxpath '_(@ a b)")
+  (gosh-mode-test-BoL "(sxpath '(@ a_ b)  -> (sxpath '_(@ a b)")
+  (gosh-mode-test-BoL "(sxpath '(@ _a b)  -> (sxpath '_(@ a b)")
+  (gosh-mode-test-BoL "(sxpath '(@_ a b)  -> (sxpath '_(@ a b)")
+  (gosh-mode-test-BoL "(sxpath '(_@ a b)  -> (sxpath '_(@ a b)")
+  (gosh-mode-test-BoL "(sxpath '_(@ a b)  -> _(sxpath '(@ a b)")
   )
 
 (defun gosh-mode-test-funcall-in-text (func text)
@@ -245,12 +251,12 @@
 (ert-deftest gosh-mode-test--parse1 ()
   :tags '(gosh-mode)
   (should (equal (gosh-mode-test-with gosh-mode-test-code1
-                   (let ((forms (gosh-parse-read-forms)))
+                   (let ((forms (gosh-parse-read-all)))
                      (gosh-extract-exports forms)))
                  '(hoge  hoge-rest hoge-opt hoge-key hoge-key-opt)))
   (should (equal
            (gosh-mode-test-with  gosh-mode-test-code1
-             (let ((forms (gosh-parse-read-forms)))
+             (let ((forms (gosh-parse-read-all)))
                (gosh-extract-globals forms)))
            '((hoge-key-opt (lambda (:optional arg1 (arg2 \#f) :key (key1 \#f) key2)))
              (hoge-key (lambda (:key (key1 \#f) key2)))

@@ -1164,28 +1164,10 @@ d:/home == /cygdrive/d/home
 
 ;; goto beginning of current sexp
 ;; See `gosh-mode-test--BoL' at gosh-mode-test.el
-;;TODO cleanup or use backward-up-list
 (defun gosh-beginning-of-list ()
-  (let ((first (point))
-        top)
+  (let ((first (point)))
     (gosh-beginning-of-string)
-    (catch 'done
-      (while t
-        (condition-case err
-            (backward-sexp)
-          (scan-error
-           (skip-chars-backward gosh-reader-ws)
-           (when (eq ?\( (char-syntax (char-before)))
-             (setq top nil)
-             (throw 'done t))))
-        (when (and (eq ?\( (char-syntax (char-after)))
-                   (not (bobp)))
-          (backward-char))
-        (when (or (setq top (eq ?\( (char-syntax (char-after))))
-                  (bobp))
-          (throw 'done t))))
-    (unless (or (bobp) top)
-      (backward-char))
+    (backward-up-list)
     (not (eq first (point)))))
 
 (defun gosh-beginning-of-string ()
