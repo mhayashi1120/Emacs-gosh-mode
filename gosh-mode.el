@@ -879,6 +879,7 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
 ;; (defun gosh-delegate-path-e2g ()
 ;;   (gosh-delegate-command-get 7))
 
+;;TODO reconsider this. no need?
 (defun gosh-register-command (command)
   (let* ((full (gosh--check-command command)))
     (unless full
@@ -1011,7 +1012,8 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
         (when (string-match regexp file)
           (throw 'found
                  (subst-char-in-string
-                  ?/ ?. (match-string 1 file))))))))
+                  ?/ ?. (match-string 1 file))))))
+    nil))
 
 (defun gosh-environ-load-path ()
   (let ((path (split-string (or (getenv "GAUCHE_LOAD_PATH") "")
@@ -4321,6 +4323,22 @@ This mode is originated from `scheme-mode' but specialized to edit Gauche code."
         (write-region (point-min) (point-max) file nil 'no-msg)))
     file))
 
+(defvar gosh-mode--previous-buffer nil)
+(defvar gosh-mode-switch-buffer-hook nil)
+
+(defun gosh-mode--follow-target-buffer ()
+  (when (or (null gosh-mode--previous-buffer)
+            (not (eq gosh-mode--previous-buffer (current-buffer))))
+    (ignore-errors
+      (run-hooks 'gosh-mode-switch-buffer-hook)))
+  (setq gosh-mode--previous-buffer
+        (and (derived-mode-p 'gosh-mode)
+             (current-buffer))))
+
+(add-hook 'window-configuration-change-hook 'gosh-mode--follow-target-buffer)
+;;TODO unload
+;; (remove-hook 'window-configuration-change-hook 'gosh-mode--follow-target-buffer)
+
 (defvar gosh-mode-cleanup-buffer-hook nil)
 (defvar gosh-mode-cleanup-hook nil)
 
@@ -4346,7 +4364,10 @@ This mode is originated from `scheme-mode' but specialized to edit Gauche code."
 (defun gosh-mode--insert-use-statement (module)
   (forward-line 0)
   (indent-for-tab-command)
-  (insert (format "(use %s)\n" module))
+  ;; save cursor at start of import statement
+  (save-excursion
+    (insert (format "(use %s)\n" module))
+    (indent-for-tab-command))
   (message "Module %s is imported now." module)
   (sit-for 0.5))
 
@@ -4795,11 +4816,18 @@ Evaluate s-expression, syntax check, etc."
            gosh-default-command-internal)))
 
 (defun gosh-eval-cleanup ()
-  (loop for (_ proc . _) in gosh-eval-process-alist
+  (loop for (_ . proc) in gosh-eval-process-alist
         do (when (process-live-p proc)
              (delete-process proc))))
 
 (add-hook 'gosh-mode-cleanup-hook 'gosh-eval-cleanup)
+
+;;TODO rename
+(defun gosh-eval-buffer-switched ()
+  ;;TODO require deliberation
+  )
+
+(add-hook 'gosh-mode-switch-buffer-hook 'gosh-eval-buffer-switched)
 
 (defvar gosh-eval-suppress-discard-input nil)
 
@@ -4872,10 +4900,10 @@ Evaluate s-expression, syntax check, etc."
     (unless proc
       (let* ((buffer (gosh-eval--create-process-buffer key))
              (dir default-directory))
+        (setq proc (gosh-start-process "Gosh backend" buffer "-i"))
         (with-current-buffer buffer
           (unless (file-directory-p default-directory)
             (cd dir))
-          (setq proc (gosh-start-process "Gosh backend" buffer "-i"))
           (set-process-filter proc 'gosh-eval-process-filter)
           (set-process-sentinel proc 'gosh-eval-process-sentinel)
           (gosh-set-alist 'gosh-eval-process-alist key proc)
