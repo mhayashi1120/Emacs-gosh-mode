@@ -1,9 +1,7 @@
-;;; gosh-config.el --- Gauche programming tool first load interface.
+;;; gosh-config.el --- Gauche programming tool for quick configuration.
 
 ;; Author: Masahiro Hayashi <mhayashi1120@gmail.com>
-;; Keywords: lisp gauche scheme config
 ;; URL: https://github.com/mhayashi1120/Emacs-gosh-mode/raw/master/gosh-config.el
-;; Emacs: GNU Emacs 22 or later
 
 ;; This program is free software; you can redistribute it and/or
 ;; modify it under the terms of the GNU General Public License as
@@ -20,22 +18,13 @@
 ;; Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
 ;; Boston, MA 02110-1301, USA.
 
-
 ;;; Commentary:
 ;;
 
+;; This module provides quick configurations for user. todo
+;; 
+
 ;;; Code:
-
-(require 'gosh-mode)
-
-;; no error exists or not
-(require 'auto-complete-config nil t)
-
-(when (or (not (boundp 'scheme-program-name))
-          (and scheme-program-name (not (string-match "gosh" scheme-program-name))))
-  (setq scheme-program-name (format "%s -i" gosh-default-command)))
-
-
 
 ;; Most recent version is following
 ;; http://practical-scheme.net/wiliki/wiliki.cgi?Gauche%3AEditingWithEmacs
@@ -108,6 +97,8 @@
 (put 'rlet1 'scheme-indent-function 2)
 (put 'with-locking-mutex 'scheme-indent-function 1)
 (put 'without-echoing  'scheme-indent-function 1)
+(put 'call-with-string-io 'scheme-indent-function 1)
+(put 'with-ports 'scheme-indent-function 3)
 
 ;; 
 (put 'begin0 'scheme-indent-function 1)
@@ -116,54 +107,96 @@
 (put 'with-output-to-string 'scheme-indent-function 0)
 (put 'ecase 'scheme-indent-function 1)
 
-(gosh-smart-indent-rule 'match 1 'util.match)
-(gosh-smart-indent-rule 'match-let 2 'util.match)
-(gosh-smart-indent-rule 'match-let* 1 'util.match)
-(gosh-smart-indent-rule 'match-letrec 1 'util.match)
-(gosh-smart-indent-rule 'match-let1 2 'util.match)
-(gosh-smart-indent-rule 'call-with-cgi-script 2 'www.cgi.test)
-(gosh-smart-indent-rule 'with-lock-file 1 'file.util)
-(gosh-smart-indent-rule 'let-values 1 'srfi-11)
-(gosh-smart-indent-rule 'let*-values 1 'srfi-11)
-(gosh-smart-indent-rule 'call-with-client-socket 1 'gauche.net)
-(gosh-smart-indent-rule 'call-with-input-conversion 1 'gauche.charconv)
-
-(gosh-smart-indent-rule '^ 1)
-
 
+;;;
+;;; Mode definitions
+;;;
+
+;;
+;; gosh mode
+;;
+
+(autoload 'gosh-mode "gosh-mode" nil t)
+(autoload 'gosh-run "gosh-mode" nil t)
 
 (add-to-list 'interpreter-mode-alist '("gosh" . gosh-mode))
 
-(add-to-list 'auto-mode-alist
-             '("\\.scm\\(?:\\.[0-9]+\\)?$" . gosh-mode))
-
-;; stub rarely used, so not `require'.
-(autoload 'gosh-stub-mode "gosh-stub" nil t)
-
-(add-to-list 'auto-mode-alist
-             '("\\.stub\\(?:\\.[0-9]+\\)?$" . gosh-stub-mode))
+(add-to-list 'auto-mode-alist '("\\.scm\\'" . gosh-mode))
 
 (add-hook 'gosh-mode-hook
           (lambda ()
             (make-local-variable 'lisp-indent-function)
-            (setq lisp-indent-function 'gosh-smart-indent)
-            (setq indent-tabs-mode nil)
-            (gosh-sticky-mode-on)
-            (turn-on-eldoc-mode)))
+            (setq lisp-indent-function 'gosh-smart-indent)))
 
-(add-hook 'gosh-inferior-mode-hook
-          (lambda ()
-            (turn-on-eldoc-mode)))
+(add-hook 'gosh-mode-hook 'gosh-eval-mode-on)
+(add-hook 'gosh-mode-hook 'turn-on-eldoc-mode)
+
+(add-hook 'gosh-inferior-mode-hook 'turn-on-eldoc-mode)
+
+;;
+;; gosh stub mode
+;;
+
+(autoload 'gosh-stub-mode "gosh-stub" nil t)
+
+(add-to-list 'auto-mode-alist '("\\.stub\\'" . gosh-stub-mode))
+
+;;
+;; Other useful mode
+;;
 
 (when (featurep 'auto-highlight-symbol)
   (add-to-list 'ahs-modes 'gosh-mode)
   (add-to-list 'ahs-modes 'gosh-stub-mode))
 
 
+;;;
+;;; configuration functions
+;;;
 
-(gosh-initialize)
+;; define general indent rule
+(defun gosh-config--define-general-indent ()
+  (gosh-smart-indent-rule 'match 1 'util.match)
+  (gosh-smart-indent-rule 'match-let 2 'util.match)
+  (gosh-smart-indent-rule 'match-let* 1 'util.match)
+  (gosh-smart-indent-rule 'match-letrec 1 'util.match)
+  (gosh-smart-indent-rule 'match-let1 2 'util.match)
+  (gosh-smart-indent-rule 'call-with-cgi-script 2 'www.cgi.test)
+  (gosh-smart-indent-rule 'with-lock-file 1 'file.util)
+  (gosh-smart-indent-rule 'let-values 1 'srfi-11)
+  (gosh-smart-indent-rule 'let*-values 1 'srfi-11)
+  (gosh-smart-indent-rule 'call-with-client-socket 1 'gauche.net)
+  (gosh-smart-indent-rule 'call-with-input-conversion 1 'gauche.charconv)
 
-
+  (gosh-smart-indent-rule '^ 1)
+  nil)
+
+;; entry point of configurations
+(defun gosh-config-loading ()
+  (gosh-initialize)
+  (gosh-config--define-general-indent))
+
+;; add hook after load substance of major-mode
+(eval-after-load 'gosh-mode
+  `(gosh-config-loading))
+
+;; TODO allowance to after loading `gosh-mode'
+(when (featurep 'gosh-mode)
+  (gosh-config-loading))
+
+;; for package (ELPA)
+;;;###autoload (require 'gosh-config)
+
+(defun gosh-config-unload-function ()
+  (let (pair)
+    (dolist (mode '(gosh-mode gosh-stub-mode))
+      (while (setq pair (rassq mode auto-mode-alist))
+        (setq auto-mode-alist
+              (delq pair auto-mode-alist))))
+    (dolist (mode '(gosh-mode))
+      (while (setq pair (rassq mode interpreter-mode-alist))
+        (setq interpreter-mode-alist
+              (delq pair interpreter-mode-alist))))))
 
 (provide 'gosh-config)
 

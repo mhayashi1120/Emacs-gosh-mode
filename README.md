@@ -1,0 +1,35 @@
+Edit gauche script on Emacs
+===========================
+
+Documentation
+-------------
+
+nil
+
+License
+-------
+
+Distributed under the term of GPLv3.
+
+Install
+-------------
+
+Now the most convenient way to install is
+
+git clone git@github.com:mhayashi1120/Emacs-gosh-mode.git /path/where/you/like
+
+(setq load-path (cons "/path/where/you/like" load-path))
+
+.emacs Sample
+-------------
+
+;; Generally only following line is required.
+(require 'gosh-config)
+
+;; if gosh command is not in PATH
+(gosh-register-command "/path/to/gosh")
+
+Note
+----
+gosh-mode is forked from scheme-complete.el
+Many code have been duplicated but specialize to Gauche.
