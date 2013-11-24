@@ -156,15 +156,17 @@
 
 (unless gosh-stub-mode-map
 
+  ;;TODO or `gosh-stub-mode-map' is for developing
   (let ((map (or gosh-stub-mode-map (make-sparse-keymap))))
 
-    (define-key map "\C-c?" 'gosh-show-info)
+    ;;TODO not yet implement
+    ;; (define-key map "\C-c?" 'gosh-info-show-index)
     (define-key map "\C-c\C-c" 'gosh-stub-genstub)
 
-    (define-key map ")" 'gosh-closing-insert-paren)
-    (define-key map "]" 'gosh-closing-insert-bracket)
-    (define-key map "(" 'gosh-opening-insert-paren)
-    (define-key map "[" 'gosh-opening-insert-bracket)
+    (define-key map ")" 'gosh-paren-insert-close)
+    (define-key map "]" 'gosh-paren-insert-close-bracket)
+    (define-key map "(" 'gosh-paren-insert-open)
+    (define-key map "[" 'gosh-paren-insert-open-bracket)
 
     (setq gosh-stub-mode-map map)))
 

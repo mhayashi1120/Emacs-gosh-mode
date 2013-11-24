@@ -96,7 +96,7 @@
 
   )
 
-(ert-deftest gosh-mode-test--parse-current-context ()
+(ert-deftest parse-current-context ()
   :tags '(gosh-mode)
 
   (let ((parenthese
@@ -125,7 +125,7 @@
       (forward-char)
       (should (equal (gosh-paren--next-context) `(case a (*)))))))
 
-(ert-deftest gosh-mode-test--with-bracket ()
+(ert-deftest with-bracket ()
   :tags '(gosh-mode)
 
   (let ((gosh-opening--auto-bracket-alist
@@ -165,7 +165,7 @@
     (gosh-mode-test-funcall-in-sexp 'gosh-extract-local-vars sexp)
     result)))
 
-(ert-deftest gosh-mode-test--BoL ()
+(ert-deftest BoL ()
   :tags '(gosh-mode)
   (gosh-mode-test-BoL "(let()_  -> _(let()")
   (gosh-mode-test-BoL "(let(_)  -> (let_()")
@@ -192,7 +192,7 @@
     (replace-match "")
     (funcall func)))
 
-(ert-deftest gosh-mode-test--eldoc-context ()
+(ert-deftest eldoc-context ()
   :tags '(gosh-mode)
   (should (equal (gosh-mode-test-funcall-in-text 'gosh-parse--current-fnsexp-in-list "(_fn \"A\")") '((fn) 0)))
   (should (equal (gosh-mode-test-funcall-in-text 'gosh-parse--current-fnsexp-in-list "(f_n \"A\")") '((fn) 0)))
@@ -204,7 +204,7 @@
   (should (equal (gosh-mode-test-funcall-in-text 'gosh-parse--current-fnsexp-in-list "(fn \"A\")_") '(nil 0)))
   )
 
-(ert-deftest gosh-mode-test--local-var-detection ()
+(ert-deftest local-var-detection ()
   :tags '(gosh-mode)
   (gosh-mode-test-parse-local-vars '(define (method a1) _) '((a1)))
   (gosh-mode-test-parse-local-vars '(define (method _ a1)) '())
@@ -222,7 +222,7 @@
 
 
 (when (memq system-type '(windows-nt))
-  (ert-deftest gosh-mode-test--w32-path ()
+  (ert-deftest w32-path ()
     :tags '(gosh-mode)
     (should (equal "c:/cygwin/usr/local/" (gosh-cygpath->emacs-path "/usr/local/")))
     (should (equal "usr/local/" (gosh-cygpath->emacs-path "usr/local/")))
@@ -248,7 +248,7 @@
 \(define (hoge-key-opt :optional arg1 (arg2 #f) :key (key1 #f) key2))
 ")
 
-(ert-deftest gosh-mode-test--parse1 ()
+(ert-deftest parse1 ()
   :tags '(gosh-mode)
   (should (equal (gosh-mode-test-with gosh-mode-test-code1
                    (let ((forms (gosh-parse-read-all)))
@@ -267,7 +267,7 @@
            (gosh-eldoc--object->string '(hoge (opts (quote ()))))
            "(hoge (opts ()))")))
 
-(ert-deftest gosh-mode-test--parse2 ()
+(ert-deftest parse2 ()
   :tags '(gosh-mode)
   (should (equal (gosh-mode-test-funcall-in-text 'gosh-parse-symbol-at-point "aa bb_") 'bb))
   (should (equal (gosh-mode-test-funcall-in-text 'gosh-parse-symbol-at-point "aa b_b") 'bb))
@@ -279,7 +279,7 @@
   (should (equal (gosh-mode-test-funcall-in-text 'gosh-parse-symbol-at-point "(aa bb)_") nil))
   )
 
-(ert-deftest gosh-mode-test--defining-indent-rule ()
+(ert-deftest defining-indent-rule ()
   :tags '(gosh-mode)
   (let ((gosh--smart-indent-alist nil))
     (should (equal (gosh-smart-indent-rule 'a 1) '(a . 1)))
@@ -288,6 +288,24 @@
     (should (equal gosh--smart-indent-alist
                    '((m (a . 2))
                      (a . 3))))))
+
+(ert-deftest append-map ()
+  :tags '(gosh-mode)
+  (should (equal '(1 2 2 4 3 6 4 8)
+                 (gosh-append-map*
+                  (lambda (x) (list x (* x 2)))
+                  '(1 2 3 . 4))))
+  (should (equal '(1 2 2 4 3 6 4 8)
+                 (gosh-append-map 
+                  (lambda (x) (list x (* x 2)))
+                  '(1 2 3 4))))
+  )
+
+(ert-deftest length ()
+  :tags '(gosh-mode)
+  (should (equal 3 (gosh-length* '(1 2 3))))
+  (should (equal 2 (gosh-length* '(1 2 . 3))))
+  )
 
 (provide 'gosh-mode-test)
 

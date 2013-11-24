@@ -219,13 +219,19 @@ This function come from apel"
         finally return res))
 
 (defun gosh-append-map (proc init-ls)
-  (if (null init-ls)
-      '()
-    (let* ((ls (reverse init-ls))
-           (res (funcall proc (pop ls))))
-      (while (consp ls)
-        (setq res (append (funcall proc (pop ls)) res)))
-      res)))
+  (let* ((ls (reverse init-ls))
+         (res '()))
+    (while (consp ls)
+      (setq res (append (funcall proc (pop ls)) res)))
+    res))
+
+(defun gosh-append-map* (proc ls)
+  (let ((res '()))
+    (while (consp ls)
+      (setq res (nconc (reverse (funcall proc (pop ls))) res)))
+    (when ls
+      (setq res (nconc (reverse (funcall proc ls)) res)))
+    (nreverse res)))
 
 (defun gosh-flatten (ls)
   (cond
@@ -244,9 +250,16 @@ This function come from apel"
 
 (defun gosh-nth* (n ls)
   (while (and (consp ls) (> n 0))
-    (setq n (- n 1)
+    (setq n (1- n)
           ls (cdr ls)))
   (and (consp ls) (car ls)))
+
+(defun gosh-length* (ls)
+  (let ((n 0))
+    (while (consp ls)
+      (setq n (1+ n)
+            ls (cdr ls)))
+    n))
 
 ;;
 ;; string utilities
@@ -1316,7 +1329,14 @@ d:/home == /cygdrive/d/home
             (backward-prefix-chars)
             (let* ((paren-end (gosh-paren-against-char paren-start))
                    (s (buffer-substring-no-properties (point) end))
-                   (sexp (gosh-read-first-from-string (concat s `(,paren-end))))
+                   ;; TODO workaround eval-when-compile to construct regexp?
+                   (middle-of-dot (format "[.][%s]*\\'" gosh-reader-ws))
+                   (sexp (gosh-read-first-from-string
+                          (concat 
+                           s
+                           (and (string-match middle-of-dot s)
+                                "()")
+                           `(,paren-end))))
                    (last (last sexp)))
               (when (and (consp last) prev)
                 (setcdr last (list prev)))
@@ -1329,7 +1349,9 @@ d:/home == /cygdrive/d/home
     (gosh-end-of-sexp)
     (let* ((ctx (gosh-parse--current-context 1))
            (fnsexp (car-safe ctx))
-           (index (1- (length fnsexp))))
+           (index (if (/= (skip-chars-backward gosh-reader-ws) 0)
+                      (gosh-length* fnsexp)
+                    (1- (gosh-length* fnsexp)))))
       (unless (and (consp fnsexp)
                    (gosh-symbol-p (car fnsexp)))
         (setq fnsexp nil))
@@ -1408,7 +1430,7 @@ d:/home == /cygdrive/d/home
        (gosh-extract--match-clause-vars (cadr x)))
       ((quote) '())
       (t
-       (gosh-append-map 'gosh-extract--match-clause-vars x))))
+       (gosh-append-map* 'gosh-extract--match-clause-vars x))))
    ((and (gosh-object-p x)
          (eq (gosh-object-type x) 'vector))
     (gosh-extract--match-clause-vars
