@@ -338,11 +338,11 @@ This function come from apel"
 ;; number -> number or gosh-object[number]
 ;; vector -> gosh-object [vector]
 ;; string -> string
-;; interporate-string -> string
+;; interpolate-string -> string
 ;; regexp -> gosh-object [regexp]
 
-(defun gosh-object-p (obj)
-  (and (vectorp obj) (= (length obj) 2)))
+(defun gosh-object-p (x)
+  (and (vectorp x) (= (length x) 2)))
 
 (defun gosh-object-type (obj)
   (aref obj 0))
@@ -367,6 +367,25 @@ This function come from apel"
                   ))
     (error "Not a supported type %s" type))
   (vector type value))
+
+
+;;;
+;;; Gauche multiple values -> Emacs sexp
+;;;
+
+(defun gosh-multivalues-p (x)
+  ;;TODO .....
+  (and (vectorp x)
+       (= (length x) 3)
+       (eq (aref x 0) 'multivalues)))
+
+;; TODO out of index
+(defun gosh-multivalues-ref (mv n)
+  (nth n (aref mv 2)))
+
+(defun gosh-multivalues (list)
+  ;;TODO aref 1 orz
+  (vector 'multivalues nil list))
 
 
 ;;;
@@ -510,9 +529,21 @@ This function come from apel"
 
 (defun gosh-reader--read-by-regexp (regexp subexp)
   (unless (looking-at regexp)
-    (signal 'invalid-read-syntax (list "todo")))
+    (signal 'invalid-read-syntax (list "Not a valid context")))
   (goto-char (match-end 0))
   (match-string-no-properties subexp))
+
+(defun gosh-reader--read-hex (length)
+  (let* ((regexp (format "\\([a-fA-F0-9]\\{%s\\}\\|[a-fA-F0-9]+;\\)" length))
+         (match (gosh-reader--read-by-regexp regexp 0)))
+    (condition-case nil
+        (string-to-number match 16)
+      ;; FIXME: ignore overflow
+      (error 0))))
+
+(defun gosh-reader--read-ucs (hex-length)
+  (let ((n (gosh-reader--read-hex hex-length)))
+    (encode-char n 'ucs)))
 
 (defun gosh-reader--read-bulk-literal (ending-char)
   (let ((start (point))
@@ -627,7 +658,7 @@ This function come from apel"
          (data (gosh-reader--read-by-regexp regexp 1)))
     (gosh-object 'charset data)))
 
-;; TODO more sophisticate
+;; FIXME refine
 (defun gosh-reader--read-list (end &optional limit)
   (forward-char)
   (let ((res '())
@@ -722,8 +753,12 @@ This function come from apel"
       ;; Introduces a literal character.
       (gosh-reader--sharp-char))
      ((eq begin ?\`)
-      ;;Introduces an interpolated string.
+      ;; Introduces an interpolated string.
       (gosh-reader--read-special-string))
+     ((eq begin ?\")
+      ;; Introduces an interpolated string. 
+      ;; commit 386882ef9d5ac891addee7d2255a685432fb2e50
+      (gosh-reader--read-string))
      ((eq begin ?\|)
       ;; [SRFI-30] Introduces a block comment.
       ;; comment context should have already been skipped.
@@ -748,9 +783,80 @@ This function come from apel"
   (forward-char)
   (list 'quote (gosh-reader--read)))
 
-(defun gosh-reader--read-string ()
+(defun gosh-reader--read-string/fallback ()
   ;; FIXME: double quoted string may have special sequence
-  (read (current-buffer)))
+  (let ((start (point)))
+    (condition-case err
+        ;; Read by Emacs reader for performance reason.
+        (read (current-buffer))
+      (error
+       ;; fallback 
+       (let ((end (point)))
+         (condition-case nil
+             (progn
+               (goto-char start)
+               (gosh-reader--read-gauche-string))
+           (error
+            (goto-char end)
+            (signal (car err) (cdr err)))))))))
+
+(defun gosh-reader--read-gauche-string ()
+  (unless (eq (char-after) ?\")
+    (error "Not a string context"))
+  (forward-char)
+  (let* ((res '())
+         (alist '((?\" . ?\") (?\\ . ?\\) (?n  . ?\n) (?r  . ?\r)
+                  (?t  . ?\t) (?f  . ?\f) (?0  . ?\0)))
+         (read-char
+          (lambda ()
+            (let ((c (char-after)))
+              (cond
+               ((eq c ?\\)
+                (forward-char)
+                (let ((c2 (char-after))
+                      (cell))
+                  (cond
+                   ((setq cell (assq c2 alist))
+                    (forward-char)
+                    (cdr cell))
+                   ((memq c2 '(?\s ?\n ?\t ?\r))
+                    ;; Seems in `gosh-reader-ws' (?\v ?\f) is not
+                    (unless (looking-at "[\s\t\r]*\n[\s\t\r]*")
+                      (signal 'invalid-read-syntax '("Invalid newline escape")))
+                    (goto-char (match-end 0))
+                    nil)
+                   ((eq c2 ?x)
+                    ;; FIXME internal encoding (how/when get it?)
+                    (forward-char)
+                    (gosh-reader--read-hex 2))
+                   ((eq c2 ?u)
+                    ;; ucs-2
+                    (forward-char)
+                    (gosh-reader--read-ucs 4))
+                   ((eq c2 ?U)
+                    ;; ucs-4
+                    (forward-char)
+                    (gosh-reader--read-ucs 8)))))
+               (t
+                (forward-char)
+                c)))))
+         (char))
+    (while (not (eq (char-after) ?\"))
+      (setq char (funcall read-char))
+      (when char
+        (setq res (cons char res))))
+    (forward-char)
+    (concat (nreverse res))))
+
+(byte-compile 'gosh-reader--read-string/fallback)
+(byte-compile 'gosh-reader--read-gauche-string)
+
+;;TODO is there performance problem? for a while testing
+(defvar gosh-reader-exact-string nil)
+
+(if gosh-reader-exact-string
+    (fset 'gosh-reader--read-string 'gosh-reader--read-gauche-string)
+  (fset 'gosh-reader--read-string 'gosh-reader--read-string/fallback))
 
 (defun gosh-reader--read-datum ()
   (goto-char (match-end 0))
@@ -972,14 +1078,20 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
     (when (and full (string-match "/gosh\\(\\.exe\\)?$" full))
       full)))
 
-(defun gosh-call-process->sexp (script &optional command)
+(defconst gosh-call--eval-format
+  "(receive vs %s (write vs))")
+
+(defun gosh-call-process/eval (script &optional command)
   (with-temp-buffer
-    (let ((args (list "-b" "-e" script)))
+    (let ((args (list "-b" "-e" (format gosh-call--eval-format script))))
       (unless (= (apply 'gosh-call-process-1 command args) 0)
-        (error "TODO")))
+        (error "%s" (substring (buffer-string) 0 -1))))
     (goto-char (point-min))
-    ;;TODO only first?
-    (gosh-read)))
+    (let ((result (gosh-read)))
+      (if (= (length result) 1)
+          (car result)
+        ;; import multiple values to emacs world
+        (gosh-multivalues result)))))
 
 (defun gosh-call-process (&rest args)
   (apply 'gosh-call-process-1 nil args))
@@ -1044,7 +1156,7 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
         (args '()))
     (when system-only
       (setenv "GAUCHE_LOAD_PATH" nil))
-    (gosh-call-process->sexp "(write *load-path*)" command)))
+    (gosh-call-process/eval "*load-path*" command)))
 
 (defun gosh-current-executable ()
   (or (gosh-mode-get :executable)
@@ -1742,8 +1854,8 @@ d:/home == /cygdrive/d/home
     (concat
      "(begin"
      "(dynamic-load \"%s\")"
-     "(write (hash-table-map"
-     "(module-table (find-module '%s)) (^ (s _) s))))")))
+     "(hash-table-map"
+     "(module-table (find-module '%s)) (^ (s _) s)))")))
 
 (defun gosh-extract-dynamic-library-exports (forms)
   (let ((res '())
@@ -1756,7 +1868,7 @@ d:/home == /cygdrive/d/home
           (setq res
                 (append
                  res
-                 (gosh-call-process->sexp
+                 (gosh-call-process/eval
                   (format gosh-extract-dynamic-load-exports-format dll-name module))))))
        ((eq (car-safe form) 'select-module)
         ;; FIXME: may be appended to other module.
