@@ -1261,6 +1261,7 @@ d:/home == /cygdrive/d/home
 ;;; Parse buffer
 ;;;
 
+;;TODO in rfc822-date->date call this command
 (defun gosh-context-string-p (&optional point)
   (save-excursion
     (let ((context (parse-partial-sexp (point-min) (or point (point)))))
@@ -3339,6 +3340,13 @@ Arg FORCE non-nil means forcely insert bracket."
 ;; To use this function
 ;;  (set (make-local-variable 'lisp-indent-function) 'gosh-smart-indent)
 (defun gosh-smart-indent (indent-point state)
+  (condition-case err
+      (gosh-smart-indent-1 indent-point state)
+    (error
+     (message "gosh-mode error: %s fallback to scheme indent" err)
+     (scheme-indent-function indent-point state))))
+
+(defun gosh-smart-indent-1 (indent-point state)
   (let ((normal-indent (current-column)))
     (goto-char (1+ (elt state 1)))
     (parse-partial-sexp (point) calculate-lisp-indent-last-sexp 0 t)
