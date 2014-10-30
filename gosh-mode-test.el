@@ -181,6 +181,14 @@
   (gosh-mode-test-BoL "(sxpath '(@_ a b)  -> (sxpath '_(@ a b)")
   (gosh-mode-test-BoL "(sxpath '(_@ a b)  -> (sxpath '_(@ a b)")
   (gosh-mode-test-BoL "(sxpath '_(@ a b)  -> _(sxpath '(@ a b)")
+
+  (gosh-mode-test-BoL "(#u8(1 2)_  -> _(#u8(1 2)")
+  (gosh-mode-test-BoL "(#u8(1 2_)  -> (#u8_(1 2)")
+  (gosh-mode-test-BoL "(#u8(_1 2)  -> (#u8_(1 2)")
+  (gosh-mode-test-BoL "(#u8_(1 2)  -> _(#u8(1 2)")
+  (gosh-mode-test-BoL "(#u_8(1 2)  -> _(#u8(1 2)")
+  (gosh-mode-test-BoL "(#_u8(1 2)  -> _(#u8(1 2)")
+  (gosh-mode-test-BoL "(_#u8(1 2)  -> _(#u8(1 2)")
   )
 
 (defun gosh-mode-test-funcall-in-text (func text)

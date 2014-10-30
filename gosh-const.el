@@ -98,6 +98,9 @@
   ;; last slash or `i' must let separated subexp.
   "\\(#\\)\\(/\\)\\(\\(?:\\\\.\\|[^/]\\)*?\\)\\(?:/\\(i\\)\\|\\(/\\)\\)")
 
+(defconst gosh-regexp-vector-prefix
+  "\\(#[usUS]\\)\\(8\\|16\\|32\\|64\\)")
+
 (defconst *gosh-scheme-r5rs-info*
   '((define (syntax (identifier value) undefined) "define a new variable")
     (set! (syntax (identifier value) undefined) "set the value of a variable")

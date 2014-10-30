@@ -1066,6 +1066,35 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
 
 (add-hook 'kill-emacs-hook 'gosh-mode--cleanup-all)
 
+(defcustom gosh-force-from-scheme-mode nil
+  "Force to `gosh-mode' no matter what mode: file local variable."
+  :type 'bool
+  :group 'gosh-mode)
+
+(defvar gosh-force-mode-progress nil)
+
+(defun gosh-mode-maybe-from-scheme-mode ()
+  "Activate `gosh-mode' from `scheme-mode'"
+  (when (and gosh-force-from-scheme-mode
+             (eq major-mode 'scheme-mode)
+             (not gosh-force-mode-progress)
+             (save-excursion
+               (or (re-search-forward "\\_<gauche\\_>" nil t)
+                   (progn
+                     (goto-char (point-min))
+                     (when (looking-at auto-mode-interpreter-regexp)
+                       (let ((interpreter (match-string 2)))
+                         (string-match "gosh" interpreter))))))
+             (and buffer-file-name
+                  (string-match "gauche\\|gosh" buffer-file-name)))
+    (run-with-timer 0.1 nil 'gosh-mode-from-scheme-mode (current-buffer))))
+
+(defun gosh-mode-from-scheme-mode (buffer)
+  (with-current-buffer buffer
+    (when (eq major-mode 'scheme-mode)
+      (let ((gosh-force-mode-progress t))
+        (gosh-mode)))))
+
 (defun gosh--initialize-command->string (gosh command &rest args)
   (let ((dir (file-name-directory gosh)))
     (with-temp-buffer
@@ -1277,17 +1306,27 @@ d:/home == /cygdrive/d/home
         (cons ?\" (match-beginning 0)))))))
 
 (defun gosh-context-comment-p (&optional point)
-  (let ((context (parse-partial-sexp (point-min) (or point (point)))))
+  (let* ((first (point))
+         (context (parse-partial-sexp (point-min) (or point first))))
+    (unless (= first (point))
+      (goto-char first))
     (when (and context (nth 4 context))
       (cons (nth 4 context) (nth 8 context)))))
 
 (defun gosh-context-code-p (&optional point)
-  (let ((context (parse-partial-sexp (point-min) (or point (point)))))
+  (let* ((first (point))
+         (context (parse-partial-sexp (point-min) (or point first))))
+    (unless (= first (point))
+      (goto-char first))
     (and (not (nth 3 context))
          (not (nth 4 context)))))
 
 (defun gosh-context-toplevel-p (&optional point)
-  (not (nth 9 (parse-partial-sexp (point-min) (or point (point))))))
+  (let ((first (point)))
+    (prog1
+        (not (nth 9 (parse-partial-sexp (point-min) (or point first))))
+      (unless (= first (point))
+        (goto-char first)))))
 
 ;; goto beginning of current sexp
 ;; See `gosh-mode-test--BoL' at gosh-mode-test.el
@@ -3750,12 +3789,18 @@ PROCEDURE-SYMBOL ::= symbol ;
     (gosh-test--mark beg end tooltip-text)))
 
 (defun gosh-test--update-modeline ()
-  (let* ((prev-module (gosh-mode-get :tested-module))
-         (module (gosh-test--update-module)))
-    (when (or (gosh-test--buffer-was-changed-p)
-              (not (equal prev-module module)))
-      (gosh-test--reset-result)))
-  (force-mode-line-update))
+  ;; ignore all errors.
+  ;; this function invoke from timer or after-save-buffer hook
+  (condition-case err
+      (progn
+        (let* ((prev-module (gosh-mode-get :tested-module))
+               (module (gosh-test--update-module)))
+          (when (or (gosh-test--buffer-was-changed-p)
+                    (not (equal prev-module module)))
+            (gosh-test--reset-result)))
+        (force-mode-line-update))
+    (error
+     (message "%s" err))))
 
 (defun gosh-test--update-module ()
   "Refresh :current-module and return that new value."
@@ -4391,15 +4436,13 @@ CHECK is function that accept no arg and return boolean."
 (define-derived-mode gosh-mode scheme-mode "Gosh"
   "Major mode for editing Gauche code.
 This mode is originated from `scheme-mode' but specialized to edit Gauche code."
-  (if (boundp 'font-lock-syntactic-keywords)
-      (set (make-local-variable 'font-lock-syntactic-keywords)
-           (append
-            font-lock-syntactic-keywords
-            gosh-font-lock-syntactic-keywords))
-    ;; FIXME:
-    ;;  must change to use `syntax-propertize-function' after 24.1
-    (set (make-local-variable 'syntax-propertize-function)
-         'gosh-syntax-table-apply-region))
+  (if (boundp 'syntax-propertize-function)
+      (set (make-local-variable 'syntax-propertize-function)
+           'gosh-syntax-table-apply-region)
+    (set (make-local-variable 'font-lock-syntactic-keywords)
+         (append
+          font-lock-syntactic-keywords
+          gosh-font-lock-syntactic-keywords)))
   (set (make-local-variable 'after-change-functions)
        'gosh-mode--after-change)
   ;;TODO cancel-timer after kill all gosh-mode
@@ -4633,31 +4676,45 @@ This mode is originated from `scheme-mode' but specialized to edit Gauche code."
     (,gosh-regexp-literal-regexp
      ;; (15) is generic string delimiter
      (1 (6) t) (2 (15)) (4 (15) nil t) (5 (15) nil t))
+    (,gosh-regexp-vector-prefix
+     (0 (6)))
     ))
 
 (defun gosh-syntax-table-apply-region (start end)
   (let ((modified (buffer-modified-p)))
+    ;;TODO i couldn't understand enough but two time call
     (unwind-protect
         (save-excursion
-          (save-restriction
-            (narrow-to-region start end)
-            (goto-char (point-min))
-            (let ((inhibit-read-only t))
-              (while (re-search-forward "#/" nil t)
-                (let ((beg (match-beginning 0)))
-                  (when (gosh-context-code-p beg)
-                    (gosh-syntax-table-set-properties beg)))))))
+          (gosh-syntax-table-apply-region-1 start end)
+          (gosh-syntax-table-apply-region-1 start end))
       (set-buffer-modified-p modified))))
+
+(defun gosh-syntax-table-apply-region-1 (start end)
+  (let ((inhibit-read-only t))
+    (goto-char start)
+    (while (re-search-forward "#/" end t)
+      (let ((beg (match-beginning 0)))
+        (when (gosh-context-code-p beg)
+          (gosh-syntax-table-set&go-properties beg ?/ ?/))))
+    (goto-char start)
+    (while (re-search-forward "#\\[" end t)
+      (let ((beg (match-beginning 0)))
+        (when (gosh-context-code-p beg)
+          (gosh-syntax-table-set&go-properties beg ?\[ ?\]))))
+    (goto-char start)
+    (while (re-search-forward "#[usUS]\\([0-9]+?\\)" end t)
+      (gosh-syntax-table-put-property
+       (match-beginning 0) (match-end 0) '(6)))))
 
 (defun gosh-syntax-table-put-property (beg end value)
   (put-text-property beg end 'syntax-table value (current-buffer)))
 
-(defun gosh-syntax-table-set-properties (beg)
+(defun gosh-syntax-table-set&go-properties (beg start-char end-char)
   (let ((curpos beg)
         ;; "aa #/regexp/"
         ;; #/ignore case regexp/i
         ;; #/regexp \/contains slash \//
-        (max (min (line-end-position 5) (point-max)))
+        (max (point-max))
         (state 0))
     (while (and (< curpos max)
                 (< state 3))
@@ -4669,7 +4726,7 @@ This mode is originated from `scheme-mode' but specialized to edit Gauche code."
         (setq state (+ 1 state)))
 
        ((= state 1)
-        (when (= (char-after curpos) ?/)
+        (when (= (char-after curpos) start-char)
           ;; (15) = generic string delimiter
           (gosh-syntax-table-put-property curpos (1+ curpos) '(15)))
         (setq state (+ 1 state)))
@@ -4681,7 +4738,7 @@ This mode is originated from `scheme-mode' but specialized to edit Gauche code."
           (gosh-syntax-table-put-property curpos (1+ curpos) '(9))
           (setq curpos (1+ curpos)))
          ;; handle backslash inside the string
-         ((= (char-after curpos) ?/)
+         ((= (char-after curpos) end-char)
           (cond
            ((= (char-after (1+ curpos)) ?i)
             (setq curpos (1+ curpos))
@@ -4696,7 +4753,8 @@ This mode is originated from `scheme-mode' but specialized to edit Gauche code."
          (t
           nil))))
       ;; next char
-      (setq curpos (+ curpos 1)))))
+      (setq curpos (+ curpos 1)))
+    (goto-char curpos)))
 
 ;;
 ;; jump
@@ -4804,7 +4862,8 @@ This mode is originated from `scheme-mode' but specialized to edit Gauche code."
                  (mod-file (gosh-module->file module))
                  (symnm2 (substring symnm (length modprefix)))
                  (sym2 (intern-soft symnm2)))
-            (when (memq sym2 (gosh-env-exports-functions mod-file))
+            (when (and mod-file
+                       (memq sym2 (gosh-env-exports-functions mod-file)))
               (when (gosh-jump-to-module-globaldef module sym2 forms)
                 (throw 'found t))))))
       ;; jump to module (cursor point as a module name)
@@ -4873,6 +4932,7 @@ otherwise insert top level of the script."
 
 (let ((map (or gosh-eval-mode-map (make-sparse-keymap))))
 
+  (define-key map "\C-c\eR" 'gosh-eval-reset-process)
   (define-key map "\C-c\C-b" 'gosh-eval-buffer)
   (define-key map "\C-c\C-n" 'gosh-eval-region)
   (define-key map "\C-x\C-e" 'gosh-eval-last-sexp)
@@ -5167,6 +5227,15 @@ Evaluate s-expression, syntax check, etc."
   (unless (gosh-eval-active-process)
     (gosh-eval-backend-switch-context)))
 
+(defun gosh-eval-reset-process ()
+  "Reset gosh process if exists."
+  (interactive)
+  (gosh--processing-message "Reset backend process..."
+    (let ((active (gosh-eval-active-process)))
+      (when active
+        (delete-process active))
+      (gosh-eval--check-backend))))
+
 (defun gosh-eval-last-sexp ()
   "Send the previous sexp to the sticky backend process.
 That sexp evaluated at current module. The module may not be loaded.
@@ -5339,6 +5408,22 @@ TODO but not supported with-module context."
     (error
      ;; step through if error.
      (setq gosh-snatch--filter-candidates t))))
+
+
+;;;
+;;; advice
+;;;
+
+(defadvice scheme-mode
+    (after gosh-hack-scheme-mode () activate)
+  (gosh-mode-maybe-from-scheme-mode))
+
+;;TODO test
+(defun gosh-deactivate-advice ()
+  (ad-disable-advice 'scheme-mode 'after 'gosh-hack-scheme-mode)
+  (ad-update 'scheme-mode))
+
+(add-hook 'gosh-mode-cleanup-hook 'gosh-deactivate-advice)
 
 
 
