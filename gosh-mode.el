@@ -1067,9 +1067,16 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
 (add-hook 'kill-emacs-hook 'gosh-mode--cleanup-all)
 
 (defcustom gosh-force-from-scheme-mode nil
-  "Force to `gosh-mode' no matter what mode: file local variable."
+  "Force to `gosh-mode' no matter what file local variable \"mode:\" is."
   :type 'bool
   :group 'gosh-mode)
+
+(defcustom gosh-mode-maybe-predicate-hook nil
+  "Hook when call `gosh-force-from-scheme-mode' is non-nil.
+All of this items is function with no-arg which return non-nil if you wish
+to change `scheme-mode' to `gosh-mode'"
+  :group 'gosh-mode
+  :type 'hook)
 
 (defvar gosh-force-mode-progress nil)
 
@@ -1078,16 +1085,28 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
   (when (and gosh-force-from-scheme-mode
              (eq major-mode 'scheme-mode)
              (not gosh-force-mode-progress)
-             (save-excursion
-               (or (re-search-forward "\\_<gauche\\_>" nil t)
-                   (progn
-                     (goto-char (point-min))
-                     (when (looking-at auto-mode-interpreter-regexp)
-                       (let ((interpreter (match-string 2)))
-                         (string-match "gosh" interpreter))))))
-             (and buffer-file-name
-                  (string-match "gauche\\|gosh" buffer-file-name)))
+             (dolist (pred gosh-mode-maybe-predicate-hook)
+               (when (ignore-errors (save-excursion (funcall pred)))
+                 (return t))))
     (run-with-timer 0.1 nil 'gosh-mode-from-scheme-mode (current-buffer))))
+
+(defun gosh-mode-maybe--from-file-name ()
+  (and buffer-file-name
+       (string-match "gauche\\|gosh" buffer-file-name)))
+
+(defun gosh-mode-maybe--from-buffer-contents ()
+  (goto-char (point-min))
+  (re-search-forward "\\_<gauche\\_>" nil t))
+
+(defun gosh-mode-maybe--from-shebang ()
+  (goto-char (point-min))
+  (when (looking-at auto-mode-interpreter-regexp)
+    (let ((interpreter (match-string 2)))
+      (string-match "gosh" interpreter))))
+
+(add-hook 'gosh-mode-maybe-predicate-hook 'gosh-mode-maybe--from-file-name)
+(add-hook 'gosh-mode-maybe-predicate-hook 'gosh-mode-maybe--from-buffer-contents)
+(add-hook 'gosh-mode-maybe-predicate-hook 'gosh-mode-maybe--from-shebang)
 
 (defun gosh-mode-from-scheme-mode (buffer)
   (with-current-buffer buffer
@@ -1290,6 +1309,13 @@ d:/home == /cygdrive/d/home
 ;;; Parse buffer
 ;;;
 
+(defun gosh--parse-partial-sexp (from &optional to)
+  (let ((first (point)))
+    (prog1
+        (parse-partial-sexp from (or to (point)))
+      (unless (= first (point))
+        (goto-char first)))))
+
 ;;TODO in rfc822-date->date call this command
 (defun gosh-context-string-p (&optional point)
   (save-excursion
@@ -1306,27 +1332,17 @@ d:/home == /cygdrive/d/home
         (cons ?\" (match-beginning 0)))))))
 
 (defun gosh-context-comment-p (&optional point)
-  (let* ((first (point))
-         (context (parse-partial-sexp (point-min) (or point first))))
-    (unless (= first (point))
-      (goto-char first))
+  (let ((context (gosh--parse-partial-sexp (point-min) point)))
     (when (and context (nth 4 context))
       (cons (nth 4 context) (nth 8 context)))))
 
 (defun gosh-context-code-p (&optional point)
-  (let* ((first (point))
-         (context (parse-partial-sexp (point-min) (or point first))))
-    (unless (= first (point))
-      (goto-char first))
+  (let ((context (gosh--parse-partial-sexp (point-min) point)))
     (and (not (nth 3 context))
          (not (nth 4 context)))))
 
 (defun gosh-context-toplevel-p (&optional point)
-  (let ((first (point)))
-    (prog1
-        (not (nth 9 (parse-partial-sexp (point-min) (or point first))))
-      (unless (= first (point))
-        (goto-char first)))))
+  (not (nth 9 (gosh--parse-partial-sexp (point-min) point))))
 
 ;; goto beginning of current sexp
 ;; See `gosh-mode-test--BoL' at gosh-mode-test.el
@@ -5418,7 +5434,6 @@ TODO but not supported with-module context."
     (after gosh-hack-scheme-mode () activate)
   (gosh-mode-maybe-from-scheme-mode))
 
-;;TODO test
 (defun gosh-deactivate-advice ()
   (ad-disable-advice 'scheme-mode 'after 'gosh-hack-scheme-mode)
   (ad-update 'scheme-mode))
