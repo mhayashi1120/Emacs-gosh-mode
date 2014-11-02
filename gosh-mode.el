@@ -1109,10 +1109,11 @@ to change `scheme-mode' to `gosh-mode'"
 (add-hook 'gosh-mode-maybe-predicate-hook 'gosh-mode-maybe--from-shebang)
 
 (defun gosh-mode-from-scheme-mode (buffer)
-  (with-current-buffer buffer
-    (when (eq major-mode 'scheme-mode)
-      (let ((gosh-force-mode-progress t))
-        (gosh-mode)))))
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (when (eq major-mode 'scheme-mode)
+        (let ((gosh-force-mode-progress t))
+          (gosh-mode))))))
 
 (defun gosh--initialize-command->string (gosh command &rest args)
   (let ((dir (file-name-directory gosh)))
@@ -1619,7 +1620,7 @@ d:/home == /cygdrive/d/home
                (gosh-extract--simple-args vars (nth 1 sexp)))
               ((match)
                (let ((clause (cdr ctx)))
-                 (gosh-extract--match-vars vars (car-safe clause))))
+                 (gosh-extract--match-vars vars (car-safe (car-safe clause)))))
               ((match-let match-let*)
                (dolist (pat-expr (nth 1 sexp))
                  (gosh-extract--match-vars vars (car-safe pat-expr))))
