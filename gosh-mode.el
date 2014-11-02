@@ -4270,7 +4270,9 @@ HIGHLIGHT is a marker to make be explicitly the target is."
           ;; move base point to start of region
           (setq point start))
         ;;TODO consider this condition
-        never (or done (= point (point-min)))))
+        never (or done (and
+                        (= (car prev-region) (point-min))
+                        (= (cdr prev-region) (point-max))))))
 
 (defun gosh-refactor--dehighlight ()
   (remove-overlays (point-min) (point-max) 'gosh-refactor-overlay-p t)
