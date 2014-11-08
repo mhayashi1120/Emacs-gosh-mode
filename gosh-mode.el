@@ -4,7 +4,7 @@
 ;; Keywords: lisp gauche scheme edit
 ;; URL: https://github.com/mhayashi1120/Emacs-gosh-mode/raw/master/gosh-mode.el
 ;; Emacs: GNU Emacs 23 or later
-;; Version: 0.3.0
+;; Version: 0.3.1
 
 ;; This program is free software; you can redistribute it and/or
 ;; modify it under the terms of the GNU General Public License as
@@ -1864,9 +1864,7 @@ d:/home == /cygdrive/d/home
                        (mapcar
                         'car
                         (or env (gosh-extract-globals forms nil)))
-                       res))
-            ;; skip all
-            (goto-char (point-max)))))
+                       res)))))
 
     (ignore-errors
       (dolist (sexp forms)
