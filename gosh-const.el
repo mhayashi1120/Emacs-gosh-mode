@@ -1345,6 +1345,9 @@
 
    ])
 
+(defconst *gosh-undocumented-info*
+  '((report-error (lambda (err)))))
+
 
 
 (defconst gosh-info-appendixes-ja

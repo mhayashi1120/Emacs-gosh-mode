@@ -34,7 +34,7 @@
   :group 'lisp
   :prefix "gosh-")
 
-(defvar gosh-mode-version "0.3.0")
+(defvar gosh-mode-version "0.3.1")
 
 (eval-when-compile
   (require 'cl)
@@ -340,6 +340,7 @@ This function come from apel"
 ;; string -> string
 ;; interpolate-string -> string
 ;; regexp -> gosh-object [regexp]
+;; iregexp -> gosh-object [iregexp]
 
 (defun gosh-object-p (x)
   (and (vectorp x) (= (length x) 2)))
@@ -353,7 +354,7 @@ This function come from apel"
 (defun gosh-object (type value)
   (unless (memq type
                 '(
-                  char charset number vector regexp
+                  char charset number vector regexp iregexp
 
                   u8vector u16vector u32vector u64vector
                   s8vector s16vector s32vector s64vector
@@ -545,17 +546,6 @@ This function come from apel"
   (let ((n (gosh-reader--read-hex hex-length)))
     (encode-char n 'ucs)))
 
-(defun gosh-reader--read-bulk-literal (ending-char)
-  (let ((start (point))
-        (regexp (format "\\(\\(?:\\\\.\\|[^%c]\\)+%c\\)"
-                        ending-char ending-char)))
-    (forward-char)
-    (unless (looking-at regexp)
-      (signal 'invalid-read-syntax
-              (list (format "No valid ending char %c" ending-char))))
-    (goto-char (match-end 0))
-    (buffer-substring-no-properties start (point))))
-
 (defun gosh-reader--read-special-string ()
   (forward-char)
   (unless (eq (char-after) ?\")
@@ -626,7 +616,18 @@ This function come from apel"
    (t (signal 'invalid-read-syntax `("Assert #" char)))))
 
 (defun gosh-reader--sharp-regexp ()
-  (gosh-object 'regexp (gosh-reader--read-bulk-literal ?\/)))
+  (let ((start (point))
+        (regexp (format "\\(\\(?:\\\\.\\|[^/]\\)*/\\)\\(i\\)?")))
+    (forward-char)
+    (unless (looking-at regexp)
+      (signal 'invalid-read-syntax
+              (list (format "Not a valid regexp literal"))))
+    (goto-char (match-end 0))
+    (let* ((end (match-end 1))
+           (value (buffer-substring-no-properties
+                   start end))
+          (ignore-case (match-string 2)))
+      (gosh-object (if ignore-case 'iregexp 'regexp) value))))
 
 (defun gosh-reader--sharp-reference ()
   (cond
@@ -2052,7 +2053,7 @@ TODO key should be module-file?? multiple executable make complex.")
 
 (defun gosh-env-current (&optional for-completion)
   ;; r5rs
-  (let* ((env (list *gosh-scheme-r5rs-info*))
+  (let* ((env (list *gosh-scheme-r5rs-info* *gosh-undocumented-info*))
          (forms (or
                  (and buffer-file-name
                       (gosh-cache-file-forms buffer-file-name))
@@ -3011,6 +3012,13 @@ Set this variable before open by `gosh-mode'."
           (requires . 2)
           (cache)))
 
+      (ac-define-source gosh-parameters
+        '((candidates . gosh-ac-parameter-candidates)
+          (symbol . "p")
+          (prefix . "(\\(\\(?:\\sw\\|\\s_\\)+\\)")
+          (requires . 2)
+          (cache)))
+
       (ac-define-source gosh-symbols
         '((candidates . gosh-ac-symbol-candidates)
           (symbol . "s")
@@ -3046,6 +3054,7 @@ Set this variable before open by `gosh-mode'."
 (defun gosh-ac--initialize-for-mode ()
   (when (featurep 'auto-complete)
     (add-to-list 'ac-sources 'ac-source-gosh-functions)
+    (add-to-list 'ac-sources 'ac-source-gosh-parameters)
     (add-to-list 'ac-sources 'ac-source-gosh-symbols)
     (add-to-list 'ac-sources 'ac-source-gosh-keywords)
     (add-to-list 'ac-sources 'ac-source-gosh-modules)))
@@ -3133,6 +3142,16 @@ Set this variable before open by `gosh-mode'."
       (let ((body (cadr inf)))
         (when (and (consp body)
                    (eq (car body) 'lambda))
+          (setq res (cons (symbol-name (car inf)) res)))))
+    res))
+
+(defun gosh-ac-parameter-candidates ()
+  (let ((env (gosh-env-current t))
+        (res '()))
+    (gosh-env-map-symbol env inf
+      (let ((body (cadr inf)))
+        (when (and (consp body)
+                   (eq (car body) 'parameter))
           (setq res (cons (symbol-name (car inf)) res)))))
     res))
 
@@ -3829,12 +3848,16 @@ PROCEDURE-SYMBOL ::= symbol ;
 
 (defun gosh-test--reset-status ()
   (gosh-mode-put :modeline-load-status
-    '(:propertize "Unknown" face gosh-modeline-lightdown-face)))
+    '(:propertize
+      "Unknown"
+      face gosh-modeline-lightdown-face)))
 
 (defun gosh-test--reset-result ()
   (gosh-mode-put :modeline-tested-module nil)
   (gosh-mode-put :modeline-test-result
-    '(:propertize "Unknown" face gosh-modeline-lightdown-face)))
+    '(:propertize
+      "Unknown"
+      face gosh-modeline-lightdown-face)))
 
 ;; Execute subprocess that have sentinel and filter
 ;;  subprocess load current file and evaluate `(test-module some-module)'
@@ -3847,10 +3870,13 @@ PROCEDURE-SYMBOL ::= symbol ;
     ;; clear overlay
     (gosh-test--clear-errors)
     (gosh-mode-put :modeline-test-result
-      `(:propertize "Checking"
-                    face gosh-modeline-working-face))
+      `(:propertize
+        "Checking"
+        face gosh-modeline-working-face))
     (gosh-mode-put :modeline-load-status
-      '(:propertize "Checking" face gosh-modeline-working-face))
+      '(:propertize
+        "Checking"
+        face gosh-modeline-working-face))
     (gosh-mode-put :test-time (float-time))
     (setq proc (gosh-start-process
                 "Gosh test" result-buf
@@ -3883,14 +3909,22 @@ PROCEDURE-SYMBOL ::= symbol ;
               (with-current-buffer buffer
                 (gosh-test--parse-error-message message)
                 (gosh-mode-put :modeline-load-status
-                  `(:propertize "Invalid"
-                                face gosh-modeline-error-face
-                                help-echo ,(concat "Gosh error: " message)
-                                mouse-face mode-line-highlight)))))
+                  `(:propertize
+                    "Invalid"
+                    face gosh-modeline-error-face
+                    help-echo ,(concat "Gosh error: " message)
+                    mouse-face mode-line-highlight)))))
            (t
             (with-current-buffer buffer
               (gosh-mode-put :modeline-load-status
-                '(:propertize "Valid" face gosh-modeline-normal-face))))))))))
+                '(:propertize
+                  "Valid"
+                  face
+                  gosh-modeline-normal-face
+                  help-echo
+                  "Gosh test: This is loadable file"
+                  mouse-face
+                  mode-line-highlight))))))))))
 
 (defun gosh-test--parse-error-message (message)
   (save-excursion
@@ -3963,8 +3997,12 @@ PROCEDURE-SYMBOL ::= symbol ;
                                    help-echo ,(concat "Gosh test error: "
                                                       (prin1-to-string errors))
                                    mouse-face mode-line-highlight)))
-                        `(:propertize "OK"
-                                      face gosh-modeline-normal-face)))
+                        `(:propertize
+                          "OK"
+                          face gosh-modeline-normal-face
+                          help-echo
+                          "Gosh test: test-module cannot detect error"
+                          mouse-face mode-line-highlight)))
                   (gosh-test--close-process proc)))
           (gosh-mode-put :modeline-test-result result)
           (gosh-test--highilght-errors-if-possible errors))))))
