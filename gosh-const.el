@@ -1345,7 +1345,7 @@
 
    ])
 
-(defconst *gosh-undocumented-info*
+(defvar *gosh-undocumented-info*
   '((report-error (lambda (err)))))
 
 

@@ -45,15 +45,12 @@
 (require 'cmuscheme)
 (require 'info-look)
 
-(defvar system-type)
 (defvar path-separator)
 (defvar process-environment)
-(defvar idle-update-delay)
 (defvar current-prefix-arg)
 (defvar inhibit-quit)
 (defvar quit-flag)
 (defvar unread-command-events)
-(defvar emacs-version)
 (defvar exec-path)
 (defvar auto-mode-interpreter-regexp)
 (defvar read-expression-map)
@@ -1453,28 +1450,6 @@ d:/home == /cygdrive/d/home
        (save-excursion
          (beginning-of-defun)
          (looking-at "([\s\t\n]*define"))))
-
-;;TODO remove and merge
-(defun gosh-parse--sexp-type-at-point (&optional env)
-  (case (char-syntax (char-after))
-    ((?\()
-     (forward-char 1)
-     (when (eq ?w (char-syntax (char-after)))
-       (let ((op (gosh-parse-symbol-at-point)))
-         (cond
-          ((eq op 'lambda)
-           (let ((params
-                  (gosh-nth-sexp-at-point 1)))
-             `(lambda ,params)))
-          (t
-           (let ((spec (gosh-env-lookup env op)))
-             (and spec
-                  (consp (cadr spec))
-                  (eq 'lambda (caadr spec))
-                  (cddadr spec)
-                  (car (cddadr spec)))))))))
-    (t
-     (gosh-read))))
 
 ;;TODO
 ;; (let* ([aa #f)) (valid-proc _))
@@ -2923,7 +2898,7 @@ Set this variable before open by `gosh-mode'."
          ((and inner-proc
                (not (zerop inner-pos))
                (consp inner-type)
-               (eq 'lambda (car inner-type)))
+               (memq (car inner-type) '(lambda)))
           (let* ((param-type (gosh-complete--lookup-type (cadr inner-type) inner-pos))
                  (set-or-flags
                   (or (and (consp param-type)
@@ -2934,7 +2909,7 @@ Set this variable before open by `gosh-mode'."
                       ;; parameter
                       (and (not (zerop outer-pos))
                            (consp outer-type)
-                           (eq 'lambda (car outer-type))
+                           (memq (car outer-type) '(lambda))
                            (let ((outer-param-type
                                   (gosh-complete--lookup-type (cadr outer-type)
                                                               outer-pos)))
@@ -2976,7 +2951,7 @@ Set this variable before open by `gosh-mode'."
                   (and (cadr x) (atom (cadr x)))
                   (memq (cadr x) '(procedure object nil))
                   (and (consp (cadr x))
-                       (memq (caadr x) '(lambda syntax)))))
+                       (memq (caadr x) '(lambda syntax parameter)))))
             env)))
          ;; complete everything
          (t
@@ -3559,6 +3534,8 @@ PROCEDURE-SYMBOL ::= symbol ;
 ;;; info integration
 ;;;
 
+(defvar gosh-info-doc--env nil)
+
 (defun gosh-info-lookup-add-help (mode)
   (info-lookup-add-help
    ;; For
@@ -3626,7 +3603,6 @@ PROCEDURE-SYMBOL ::= symbol ;
                 (gosh-symbol-p (car-safe e)))
         return (gosh-symbol-name (car-safe e))))
 
-(defvar gosh-info-doc--env nil)
 (defun gosh-info-doc--generate-signatures ()
   (gosh-and*
       ((infofile (ignore-errors (Info-find-file "gauche-refe")))

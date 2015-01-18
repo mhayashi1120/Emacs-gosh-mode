@@ -171,7 +171,7 @@
   (gosh-smart-indent-rule '^ 1)
   nil)
 
-;; entry point of configurations
+;; entry point of this configurations
 (defun gosh-config-loading ()
   (gosh-initialize)
   (gosh-config--define-general-indent))
@@ -180,7 +180,7 @@
 (eval-after-load 'gosh-mode
   `(gosh-config-loading))
 
-;; TODO allowance to after loading `gosh-mode'
+;; amend after load `gosh-mode'
 (when (featurep 'gosh-mode)
   (gosh-config-loading))
 
