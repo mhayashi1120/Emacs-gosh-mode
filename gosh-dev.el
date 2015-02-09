@@ -31,8 +31,7 @@
         (while (not (eobp))
           (let ((start (point)))
             (condition-case err
-                (progn
-                  (gosh-read)
+                (let ((sexp (gosh-read)))
                   (gosh-reader-ignore))
               (error
                (let ((text (buffer-substring start (point))))

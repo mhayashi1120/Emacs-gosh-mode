@@ -4,7 +4,7 @@
 ;; Keywords: lisp gauche scheme edit
 ;; URL: https://github.com/mhayashi1120/Emacs-gosh-mode/raw/master/gosh-mode.el
 ;; Emacs: GNU Emacs 23 or later
-;; Version: 0.3.1
+;; Version: 0.3.2
 
 ;; This program is free software; you can redistribute it and/or
 ;; modify it under the terms of the GNU General Public License as
@@ -34,7 +34,7 @@
   :group 'lisp
   :prefix "gosh-")
 
-(defvar gosh-mode-version "0.3.1")
+(defvar gosh-mode-version "0.3.2")
 
 (eval-when-compile
   (require 'cl)
@@ -525,15 +525,22 @@ This function come from apel"
   (goto-char (match-end 0))
   (length (match-string 0)))
 
-(defun gosh-reader--read-by-regexp (regexp subexp)
-  (unless (looking-at regexp)
-    (signal 'invalid-read-syntax (list "Not a valid context")))
-  (goto-char (match-end 0))
-  (match-string-no-properties subexp))
+(defun gosh-reader--read-by-regexp (regexp subexp &optional no-error)
+  (cond
+   ((looking-at regexp)
+    (goto-char (match-end 0))
+    (match-string-no-properties subexp))
+   (no-error nil)
+   (t
+    (signal 'invalid-read-syntax (list "Not a valid context")))))
 
 (defun gosh-reader--read-hex (length)
-  (let* ((regexp (format "\\([a-fA-F0-9]\\{%s\\}\\|[a-fA-F0-9]+;\\)" length))
-         (match (gosh-reader--read-by-regexp regexp 0)))
+  (let ((match (or
+                (gosh-reader--read-by-regexp
+                 ;; R7RS new syntax
+                 "\\([a-fA-F0-9]+\\);" 1 t)
+                (gosh-reader--read-by-regexp
+                 (format "[a-fA-F0-9]\\{%s\\}" length) 0))))
     (condition-case nil
         (string-to-number match 16)
       ;; FIXME: ignore overflow
@@ -562,6 +569,9 @@ This function come from apel"
     ("escape"  . ?\x1b) ("esc"     . ?\x1b)
     ("delete"  . ?\x7f) ("del"     . ?\x7f)
     ("null"    . ?\x00)
+
+    ("alarm"     . ?\x07)
+    ("backspace" . ?\x08)
     ))
 
 (defun gosh-reader--sharp-char ()
