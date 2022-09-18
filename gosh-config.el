@@ -1,7 +1,7 @@
 ;;; gosh-config.el --- Gauche programming tool for quick configuration.
 
 ;; Author: Masahiro Hayashi <mhayashi1120@gmail.com>
-;; URL: https://github.com/mhayashi1120/Emacs-gosh-mode/raw/master/gosh-config.el
+;; URL: https://github.com/mhayashi1120/Emacs-gosh-mode
 
 ;; This program is free software; you can redistribute it and/or
 ;; modify it under the terms of the GNU General Public License as
@@ -86,8 +86,12 @@
 (put 'with-string-io 'scheme-indent-function 1)
 (put 'with-time-counter 'scheme-indent-function 1)
 
+
+(put 'and-let1 'scheme-indent-function 2)
+(put 'quasirename 'scheme-indent-function 1)
+
 ;;
-;; Currently not listed.
+;; Currently not listed in wiliki.
 ;;
 
 (put 'guard 'scheme-indent-function 1)
@@ -168,7 +172,14 @@
   (gosh-smart-indent-rule 'call-with-client-socket 1 'gauche.net)
   (gosh-smart-indent-rule 'call-with-input-conversion 1 'gauche.charconv)
 
+  (gosh-smart-indent-rule '$let 1 'parser.peg)
+  (gosh-smart-indent-rule '$let* 1 'parser.peg)
+
   (gosh-smart-indent-rule '^ 1)
+  (gosh-smart-indent-rule 'glet 1 'gauche.generator)
+  (gosh-smart-indent-rule 'glet* 1 'gauche.generator)
+  (gosh-smart-indent-rule 'glet1 2 'gauche.generator)
+  (gosh-smart-indent-rule 'do-generator 1 'gauche.generator)
   nil)
 
 ;; entry point of this configurations

@@ -1,7 +1,7 @@
 ;;; gosh-const.el --- gosh-mode constant settings.
 
 ;; Author: Masahiro Hayashi <mhayashi1120@gmail.com>
-;; URL: https://github.com/mhayashi1120/Emacs-gosh-mode/raw/master/gosh-const.el
+;; URL: https://github.com/mhayashi1120/Emacs-gosh-mode
 
 ;; This program is free software; you can redistribute it and/or
 ;; modify it under the terms of the GNU General Public License as
@@ -36,6 +36,7 @@
     "export" "export-if-defined" "export-all"
 
     "require"
+    "dynamic-wind"
 
     "^"
     "^a" "^b" "^c" "^d" "^e" "^f" "^g" "^h" "^i"
@@ -43,13 +44,17 @@
     "^s" "^t" "^u" "^v" "^w" "^x" "^y" "^z"
 
     ;; keywords special indent function by `scheme-indent-function' property
-    "and-let*" "begin0" "call-with-client-socket"
+    "and-let*" "and-let1" "begin0" "call-with-client-socket"
     "call-with-input-conversion" "call-with-input-file"
     "call-with-input-process" "call-with-input-string"
     "call-with-iterator" "call-with-output-conversion"
     "call-with-output-file" "call-with-output-string"
-    "call-with-temporary-file" "call-with-values" "dolist" "dotimes"
-    "ecase" "guard" "if" "if-let1" "if-match" "let*-values" "let-args"
+    "call-with-temporary-file" "call-with-values"
+    "dolist" "dotimes" "do-generator"
+    "ecase" "guard"
+    "if" "if-let1" "if-match"
+    "glet" "glet1" "glet*"
+    "let*-values" "let-args"
     "let-keywords*" "let-match" "let-optionals*" "let-syntax"
     "let-values" "let/cc" "let1" "letrec-syntax" "make" "match"
     "multiple-value-bind" "parameterize" "parse-options" "receive"

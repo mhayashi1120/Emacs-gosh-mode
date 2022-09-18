@@ -2,7 +2,7 @@
 
 ;; Author: Masahiro Hayashi <mhayashi1120@gmail.com>
 ;; Keywords: lisp gauche scheme edit
-;; URL: https://github.com/mhayashi1120/Emacs-gosh-mode/raw/master/gosh-mode.el
+;; URL: https://github.com/mhayashi1120/Emacs-gosh-mode
 ;; Emacs: GNU Emacs 23 or later
 ;; Version: 0.3.2
 
@@ -22,10 +22,19 @@
 ;; Boston, MA 02110-1301, USA.
 
 ;;; Commentary:
-;;
 
-;; gosh-mode is forked from scheme-complete.el
-;; Many code is duplicated but specialize to Gauche.
+;; ## Install:
+
+;;TODO
+
+;; ## Usage:
+
+;; * `C-c C-u`
+
+;; ## Thanks:
+;; - scheme-complete.el
+;;    gosh-mode is forked from scheme-complete.el
+;;    Many code is duplicated but specialize to Gauche.
 
 ;;; Code:
 
@@ -963,7 +972,7 @@ This function come from apel"
 (defvar gosh-default-path-e2g nil)
 (defvar gosh-command-alist nil
   "List about command information following order.
-COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
+COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR PATH-TO-EMACS PATH-FROM-EMACS"
   )
 
 (defvar gosh-autoload-modules
@@ -1009,31 +1018,38 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
 
 ;;TODO reconsider this. no need?
 (defun gosh-register-command (command)
-  (let* ((full (gosh--check-command command)))
+  (let ((full (gosh--check-command command)))
     (unless full
       (error "Unable recognize as gosh command %s" command))
-    (or (assoc full gosh-command-alist)
-        (let* ((output (gosh--initialize-command->string full full "-V"))
-               (ver (when (string-match "version[\s\t]+\\([0-9][0-9.]+\\)" output)
-                      (match-string 1 output)))
-               (type (cond
-                      ((string-match "mingw32$" output) 'mingw32)
-                      ((string-match "cygwin$" output) 'cygwin)
-                      (t 'unix)))
-               (sep (case type (mingw32 ";") (t ":")))
-               (repo (let* ((res (gosh--initialize-command->string full "gauche-config" "--syslibdir"))
-                            (res (substring res 0 -1))) ;remove trailing newline
-                       (let* ((dir (file-name-directory res))
-                              (dir2 (file-name-directory
-                                     (directory-file-name dir))))
-                         (directory-file-name dir2))))
-               (g2e (case type (cygwin 'gosh-cygpath->emacs-path) (t 'identity)))
-               (e2g (case type (cygwin 'gosh-emacs-path->cygpath) (t 'identity)))
-               (path (mapcar g2e (gosh-exact-load-path full t)))
-               (item (list full ver repo path type sep g2e e2g)))
-          (setq gosh-command-alist
-                (cons item gosh-command-alist))
-          item))))
+    (let ((key (expand-file-name full)))
+      (or (assoc key gosh-command-alist)
+          (let* ((output (gosh--initialize-command->string full full "-V"))
+                 (ver (when (string-match "version[\s\t]+\\([0-9][0-9.]+\\)" output)
+                        (match-string 1 output)))
+                 (type (cond
+                        ((string-match "mingw32$" output) 'mingw32)
+                        ((string-match "cygwin$" output) 'cygwin)
+                        (t 'unix)))
+                 (sep (case type (mingw32 ";") (t ":")))
+                 (repo (let* ((res (gosh--initialize-command->string full "gauche-config" "--syslibdir"))
+                              (res (substring res 0 -1))) ;remove trailing newline
+                         (let* ((dir (file-name-directory res))
+                                (dir2 (file-name-directory
+                                       (directory-file-name dir))))
+                           (directory-file-name dir2))))
+                 (g2e (case type (cygwin 'gosh-cygpath->emacs-path) (t 'identity)))
+                 (e2g (case type (cygwin 'gosh-emacs-path->cygpath) (t 'identity)))
+                 (path (mapcar g2e (gosh-exact-load-path full t)))
+                 (item (list
+                        ;; FIXME:
+                        ;;  NTEmacs break string contents which indicate exe path destructively.
+                        ;;  e.g. c:/cygwin/bin/hoge.exe -> c:\cygwin\bin\hoge.exe
+                        ;;  Do not use this string.
+                        (copy-sequence key)
+                        ver repo path type sep g2e e2g)))
+            (setq gosh-command-alist
+                  (cons item gosh-command-alist))
+            item)))))
 
 (defun gosh-switch-default-command (command)
   "Switch gosh command (ex: trunk <-> release)"
@@ -1060,19 +1076,6 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR CONVERTER1 CONVERTER1"
           gosh-default-path-separator (nth 5 info)
           gosh-default-path-g2e (nth 6 info)
           gosh-default-path-e2g (nth 7 info))))
-
-;; Execute when loading.
-(defun gosh-initialize ()
-  (gosh-default-initialize)
-  (gosh-ac-initialize)
-  (gosh-info-initialize))
-
-;; called when `unload-feature'
-(defun gosh-mode-unload-function ()
-  (remove-hook 'kill-emacs-hook 'gosh-mode--cleanup-all)
-  (gosh-mode--cleanup-all))
-
-(add-hook 'kill-emacs-hook 'gosh-mode--cleanup-all)
 
 (defcustom gosh-force-from-scheme-mode nil
   "Force to `gosh-mode' no matter what file local variable \"mode:\" is."
@@ -1185,10 +1188,10 @@ to change `scheme-mode' to `gosh-mode'"
     (when dir
       (expand-file-name file dir))))
 
-(defun gosh-file->module (file)
+(defun gosh-file->module (file &optional other-paths)
   (setq file (expand-file-name file))
   (catch 'found
-    (dolist (path (gosh-load-path))
+    (dolist (path (append other-paths (gosh-load-path)))
       (let ((regexp (concat "\\`"
                             (regexp-quote (file-name-as-directory path))
                             "\\(.+\\)\\.scm\\'")))
@@ -1843,7 +1846,17 @@ d:/home == /cygdrive/d/home
                            res))))))
          (export-handler
           (lambda (form)
-            (setq res (append (cdr form) res))))
+            (setq res (append
+                       (mapcar
+                        (lambda (item)
+                          (cond
+                           ((symbolp item) item)
+                           ((eq 'rename (car-safe item))
+                            (nth 2 item))
+                           ;; Unknown
+                           (t nil)))
+                        (cdr form))
+                       res))))
          (export-all-handler
           (lambda ()
             (setq res (append
@@ -1860,12 +1873,17 @@ d:/home == /cygdrive/d/home
              (let ((decls (cddr sexp)))
                (funcall extend-handler (assq 'extend decls))
                (cond
-                ((and (consp decls) (assq 'export decls))
-                 (funcall export-handler (assq 'export decls)))
                 ((and (consp decls) (assq 'export-all decls))
-                 (funcall export-all-handler)))))
+                 (funcall export-all-handler))
+                ((and (consp decls) (assq 'export decls))
+                 (funcall export-handler
+                          (gosh-append-map*
+                           (lambda (decl)
+                             (and (eq 'export (car-safe decl))
+                                  decl))
+                           decls))))))
             ((export export-if-defined)
-             (funcall export-handler (cdr sexp)))
+             (funcall export-handler sexp))
             ((export-all)
              (funcall export-all-handler))
             ((extend)
@@ -1949,7 +1967,7 @@ TODO key should be module-file?? multiple executable make complex.")
               (ctime (nth 2 hit)))
           (> mtime ctime)))
       (setcdr hit nil))
-     ((let ((buf (get-file-buffer file)))
+     ((let ((buf (get-file-buffer (file-truename file))))
         (and buf (buffer-modified-p buf)))
       ;;TODO consider using :modtime property
       (setcdr hit nil)))
@@ -2391,34 +2409,36 @@ Set this variable before open by `gosh-mode'."
 
 (defun gosh-eldoc--canonicalize-order (ls)
   ;; put optional arguments inside brackets (via a vector)
-  (if (memq :optional ls)
-      (let ((res '())
-            (opts '())
-            (kwds '())
-            item)
-        (while ls
-          (setq item (car ls))
-          (setq ls (cdr ls))
-          (cond 
-           ((eq item :optional)
-            (while (and (consp ls)
-                        (not (keywordp (car ls))))
-              (setq opts (cons (car ls) opts))
-              (setq ls (cdr ls))))
-           ((eq item :key)
-            (unless (consp kwds)
-              (setq kwds (cons item kwds)))
-            (while (and (consp ls)
-                        (not (keywordp (car ls))))
-              (setq kwds (cons (car ls) kwds))
-              (setq ls (cdr ls))))
-           ((keywordp item))
-           (t
-            (setq res (cons item res)))))
-        (append (nreverse res)
-                (mapcar 'vector (nreverse opts))
-                (nreverse kwds)))
-    ls))
+  (cond
+   ((memq :optional ls)
+    (let ((res '())
+          (opts '())
+          (kwds '())
+          item)
+      (while ls
+        (setq item (car ls))
+        (setq ls (cdr ls))
+        (cond 
+         ((eq item :optional)
+          (while (and (consp ls)
+                      (not (keywordp (car ls))))
+            (setq opts (cons (car ls) opts))
+            (setq ls (cdr ls))))
+         ((eq item :key)
+          (unless (consp kwds)
+            (setq kwds (cons item kwds)))
+          (while (and (consp ls)
+                      (not (keywordp (car ls))))
+            (setq kwds (cons (car ls) kwds))
+            (setq ls (cdr ls))))
+         ((keywordp item))
+         (t
+          (setq res (cons item res)))))
+      (append (nreverse res)
+              (mapcar 'vector (nreverse opts))
+              (nreverse kwds))))
+   (t
+    ls)))
 
 (defun gosh-eldoc--sexp-rest-arg (sexp)
   (catch 'found
@@ -2561,7 +2581,7 @@ Set this variable before open by `gosh-mode'."
                   (gosh-eldoc--highlight-sexp sexp highlight)
                 (gosh-eldoc--object->string sexp))))))
         ((memq keytype '(parameter variable constant))
-         (format "%s: " (capitalize (symbol-name keytype))))
+         (format "%S: " (capitalize (symbol-name keytype))))
         ((stringp type)
          (concat
           "String: \""
@@ -3182,7 +3202,8 @@ Set this variable before open by `gosh-mode'."
         (let* ((opening (gosh-paren-against-char default-close))
                (actual-open (char-after start))
                (closing (gosh-paren-against-char actual-open)))
-          (unless (eq actual-open opening)
+          (when (and closing
+                     (not (eq actual-open opening)))
             (delete-region (1- (point)) (point))
             (insert closing)))
         (gosh-paren--balance-all-paren)))))
@@ -3301,9 +3322,14 @@ Arg FORCE non-nil means forcely insert bracket."
     (do (*))
     (let (*))
     (let* (*))
+    (glet (*))
+    (glet* (*))
     (let gosh-symbol-p (*))             ; named let
     (letrec (*))
     (and-let* (*))
+    (let-values (*))
+    (let*-values (*))
+    (parameterize (*))
     (case t *)
     (ecase t *)
     (cond *)
@@ -3320,10 +3346,19 @@ Arg FORCE non-nil means forcely insert bracket."
     (match-letrec (*))
 
     (rxmatch-case t *)
-    (rxmatch-cond t *)
+    (rxmatch-cond *)
 
     (let-args t (*))
-    ))
+    (parse-options t (*))
+
+    (let-keywords t (*))
+    (let-keywords* t (*))
+    )
+  "TODO
+`*' match to every member of the paren context.
+`?' match to a sexp.
+`t' simply skip the context to auto bracket process.
+")
 
 ;; `*' point to the cursor position.
 (defun gosh-paren--context-bracket-p (context)
@@ -3333,7 +3368,9 @@ Arg FORCE non-nil means forcely insert bracket."
              (loop for a1 in def
                    for a2 on args
                    if (eq a1 '*)
-                   return (member a1 a2)
+                   return (member '* a2)
+                   else if (eq a1 '\?)
+                   return (eq (car-safe a2) '*)
                    else if (listp a1)
                    return (funcall match-to a1 (car a2))
                    else if (and (functionp a1)
@@ -3374,6 +3411,7 @@ Arg FORCE non-nil means forcely insert bracket."
                           (reverse (nth 9 parsed))))
              (closing (concat parenthese))
              (sexp (gosh-read-first-from-string
+                    ;; Add special character "*" at point
                     (concat partial " *" closing))))
         (and (consp sexp) sexp)))))
 
@@ -3541,9 +3579,40 @@ PROCEDURE-SYMBOL ::= symbol ;
 
 
 ;;;
+;;; Smart import
+;;;
+
+(defun gosh-smart-import-guess-module (alist symbol)
+  (loop for e in alist
+        if (and (assq symbol (cdr-safe e))
+                ;; first element may be module.
+                (gosh-symbol-p (car-safe e)))
+        return (gosh-symbol-name (car-safe e))))
+
+;; -> ALIST (same as `gosh-info-doc--env')
+(defun gosh-smart-import-tree-exports (directory)
+  (mapcar
+   (lambda (file)
+     (cons (intern (gosh-file->module file))
+           (mapcar
+            (lambda (sym)
+              (cons sym nil))
+            (gosh-env-exports-functions file))))
+   (and (file-directory-p directory)
+        (directory-files-recursively directory "\\.scm\\'"))))
+
+(defun gosh-smart-import-search-path-module (path symbol)
+  (let ((alist (gosh-smart-import-tree-exports path)))
+    (gosh-smart-import-guess-module alist symbol)))
+
+
+;;;
 ;;; info integration
 ;;;
 
+;; MODULE-ALIST: MODULE<symbol> . PROCEDURE-ALIST
+;; PROCEDURE-ALIST: PROCEDURE . PROCEDURE-SIGNATURE
+;; PROCEDURE-SIGNATURE: TODO descirbe more
 (defvar gosh-info-doc--env nil)
 
 (defun gosh-info-lookup-add-help (mode)
@@ -3607,15 +3676,21 @@ PROCEDURE-SYMBOL ::= symbol ;
    gosh-info-doc--env))
 
 (defun gosh-info-doc-guess-module (symbol)
-  (loop for e in gosh-info-doc--env
-        if (and (assq symbol (cdr-safe e))
-                ;; first element may be module.
-                (gosh-symbol-p (car-safe e)))
-        return (gosh-symbol-name (car-safe e))))
+  (gosh-smart-import-guess-module gosh-info-doc--env symbol))
+
+(defun gosh-info-doc--get-filename ()
+  ;; `Info-find-file' break current window settings.
+  (save-window-excursion
+    (let ((file (ignore-errors
+                  (Info-find-file "gauche-refe"))))
+      (unless file
+        (message "Gauche info file is not installed?\
+ Otherwise set `Info-additional-directory-list' correctly."))
+      file)))
 
 (defun gosh-info-doc--generate-signatures ()
   (gosh-and*
-      ((infofile (ignore-errors (Info-find-file "gauche-refe")))
+      ((infofile (gosh-info-doc--get-filename))
        (dir (file-name-directory infofile))
        (filename (file-name-nondirectory infofile))
        (files (directory-files dir t (concat "\\`" filename)))
@@ -4820,7 +4895,7 @@ This mode is originated from `scheme-mode' but specialized to edit Gauche code."
 (defun gosh-jump-to-module-globaldef (module symbol forms)
   (when (assq symbol (gosh-cache-module-global-env module))
     (let* ((mod-file (gosh-module->file module))
-           (buf (get-file-buffer mod-file)))
+           (buf (get-file-buffer (file-truename mod-file))))
       (set-buffer (or buf (gosh--find-file-noselect mod-file)))
       (when (gosh-jump-to-globaldef symbol)
         (switch-to-buffer (current-buffer))
@@ -4897,16 +4972,17 @@ This mode is originated from `scheme-mode' but specialized to edit Gauche code."
           (throw 'found t)))
       ;; search imported modules
       (let ((importers (gosh-extract-importers forms)))
-        (dolist (importer importers)
-          (let* ((module (nth 0 importer))
-                 (modprefix (nth 1 importer))
-                 (mod-file (gosh-module->file module))
-                 (symnm2 (substring symnm (length modprefix)))
-                 (sym2 (intern-soft symnm2)))
-            (when (and mod-file
-                       (memq sym2 (gosh-env-exports-functions mod-file)))
-              (when (gosh-jump-to-module-globaldef module sym2 forms)
-                (throw 'found t))))))
+        (loop for (module modprefix) in importers
+              do (gosh-and* ((mod-file (gosh-module->file module))
+                             (prefix-re (concat "\\`" (regexp-quote modprefix)))
+                             ;; no prefix match to every symbol "\\`"
+                             ((string-match prefix-re symnm))
+                             (symnm2 (substring symnm (length modprefix)))
+                             (sym2 (intern-soft symnm2)))
+                   (when (and mod-file
+                              (memq sym2 (gosh-env-exports-functions mod-file)))
+                     (when (gosh-jump-to-module-globaldef module sym2 forms)
+                       (throw 'found t))))))
       ;; jump to module (cursor point as a module name)
       (let ((file (gosh-module->file sym)))
         (when file
@@ -4914,22 +4990,30 @@ This mode is originated from `scheme-mode' but specialized to edit Gauche code."
           (throw 'found t)))
       (message "Not found definition %s" sym))))
 
-(defun gosh-mode-import-module-maybe ()
-  "Import a new module if missing.
+(defun gosh-mode-import-module-maybe (&optional force-all)
+  "Import a new module if missing. If FORCE-ALL is non-nil search on all gauche load-path.
+FORCE-ALL make slow the Emacs, of course.
 
 if define-module is exists then insert statement to the form of `define-module'
 otherwise insert top level of the script."
-  (interactive)
+  (interactive "P")
   (barf-if-buffer-read-only)
   (let* ((sym (gosh-parse-symbol-at-point))
          (cur-module (gosh-parse-current-module))
          mod-target)
+    (unless sym
+      (error "Here is no symbol to import a module"))
     (catch 'found
-      (unless sym (throw 'found 'not-found))
       ;; search imported modules
       (setq mod-target (gosh-info-doc-guess-module sym))
       (when mod-target
         (throw 'found t))
+      (when force-all
+        (dolist (path (gosh-load-path))
+          (gosh--temp-message "Searching on %s" path)
+          (setq mod-target (gosh-smart-import-search-path-module path sym))
+          (when mod-target
+            (throw 'found t))))
       (error "Module for `%s' is not found" sym))
     (gosh-mode--import-module mod-target cur-module)))
 
@@ -5464,6 +5548,23 @@ TODO but not supported with-module context."
   (ad-update 'scheme-mode))
 
 (add-hook 'gosh-mode-cleanup-hook 'gosh-deactivate-advice)
+
+
+
+;; Execute when loading.
+(defun gosh-initialize ()
+  (gosh-default-initialize)
+  (gosh-ac-initialize)
+  (gosh-info-initialize))
+
+;; called when `unload-feature'
+(defun gosh-mode-unload-function ()
+  (remove-hook 'kill-emacs-hook 'gosh-mode--cleanup-all)
+  (gosh-mode--cleanup-all)
+  ;; explicitly return nil
+  nil)
+
+(add-hook 'kill-emacs-hook 'gosh-mode--cleanup-all)
 
 
 

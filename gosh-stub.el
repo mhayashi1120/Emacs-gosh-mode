@@ -1,7 +1,7 @@
 ;;; gosh-stub.el --- Programming language gauche stub editing tools.
 
 ;; Author: Masahiro Hayashi <mhayashi1120@gmail.com>
-;; URL: https://github.com/mhayashi1120/Emacs-gosh-mode/raw/master/gosh-stub.el
+;; URL: https://github.com/mhayashi1120/Emacs-gosh-mode
 
 ;; This program is free software; you can redistribute it and/or
 ;; modify it under the terms of the GNU General Public License as
