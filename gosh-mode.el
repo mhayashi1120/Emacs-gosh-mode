@@ -3582,15 +3582,8 @@ PROCEDURE-SYMBOL ::= symbol ;
 ;;; Smart import
 ;;;
 
-(defun gosh-smart-import-guess-module (alist symbol)
-  (loop for e in alist
-        if (and (assq symbol (cdr-safe e))
-                ;; first element may be module.
-                (gosh-symbol-p (car-safe e)))
-        return (gosh-symbol-name (car-safe e))))
-
 ;; -> ALIST (same as `gosh-info-doc--env')
-(defun gosh-smart-import-tree-exports (directory)
+(defun gosh-smart-import--exports-in-path (directory)
   (mapcar
    (lambda (file)
      (cons (intern (gosh-file->module file))
@@ -3601,9 +3594,30 @@ PROCEDURE-SYMBOL ::= symbol ;
    (and (file-directory-p directory)
         (directory-files-recursively directory "\\.scm\\'"))))
 
-(defun gosh-smart-import-search-path-module (path symbol)
-  (let ((alist (gosh-smart-import-tree-exports path)))
+(defun gosh-smart-import--search-in-path (path symbol)
+  (let ((alist (gosh-smart-import--exports-in-path path)))
     (gosh-smart-import-guess-module alist symbol)))
+
+(defun gosh-smart-import-guess-module (alist symbol)
+  (loop for e in alist
+        if (and (assq symbol (cdr-safe e))
+                ;; first element may be module.
+                (gosh-symbol-p (car-safe e)))
+        return (gosh-symbol-name (car-safe e))))
+
+(defun gosh-smart-import-search-module (sym force-all)
+  (catch 'found
+    ;; search imported modules
+    (let ((module (gosh-info-doc-guess-module sym)))
+      (when module
+        (throw 'found module))
+      (when force-all
+        (dolist (path (gosh-load-path))
+          (gosh--temp-message "Searching on %s" path)
+          (setq module (gosh-smart-import--search-in-path path sym))
+          (when module
+            (throw 'found module)))))
+    (error "Module for `%s' is not found" sym)))
 
 
 ;;;
@@ -4511,6 +4525,7 @@ CHECK is function that accept no arg and return boolean."
 
     (define-key map "\M-\C-i" 'gosh-smart-complete)
     (define-key map "\C-c\M-I" 'gosh-mode-import-module-maybe)
+    (define-key map "\C-c\M-A" 'gosh-mode-autoload-module-maybe)
     (define-key map "\C-c\C-j" 'gosh-mode-jump)
     (define-key map "\C-c\C-u" 'gosh-test-module)
     (define-key map "\C-c?" 'gosh-info-show-index)
@@ -4668,7 +4683,7 @@ This mode is originated from `scheme-mode' but specialized to edit Gauche code."
   (message "Module %s is imported now." module)
   (sit-for 0.5))
 
-(defun gosh-mode--import-module (target module)
+(defun gosh-mode--import-module (target current-module)
   (save-excursion
     (goto-char (point-min))
     (cond
@@ -4688,7 +4703,7 @@ This mode is originated from `scheme-mode' but specialized to edit Gauche code."
         )))
      ((re-search-forward "^ *\\((use\\_>\\)" nil t) ; first `use' statements
       (gosh-mode--insert-use-statement target))
-     ((let* ((qmodule (regexp-quote module))
+     ((let* ((qmodule (regexp-quote current-module))
              (regexp (format "^ *(define-module[\s\t]+%s[\s\t\n]" qmodule)))
         (re-search-forward regexp nil t))
       (forward-line 0)
@@ -4696,7 +4711,20 @@ This mode is originated from `scheme-mode' but specialized to edit Gauche code."
      ((re-search-forward "^ *(" nil t)  ; first statement
       (gosh-mode--insert-use-statement target))
      (t
-      (error "Unable find properly point to insert use statement")))))
+      (error "Unable find properly point to insert `use' statement")))))
+
+(defun gosh-mode--autoload-procedure (symbol module)
+  (save-excursion
+    (let ((init-point (point)))
+      (goto-char (point-min))
+      (cond
+       ((progn
+          (goto-char init-point)
+          (re-search-backward "^(" nil t))
+        (forward-line -1)
+        (insert (format "(autoload %s %s)\n" module symbol)))
+       (t
+        (error "Unable find properly point to insert `autoload' statement"))))))
 
 ;;
 ;; font-lock
@@ -5000,22 +5028,24 @@ otherwise insert top level of the script."
   (barf-if-buffer-read-only)
   (let* ((sym (gosh-parse-symbol-at-point))
          (cur-module (gosh-parse-current-module))
-         mod-target)
+         module)
     (unless sym
       (error "Here is no symbol to import a module"))
-    (catch 'found
-      ;; search imported modules
-      (setq mod-target (gosh-info-doc-guess-module sym))
-      (when mod-target
-        (throw 'found t))
-      (when force-all
-        (dolist (path (gosh-load-path))
-          (gosh--temp-message "Searching on %s" path)
-          (setq mod-target (gosh-smart-import-search-path-module path sym))
-          (when mod-target
-            (throw 'found t))))
-      (error "Module for `%s' is not found" sym))
-    (gosh-mode--import-module mod-target cur-module)))
+    (setq module (gosh-smart-import-search-module sym force-all))
+    (gosh-mode--import-module module cur-module)))
+
+(defun gosh-mode-autoload-module-maybe (&optional force-all)
+  "Add autoload if missing. If FORCE-ALL is non-nil search on all gauche load-path.
+FORCE-ALL make slow the Emacs, of course.
+"
+  (interactive "P")
+  (barf-if-buffer-read-only)
+  (let* ((sym (gosh-parse-symbol-at-point))
+         module)
+    (unless sym
+      (error "Here is no symbol to import a module"))
+    (setq module (gosh-smart-import-search-module sym force-all))
+    (gosh-mode--autoload-procedure sym module)))
 
 
 ;;;
