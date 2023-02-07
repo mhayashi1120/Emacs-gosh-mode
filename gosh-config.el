@@ -22,7 +22,7 @@
 ;;
 
 ;; This module provides quick configurations for user. todo
-;; 
+;;
 
 ;;; Code:
 
@@ -104,7 +104,7 @@
 (put 'call-with-string-io 'scheme-indent-function 1)
 (put 'with-ports 'scheme-indent-function 3)
 
-;; 
+;;
 (put 'begin0 'scheme-indent-function 1)
 
 ;; TODO incorrect at partical-scheme?

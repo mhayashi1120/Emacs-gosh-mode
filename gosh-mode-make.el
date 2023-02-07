@@ -2,16 +2,16 @@
 
 
 ;;; History:
-;; 
+;;
 
 ;;; Commentary:
-;; 
+;;
 
 ;;; Code:
 
 
 
-(setq ALL-MODULES 
+(setq ALL-MODULES
       (list
        "gosh-config.el"
        "gosh-mode.el"
@@ -24,7 +24,7 @@
 ;;      (append ALL-MODULES (list "fsvn-win.el")))
 ;;   (unless (featurep 'meadow)
 ;;     (setq ALL-MODULES
-;;      (append ALL-MODULES (list 
+;;      (append ALL-MODULES (list
 ;;                           "mw32cmp.el"
 ;;                           "mw32script.el"
 ;;                           )))))

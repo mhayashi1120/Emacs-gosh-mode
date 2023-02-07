@@ -2,7 +2,7 @@
 
 
 ;;; Commentary:
-;; 
+;;
 
 ;;; Code:
 
@@ -36,7 +36,7 @@
               (error
                (let ((text (buffer-substring start (point))))
                  (signal (car err) (list (format "%s %s" text (cdr err))))))))))
-    (error 
+    (error
      (insert (format "File: %s Error: %s\n" file err)))))
 
 (provide 'gosh-dev)

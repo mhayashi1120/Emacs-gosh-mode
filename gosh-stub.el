@@ -53,17 +53,17 @@
 
     "include" "initcode" "declcode" "begin" "eval*"
     "code" "call" "expr" "body"
-    "result" "return" 
+    "result" "return"
 
     "when" "unless" "else" "cond" "case" "case/fallthrough"
     "for" "loop" "for-each" "dolist" "pair-for-each" "dopairs" "dotimes"
 
     "break" "continue" "label" "goto"
-    
+
     ".if" ".cond" ".undef" ".include"
 
     "cast"
-    
+
     "*" "&" "->" "ref"
     ))
 

@@ -73,7 +73,7 @@
   (should (equal (gosh-read-first-from-string "#[1]") [charset "1"]))
   (should (equal (gosh-read-first-from-string "#[b[:alpha:]a]") [charset "b[:alpha:]a"]))
   (should (equal (gosh-read-first-from-string "#[[:graph:]]") [charset "[:graph:]"]))
-  
+
   (should (equal (gosh-read-first-from-string "#[]") [charset ""]))
 
   ;;TODO
@@ -85,7 +85,7 @@
 
   (should (equal (gosh-read-first-from-string "(#3=(1 2) #3#)") '((1 2) [back-reference 3])))
   (should (equal (gosh-read-first-from-string "#,(1 2)") '[reader-constructor (1 2)]))
-  
+
   ;;TODO what should i do?
   (should (equal (gosh-read-first-from-string "||")  '##))
 
@@ -102,8 +102,8 @@
   (let ((parenthese
          (lambda (count)
            (goto-char (point-min))
-           (loop repeat count
-                 do (re-search-forward "[[(]" nil t))
+           (cl-loop repeat count
+                    do (re-search-forward "[[(]" nil t))
            (backward-char))))
     (with-temp-buffer
       (insert "(let (()) (()))")
@@ -160,7 +160,7 @@
   (gosh-mode-test-funcall-in-text func (prin1-to-string sexp)))
 
 (defun gosh-mode-test-parse-local-vars (sexp result)
-  (should 
+  (should
    (equal
     (gosh-mode-test-funcall-in-sexp 'gosh-extract-local-vars sexp)
     result)))
@@ -304,7 +304,7 @@
                   (lambda (x) (list x (* x 2)))
                   '(1 2 3 . 4))))
   (should (equal '(1 2 2 4 3 6 4 8)
-                 (gosh-append-map 
+                 (gosh-append-map
                   (lambda (x) (list x (* x 2)))
                   '(1 2 3 4))))
   )
