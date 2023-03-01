@@ -1639,7 +1639,7 @@ d:/home == /cygdrive/d/home
                     (gosh-extract--put-var vars (car var-expr) nil)))
                  ((receive)
                   (gosh-extract--simple-args vars (nth 1 sexp)))
-                 ((define define-constant)
+                 ((define define-constant define-inline)
                   ;;TODO if inner definitions
                   ;; (gosh-extract--put-var vars (car (nth 1 sexp))
                   (when (consp (nth 1 sexp))
@@ -1763,7 +1763,7 @@ d:/home == /cygdrive/d/home
        (let* ((name (car-safe body))
               (args (car (cdr-safe body))))
          `((,name (lambda ,args)))))
-      ((define define-constant)
+      ((define define-constant define-inline)
        (let* ((first (car-safe body)))
          (cond
           ((consp first)
@@ -4794,7 +4794,7 @@ This mode is originated from `scheme-mode' but specialized to edit Gauche code."
            `(
              ,(concat
                "(\\(define\\*?\\(?:"
-               "\\(-constant\\)"
+               "\\(-constant\\|-inline\\)"
                "\\)\\)\\_>[\s\t]*(?\\([^\s\t\n]+\\)"
                )
              (1 font-lock-keyword-face)

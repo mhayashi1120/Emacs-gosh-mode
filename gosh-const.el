@@ -31,6 +31,7 @@
   '(
     ;; define methods
     "define-condition-type"
+    "define-inline"
     "define-in-module" "define-record-type" "define-values"
 
     "export" "export-if-defined" "export-all"
