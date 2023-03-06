@@ -329,7 +329,8 @@ This function come from apel"
            (unwind-protect
                (setq ,res (ignore-errors (save-excursion ,@body)))
              (unless ,buf
-               (kill-buffer (current-buffer))))
+               (when (string= (buffer-file-name ,buf) ,path)
+                 (kill-buffer (current-buffer)))))
            ,res)))))
 
 (defun gosh-file-mtime (file)
