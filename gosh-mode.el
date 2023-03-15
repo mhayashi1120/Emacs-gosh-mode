@@ -1709,17 +1709,18 @@ d:/home == /cygdrive/d/home
     (dolist (importer importers)
       (ignore-errors
         (let ((syms
-               (let ((module (nth 0 importer))
-                     (prefix (nth 1 importer)))
-                 (mapcar
-                  (lambda (d)
-                    (cond
-                     ((gosh-symbol-p (car d))
-                      (let* ((dname (gosh-symbol-name (car d)))
-                             (fullsym (intern (concat prefix dname))))
-                        (cons fullsym (cdr d))))
-                     (t d)))
-                  (gosh-cache-module-export-env module)))))
+               (pcase importer
+                 (`(,module ,prefix)
+                  (mapcar
+                   (lambda (d)
+                     (pcase d
+                       (`(,(and (pred gosh-symbol-p) name) . ,body)
+                        (let* ((dname (gosh-symbol-name name))
+                               (fullsym (intern (concat prefix dname))))
+                          (cons fullsym body)))
+                       ;; import asis (means no :prefix)
+                       (asis asis)))
+                   (gosh-cache-module-export-env module))))))
           (setq res (append syms res)))))
     res))
 
@@ -2010,7 +2011,8 @@ TODO key should be module-file?? multiple executable make complex.")
 (defun gosh-cache-module-export-env (module)
   (let ((mname (symbol-name module)))
     (cond
-     ((and (gosh-symbol-p module) (string-match "^srfi-\\([0-9]+\\)$" mname))
+     ((and (gosh-symbol-p module)
+           (string-match "^srfi-\\([0-9]+\\)$" mname))
       (let ((srfi-n (string-to-number (match-string 1 mname))))
         (gosh-env--srfi-exports srfi-n)))
      (t
@@ -2074,7 +2076,7 @@ TODO key should be module-file?? multiple executable make complex.")
                       (gosh-cache-file-forms buffer-file-name))
                  (gosh-parse-read-all)))
          (importers (gosh-extract-importers forms)))
-    ;; base language
+    ;; language basics
     (let ((base (ignore-errors
                   (gosh-info-doc-env (if for-completion t importers)))))
       (when base
@@ -2088,6 +2090,10 @@ TODO key should be module-file?? multiple executable make complex.")
     (let ((top (ignore-errors (gosh-extract-globals forms nil))))
       (when top
         (push top env)))
+    ;; autoload defs
+    ;; (let ((autoload (ignore-errors (gosh-extract-autoloads forms))))
+    ;;   (when autoload
+    ;;     (push autoload env)))
     ;; current local vars
     (let ((locals (ignore-errors (gosh-extract-local-vars env))))
       (when locals
@@ -2140,7 +2146,7 @@ TODO key should be module-file?? multiple executable make complex.")
        ((or
          (> (length s) (length res))
          (and (= (length s) (length res))
-              ;;FIXME TODO....
+              ;;FIXME TODO refactor....
               (consp (cadr s))
               (consp (cadr res))
               (eq 'lambda (caadr s))
