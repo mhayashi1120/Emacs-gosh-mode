@@ -1032,15 +1032,21 @@ COMMAND VERSION SYSLIBDIR LOAD-PATH TYPE PATH-SEPRATOR PATH-TO-EMACS PATH-FROM-E
                         ((string-match "mingw32$" output) 'mingw32)
                         ((string-match "cygwin$" output) 'cygwin)
                         (t 'unix)))
-                 (sep (cl-case type (mingw32 ";") (t ":")))
+                 (sep (cl-case type
+                        ((mingw32) ";")
+                        (t ":")))
                  (repo (let* ((res (gosh--initialize-command->string full "gauche-config" "--syslibdir"))
                               (res (substring res 0 -1))) ;remove trailing newline
                          (let* ((dir (file-name-directory res))
                                 (dir2 (file-name-directory
                                        (directory-file-name dir))))
                            (directory-file-name dir2))))
-                 (g2e (cl-case type (cygwin 'gosh-cygpath->emacs-path) (t 'identity)))
-                 (e2g (cl-case type (cygwin 'gosh-emacs-path->cygpath) (t 'identity)))
+                 (g2e (cl-case type
+                        ((cygwin) 'gosh-cygpath->emacs-path)
+                        (t 'identity)))
+                 (e2g (cl-case type
+                        ((cygwin) 'gosh-emacs-path->cygpath)
+                        (t 'identity)))
                  (path (mapcar g2e (gosh-exact-load-path full t)))
                  (item (list
                         ;; FIXME:
@@ -1723,16 +1729,15 @@ d:/home == /cygdrive/d/home
   (gosh-append-map 'gosh-extract--importer forms))
 
 (defun gosh-extract--importer (sexp)
-  (cl-case (car-safe sexp)
-    ((begin define-module)
-     (gosh-append-map 'gosh-extract--importer (cdr sexp)))
-    ((cond-expand)
+  (pcase sexp
+    (`(,(or 'begin 'define-module) . ,body)
+     (gosh-append-map 'gosh-extract--importer body))
+    (`(cond-expand . ,body)
      (gosh-append-map 'gosh-extract--importer
-                      (gosh-append-map 'cdr (cdr sexp))))
-    ((use import)
-     (gosh-and* ((module (nth 1 sexp))
-                 ((gosh-symbol-p module)))
-       (let* ((gprefix (cadr (memq :prefix sexp)))
+                      (gosh-append-map 'cdr body)))
+    (`(,(or 'use 'import) ,module . ,opts)
+     (gosh-and* (((gosh-symbol-p module)))
+       (let* ((gprefix (cadr (memq :prefix opts)))
               (prefix (cond
                        ((and gprefix (gosh-symbol-p gprefix))
                         (symbol-name gprefix))
@@ -1740,14 +1745,13 @@ d:/home == /cygdrive/d/home
                         gprefix)
                        (t ""))))
          (list (list module prefix)))))
-    ((require)
-     (gosh-and* ((mpath (nth 1 sexp))
-                 ((stringp mpath))
+    (`(require ,mpath . ,_)
+     (gosh-and* (((stringp mpath))
                  (mname (subst-char-in-string ?/ ?. mpath))
                  (module (intern mname)))
        (list (list module ""))))
-    ((require-extension)
-     (gosh-append-map 'gosh-extract--importer (cdr sexp)))))
+    (`(require-extension . ,body)
+     (gosh-append-map 'gosh-extract--importer body))))
 
 (defun gosh-extract--slot-members (slots)
   (mapcar
@@ -4367,21 +4371,21 @@ HIGHLIGHT is a marker to make be explicitly the target is."
                             (let ((query (or no-confirm
                                              (gosh-refactor--query "Rename: "))))
                               (cl-case query
-                                ('yes
+                                ((yes)
                                  (gosh-refactor--replace-string ov new-string))
-                                ('no
+                                ((no)
                                  (gosh-refactor--mark-as-finished ov))
-                                ('quit
+                                ((quit)
                                  (setq done t)
                                  (cl-return))
-                                ('all-of-buffer
+                                ((all-of-buffer)
                                  (gosh-refactor--replace-string ov new-string)
                                  (sit-for 0.2)
                                  (setq start (save-excursion
                                                (gosh-refactor--goto-toplevel)
                                                (point)))
                                  (setq no-confirm query))
-                                ('all-of-highlight
+                                ((all-of-highlight)
                                  (gosh-refactor--replace-string ov new-string)
                                  (sit-for 0.2)
                                  (setq no-confirm query))))
