@@ -1352,7 +1352,10 @@
    ])
 
 (defvar *gosh-undocumented-info*
-  '((report-error (lambda (err)))))
+  '(
+    (report-error (lambda (err)))
+    (warn (lambda (fmt . args)))
+    ))
 
 
 
