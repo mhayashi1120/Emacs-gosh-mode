@@ -1749,6 +1749,17 @@ d:/home == /cygdrive/d/home
     ((require-extension)
      (gosh-append-map 'gosh-extract--importer (cdr sexp)))))
 
+(defun gosh-extract--slot-members (slots)
+  (mapcar
+   (lambda (x)
+     (pcase x
+       ((and (pred atom) name)
+        (list name))
+       (`(,name . ,_)
+        (list name))
+       (_ nil)))
+   slots))
+
 (defun gosh-extract-definition (sexp)
   (pcase sexp
     (`(define-syntax ,name . ,_)
@@ -1775,14 +1786,14 @@ d:/home == /cygdrive/d/home
      ;; TODO format slots
      `((,name (class ,super ,slots))))
     (`(define-record-type ,type-spec ,_ctor ,_pred . ,members)
-     ;; TODO format slots
-     (pcase type-spec
-       ((and (pred atom) name)
-        `((,name (class nil ,members))))
-       (`(,name . _)
-        `((,name (class nil ,members))))
-       (_
-        nil)))
+     (let ((members* (gosh-extract--slot-members members)))
+       (pcase type-spec
+         ((and (pred atom) name)
+          `((,name (class nil ,members*))))
+         (`(,name . _)
+          `((,name (class nil ,members*))))
+         (_
+          nil))))
     (`((or 'begin 'begin0) . ,body)
      (gosh-append-map 'gosh-extract-definition body))
     (_
