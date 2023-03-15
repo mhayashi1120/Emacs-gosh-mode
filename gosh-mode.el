@@ -1881,27 +1881,25 @@ d:/home == /cygdrive/d/home
 
     (ignore-errors
       (dolist (sexp forms)
-        (let ((fnsym (car-safe sexp)))
-          (cl-case fnsym
-            ((define-module)
-             (let ((decls (cddr sexp)))
-               (funcall extend-handler (assq 'extend decls))
-               (cond
-                ((and (consp decls) (assq 'export-all decls))
-                 (funcall export-all-handler))
-                ((and (consp decls) (assq 'export decls))
-                 (funcall export-handler
-                          (gosh-append-map*
-                           (lambda (decl)
-                             (and (eq 'export (car-safe decl))
-                                  decl))
-                           decls))))))
-            ((export export-if-defined)
-             (funcall export-handler sexp))
-            ((export-all)
+        (pcase sexp
+          (`(define-module ,_ . ,decls)
+           (funcall extend-handler (assq 'extend decls))
+           (cond
+            ((and (consp decls) (assq 'export-all decls))
              (funcall export-all-handler))
-            ((extend)
-             (funcall extend-handler sexp))))))
+            ((and (consp decls) (assq 'export decls))
+             (funcall export-handler
+                      (gosh-append-map*
+                       (lambda (decl)
+                         (and (eq 'export (car-safe decl))
+                              decl))
+                       decls)))))
+          ((or 'export 'export-if-defined)
+           (funcall export-handler sexp))
+          ((or 'export-all)
+           (funcall export-all-handler))
+          ((or 'extend)
+           (funcall extend-handler sexp)))))
     res))
 
 (defun gosh-extract-exported-definitions (forms)
