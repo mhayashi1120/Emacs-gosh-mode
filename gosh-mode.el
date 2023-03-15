@@ -1718,10 +1718,31 @@ d:/home == /cygdrive/d/home
                         (let* ((dname (gosh-symbol-name name))
                                (fullsym (intern (concat prefix dname))))
                           (cons fullsym body)))
-                       ;; import asis (means no :prefix)
                        (asis asis)))
                    (gosh-cache-module-export-env module))))))
           (setq res (append syms res)))))
+    res))
+
+(defun gosh-extract-autoloads (forms)
+  (let ((res '()))
+    (dolist (sexp forms)
+      (pcase sexp
+        (`(autoload ,module . ,members)
+         (let ((env (gosh-cache-module-export-env module)))
+           (dolist (m members)
+             (pcase m
+               ((and (pred gosh-symbol-p) name)
+                (pcase (assq name env)
+                  (`(,_)
+                   (pcase (assq module gosh-info-doc--env)
+                     (`(,_ . ,docs)
+                      (pcase (assq name docs)
+                        (`(,_ ,body)
+                         (setq res (cons (list name body) res)))
+                        (_
+                         (setq res (cons (list name) res)))))))
+                  (`(,_ ,body)
+                   (setq res (cons (list name body) res)))))))))))
     res))
 
 (defun gosh-extract-importers (forms)
@@ -1831,7 +1852,7 @@ d:/home == /cygdrive/d/home
                        parents)
                       res))))
         (`(autoload ,module . ,members)
-         (let ((env (ignore-errors (gosh-cache-module-export-env module))))
+         (let ((env (gosh-cache-module-export-env module)))
            (setq res (append
                       (mapcar
                        (lambda (sym)
@@ -1869,7 +1890,7 @@ d:/home == /cygdrive/d/home
                             (`(rename ,_source ,exported)
                              exported)
                             ;; Unknown
-                            (t nil)))
+                            (_ nil)))
                         (cdr form))
                        res))))
          (export-all-handler
@@ -2091,9 +2112,9 @@ TODO key should be module-file?? multiple executable make complex.")
       (when top
         (push top env)))
     ;; autoload defs
-    ;; (let ((autoload (ignore-errors (gosh-extract-autoloads forms))))
-    ;;   (when autoload
-    ;;     (push autoload env)))
+    (let ((autoload (ignore-errors (gosh-extract-autoloads forms))))
+      (when autoload
+        (push autoload env)))
     ;; current local vars
     (let ((locals (ignore-errors (gosh-extract-local-vars env))))
       (when locals
@@ -5117,7 +5138,7 @@ FORCE-ALL make slow the Emacs, of course.
 (define-minor-mode gosh-eval-mode
   "Gosh sticky process mode.
 Evaluate s-expression, syntax check, etc."
-  nil nil gosh-eval-mode-map
+  :keymap gosh-eval-mode-map
   (if gosh-eval-mode
       (add-hook 'gosh-mode-timer-functions 'gosh-eval-backend-watcher nil t)
     (remove-hook 'gosh-mode-timer-functions 'gosh-eval-backend-watcher t))
