@@ -53,6 +53,7 @@
 (require 'scheme)
 (require 'cmuscheme)
 (require 'info-look)
+(require 'pcase)
 
 (defvar path-separator)
 (defvar process-environment)
@@ -1749,46 +1750,43 @@ d:/home == /cygdrive/d/home
      (gosh-append-map 'gosh-extract--importer (cdr sexp)))))
 
 (defun gosh-extract-definition (sexp)
-  (let ((fnsym (car-safe sexp))
-        (body (cdr-safe sexp)))
-    (cl-case fnsym
-      ((define-syntax)
-       (let ((name (nth 0 body)))
-         `((,name (syntax)))))
-      ((define-macro)
-       (let* ((sig (nth 0 body))
-              (name (car sig))
-              (args (cdr sig)))
-         `((,name (syntax ,args)))))
-      ((define-method)
-       (let* ((name (car-safe body))
-              (args (car (cdr-safe body))))
-         `((,name (lambda ,args)))))
-      ((define define-constant define-inline)
-       (let* ((first (car-safe body)))
-         (cond
-          ((consp first)
-           `((,(car first) (lambda ,(cdr first)))))
-          ((and (atom first) (cdr body))
-           `((,first ,(car-safe (cdr body))))))))
-      ((define-class)
-       (let ((name (nth 0 body))
-             (super (nth 1 body))
-             (slots (nth 2 body)))
-         `((,name (class ,super ,slots)))))
-      ((define-condition-type)
-       (let ((name (nth 0 body))
-             (super `(,(nth 1 body)))
-             (slots (nthcdr 3 body)))
-         `((,name (class ,super ,slots)))))
-      ((define-record-type)
-       (let ((name (nth 0 body))
-             (members (nthcdr 3 body)))
-         `((,name (class nil ,members)))))
-      ((begin begin0)
-       (gosh-append-map 'gosh-extract-definition body))
-      (t
-       '()))))
+  (pcase sexp
+    (`(define-syntax ,name . ,_)
+     `((,name (syntax))))
+    (`(define-macro (,name . ,args) . ,_)
+     `((,name (syntax ,args))))
+    (`(define-method ,name ,args . ,_)
+     `((,name (lambda ,args))))
+    (`(,(or 'define 'define-constant 'define-inline)
+       ,first . ,body)
+     (pcase first
+       (`(,name . ,args)
+        `((,name (lambda ,args))))
+       ((pred atom)
+        (pcase body
+          (`(,value . ,_)
+           `((,first ,value)))
+          (_ nil)))
+       (_ nil)))
+    (`(define-class ,name ,super ,slots . ,_)
+     ;; TODO format slots
+     `((,name (class ,super ,slots))))
+    (`(define-condition-type ,name ,super ,_pred . ,slots)
+     ;; TODO format slots
+     `((,name (class ,super ,slots))))
+    (`(define-record-type ,type-spec ,_ctor ,_pred . ,members)
+     ;; TODO format slots
+     (pcase type-spec
+       ((and (pred atom) name)
+        `((,name (class nil ,members))))
+       (`(,name . _)
+        `((,name (class nil ,members))))
+       (_
+        nil)))
+    (`((or 'begin 'begin0) . ,body)
+     (gosh-append-map 'gosh-extract-definition body))
+    (_
+     '())))
 
 (defun gosh-extract-base-modules (forms)
   (let ((extends (cdr
@@ -1850,12 +1848,13 @@ d:/home == /cygdrive/d/home
             (setq res (append
                        (mapcar
                         (lambda (item)
-                          (cond
-                           ((symbolp item) item)
-                           ((eq 'rename (car-safe item))
-                            (nth 2 item))
-                           ;; Unknown
-                           (t nil)))
+                          (pcase item
+                            ((pred symbolp)
+                             item)
+                            (`(rename ,_source ,exported)
+                             exported)
+                            ;; Unknown
+                            (t nil)))
                         (cdr form))
                        res))))
          (export-all-handler
