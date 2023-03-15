@@ -1826,10 +1826,14 @@ d:/home == /cygdrive/d/home
                        parents)
                       res))))
         (`(autoload ,module . ,members)
-         ;;TODO resolve
-         (setq res (append
-                    (mapcar (lambda (x) (list x)) members)
-                    res)))
+         (let ((env (ignore-errors (gosh-cache-module-export-env module))))
+           (setq res (append
+                      (mapcar
+                       (lambda (sym)
+                         (or (assq sym env)
+                             (list sym)))
+                       members)
+                      res))))
         (_
          (setq res
                (append
