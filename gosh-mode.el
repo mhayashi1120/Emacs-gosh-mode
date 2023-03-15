@@ -1809,37 +1809,32 @@ d:/home == /cygdrive/d/home
 (defun gosh-extract-globals (forms &optional only-current)
   (let ((res '()))
     (dolist (sexp forms)
-      (let ((fnsym (car-safe sexp)))
-        (cl-case fnsym
-          ((define-module)
-           (unless only-current
-             (let* ((body (cdr-safe sexp))
-                    (parents (cdr (assq 'extend body))))
-               (setq res (append
-                          (gosh-append-map
-                           'gosh-cache-module-global-env
-                           parents)
-                          res)))))
-          ((extend)
-           (unless only-current
-             (let* ((body (cdr-safe sexp))
-                    (parents (cdr body)))
-               (setq res (append
-                          (gosh-append-map
-                           'gosh-cache-module-global-env
-                           parents)
-                          res)))))
-          ((autoload)
-           (let* ((body (cdr-safe sexp)))
-             ;;TODO resolve
+      (pcase sexp
+        (`(define-module ,_ . ,body)
+         (unless only-current
+           (let ((parents (cdr (assq 'extend body))))
              (setq res (append
-                        (mapcar (lambda (x) (list x)) (cdr body))
-                        res))))
-          (t
-           (setq res
-                 (append
-                  (ignore-errors (gosh-extract-definition sexp))
-                  res))))))
+                        (gosh-append-map
+                         'gosh-cache-module-global-env
+                         parents)
+                        res)))))
+        (`(extend . ,parents)
+         (unless only-current
+           (setq res (append
+                      (gosh-append-map
+                       'gosh-cache-module-global-env
+                       parents)
+                      res))))
+        (`(autoload ,module . ,members)
+         ;;TODO resolve
+         (setq res (append
+                    (mapcar (lambda (x) (list x)) members)
+                    res)))
+        (_
+         (setq res
+               (append
+                (ignore-errors (gosh-extract-definition sexp))
+                res)))))
     res))
 
 (defun gosh-extract-exports (forms &optional only-current env)
