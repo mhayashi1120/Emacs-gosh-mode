@@ -3,8 +3,9 @@
 ;; Author: Masahiro Hayashi <mhayashi1120@gmail.com>
 ;; Keywords: lisp gauche scheme edit
 ;; URL: https://github.com/mhayashi1120/Emacs-gosh-mode
-;; Emacs: GNU Emacs 23 or later
+;; Emacs: GNU Emacs 28 or later
 ;; Version: 0.3.2
+;; Package-Requires: ((emacs "28.1"))
 
 ;; This program is free software; you can redistribute it and/or
 ;; modify it under the terms of the GNU General Public License as
@@ -72,45 +73,6 @@
 ;;;;
 ;;;; utilities
 ;;;;
-
-;; [SRFI-2]
-;; http://srfi.schemers.org/srfi-2/srfi-2.html
-;;
-;; AND-LET* (CLAWS) BODY
-
-;; CLAWS ::= '() | (cons CLAW CLAWS)
-;; CLAW  ::=  (VARIABLE EXPRESSION) | (EXPRESSION) | BOUND-VARIABLE
-(defmacro gosh-and* (varlist &rest body)
-  (declare (indent 1) (debug t))
-  (cl-reduce
-   (lambda (v res)
-     (cond
-      ((atom v)
-       ;; BOUND-VARIABLE
-       `(and ,v ,res))
-      ((= (length v) 1)
-       ;; (EXPRESSION)
-       `(and ,@v ,res))
-      ((> (length v) 2)
-       (error "Malformed `and-let*'"))
-      ((not (symbolp (car v)))
-       (error "Malformed `and-let*'"))
-      (t
-       ;; (VARIABLE EXPRESSION)
-       `(let ((,(car v) ,(cadr v)))
-          (and ,(car v) ,res)))))
-   varlist
-   :from-end t
-   :initial-value `(progn ,@body)))
-
-;;TODO FIXME for suppress edebug error
-(put 'gosh-and* 'edebug-form-spec nil)
-
-(defmacro gosh-if-let1 (var expr then &rest else)
-  "Anaphoric if. Temporary variable `it' is the result of test-form."
-  (declare (indent 2))
-  `(let ((,var ,expr))
-     (if ,var ,then ,@else)))
 
 (defun gosh-goto-line (line)
   (save-restriction
@@ -1758,7 +1720,7 @@ d:/home == /cygdrive/d/home
      (gosh-append-map 'gosh-extract--importer
                       (gosh-append-map 'cdr body)))
     (`(,(or 'use 'import) ,module . ,opts)
-     (gosh-and* (((gosh-symbol-p module)))
+     (and-let* (((gosh-symbol-p module)))
        (let* ((gprefix (cadr (memq :prefix opts)))
               (prefix (cond
                        ((and gprefix (gosh-symbol-p gprefix))
@@ -1768,9 +1730,9 @@ d:/home == /cygdrive/d/home
                        (t ""))))
          (list (list module prefix)))))
     (`(require ,mpath . ,_)
-     (gosh-and* (((stringp mpath))
-                 (mname (subst-char-in-string ?/ ?. mpath))
-                 (module (intern mname)))
+     (and-let* (((stringp mpath))
+                (mname (subst-char-in-string ?/ ?. mpath))
+                (module (intern mname)))
        (list (list module ""))))
     (`(require-extension . ,body)
      (gosh-append-map 'gosh-extract--importer body))))
@@ -2405,8 +2367,8 @@ Set this variable before open by `gosh-mode'."
     ;; * (lambda args)
     ;; * (lambda (:rest args))
     (unless target-exp
-      (gosh-if-let1 it (gosh-eldoc--sexp-rest-arg real-sexp)
-        (setq target-exp it)))
+      (if-let ((it (gosh-eldoc--sexp-rest-arg real-sexp)))
+          (setq target-exp it)))
     (concat "("
             (mapconcat
              'identity
@@ -3707,7 +3669,7 @@ PROCEDURE-SYMBOL ::= symbol ;
      (let ((maybe-module (car-safe e)))
        (cond
         ((symbolp maybe-module)
-         (gosh-and*
+         (and-let*
              ((prefix (or
                        (and (eq importers t) "")
                        (let ((importer (assq maybe-module importers)))
@@ -3742,7 +3704,7 @@ PROCEDURE-SYMBOL ::= symbol ;
       file)))
 
 (defun gosh-info-doc--generate-signatures ()
-  (gosh-and*
+  (and-let*
       ((infofile (gosh-info-doc--get-filename))
        (dir (file-name-directory infofile))
        (filename (file-name-nondirectory infofile))
@@ -5040,12 +5002,12 @@ This mode is originated from `scheme-mode' but specialized to edit Gauche code."
       ;; search imported modules
       (let ((importers (gosh-extract-importers forms)))
         (cl-loop for (module modprefix) in importers
-                 do (gosh-and* ((mod-file (gosh-module->file module))
-                                (prefix-re (concat "\\`" (regexp-quote modprefix)))
-                                ;; no prefix match to every symbol "\\`"
-                                ((string-match prefix-re symnm))
-                                (symnm2 (substring symnm (length modprefix)))
-                                (sym2 (intern-soft symnm2)))
+                 do (and-let* ((mod-file (gosh-module->file module))
+                               (prefix-re (concat "\\`" (regexp-quote modprefix)))
+                               ;; no prefix match to every symbol "\\`"
+                               ((string-match prefix-re symnm))
+                               (symnm2 (substring symnm (length modprefix)))
+                               (sym2 (intern-soft symnm2)))
                       (when (and mod-file
                                  (memq sym2 (gosh-env-exports-functions mod-file)))
                         (when (gosh-jump-to-module-globaldef module sym2 forms)
