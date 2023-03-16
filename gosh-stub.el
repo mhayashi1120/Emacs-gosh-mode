@@ -136,7 +136,7 @@
                ((null def)
                 (point-min))
                (t
-                (destructuring-bind (deftype sname) def
+                (cl-destructuring-bind (deftype sname) def
                   (let ((cname (gosh-stub-scheme-name->c-name deftype libname sname)))
                     (goto-char (point-min))
                     (let ((regexp (format "^static .*\\_<%s\\_>" (regexp-quote cname))))
