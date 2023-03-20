@@ -1355,6 +1355,7 @@
   '(
     (report-error (lambda (err)))
     (warn (lambda (fmt . args)))
+    (check-arg (syntax (test arg)))
     ))
 
 
