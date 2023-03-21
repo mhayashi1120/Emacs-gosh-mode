@@ -1750,8 +1750,23 @@ d:/home == /cygdrive/d/home
 
 (defun gosh-extract-definition (sexp)
   (pcase sexp
-    (`(define-syntax ,name . ,_)
-     `((,name (syntax))))
+    (`(define-syntax ,name . ,syntax-form)
+     (pcase (car-safe syntax-form)
+       (`(syntax-rules . ,(or `(,(and (pred gosh-symbol-p) ellipsis) ,_ . ,rules*)
+                              `(,_ . ,rules*)))
+        (mapcar
+         (lambda (r)
+           (pcase r
+             (`((_ . ,args) . ,_)
+              ;; TODO FIXME should replace ellipsis in args
+              (list name (list 'syntax args)))
+             (_
+              ;; FIXME reconsider it
+              (list name (list 'syntax 'unknown-syntax)))))
+         rules*))
+       (_
+        ;; FIXME no need support er-macro-transformer now. maybe too complex
+        `((,name (syntax))))))
     (`(define-macro (,name . ,args) . ,_)
      `((,name (syntax ,args))))
     (`(define-method ,name ,args . ,_)
