@@ -4,7 +4,7 @@
 ;; Keywords: lisp gauche scheme edit
 ;; URL: https://github.com/mhayashi1120/Emacs-gosh-mode
 ;; Emacs: GNU Emacs 28 or later
-;; Version: 0.3.2
+;; Version: 0.3.3
 ;; Package-Requires: ((emacs "28.1"))
 
 ;; This program is free software; you can redistribute it and/or
