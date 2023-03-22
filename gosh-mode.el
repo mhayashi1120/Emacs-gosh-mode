@@ -1748,25 +1748,28 @@ d:/home == /cygdrive/d/home
        (_ nil)))
    slots))
 
+(defun gosh-extract-syntax (transformer)
+  (pcase transformer
+    (`(syntax-rules . ,(or `(,(and (pred gosh-symbol-p) ellipsis) ,_ . ,rules*)
+                           `(,_ . ,rules*)))
+     (mapcar
+      (lambda (r)
+        (pcase r
+          (`((_ . ,args) . ,_)
+           ;; TODO FIXME should replace ellipsis in args
+           (list name (list 'syntax args)))
+          (_
+           ;; FIXME reconsider it
+           (list name (list 'syntax 'unknown-syntax)))))
+      rules*))
+    (_
+     ;; FIXME no need support er-macro-transformer now. maybe too complex
+     `((,name (syntax))))))
+
 (defun gosh-extract-definition (sexp)
   (pcase sexp
-    (`(define-syntax ,name . ,syntax-form)
-     (pcase (car-safe syntax-form)
-       (`(syntax-rules . ,(or `(,(and (pred gosh-symbol-p) ellipsis) ,_ . ,rules*)
-                              `(,_ . ,rules*)))
-        (mapcar
-         (lambda (r)
-           (pcase r
-             (`((_ . ,args) . ,_)
-              ;; TODO FIXME should replace ellipsis in args
-              (list name (list 'syntax args)))
-             (_
-              ;; FIXME reconsider it
-              (list name (list 'syntax 'unknown-syntax)))))
-         rules*))
-       (_
-        ;; FIXME no need support er-macro-transformer now. maybe too complex
-        `((,name (syntax))))))
+    (`(define-syntax ,name ,transformer)
+     (gosh-extract-syntax transformer))
     (`(define-macro (,name . ,args) . ,_)
      `((,name (syntax ,args))))
     (`(define-method ,name ,args . ,_)
@@ -2353,51 +2356,75 @@ Set this variable before open by `gosh-mode'."
                           gosh-eldoc-rotate-seconds
                           'gosh-eldoc--rotate-print-info))))
 
-(defun gosh-eldoc--highlight-sexp (info-sexp highlight)
-  (let ((index (nth 0 highlight))
-        (sym (nth 1 highlight))
-        (prev-sym (nth 2 highlight))
-        (real-sexp (gosh-eldoc--normalize-fn-sexp info-sexp))
-        target-exp)
-    (when (or (keywordp sym)
-              (keywordp prev-sym))
-      (let ((key1
-             (intern-soft (substring (symbol-name
-                                      (or
-                                       (and (keywordp sym) sym)
-                                       (and (keywordp prev-sym) prev-sym)))
-                                     1)))
-            (key2
-             (or
-              (and (keywordp sym) sym)
-              (and (keywordp prev-sym) prev-sym)))
-            (keywords (cdr (memq :key info-sexp))))
-        (setq target-exp (or (assq key1 keywords)
-                             (assq key2 keywords)
-                             (car-safe (memq key1 keywords))
-                             (car-safe (memq key2 keywords))))))
-    (unless target-exp
-      (setq target-exp (nth index real-sexp)))
-    ;; index exceed maximum but
-    ;; * (lambda args)
-    ;; * (lambda (:rest args))
-    (unless target-exp
-      (if-let ((it (gosh-eldoc--sexp-rest-arg real-sexp)))
-          (setq target-exp it)))
-    (concat "("
-            (mapconcat
-             'identity
-             (mapcar
-              (lambda (exp)
-                (let ((str (gosh-eldoc--object->string exp)))
-                  (when (eq target-exp exp)
-                    (add-text-properties 0 (length str)
-                                         (list 'face 'eldoc-highlight-function-argument)
-                                         str))
-                  str))
-              info-sexp)
-             " ")
-            ")")))
+(defun gosh-eldoc--highlight-syntax (info-sexp highlight)
+  (pcase-exhaustive highlight
+    (`(,index . ,options)
+     (let ((target (nth index info-sexp)))
+       (unless target
+         (if-let ((it (gosh-eldoc--sexp-rest-arg info-sexp)))
+             (setq target it)))
+       (concat
+        "("
+        (mapconcat
+         (lambda (rule)
+           (let ((str (gosh-eldoc--object->string rule)))
+             (when (string= str "")
+               (setq str (with-output-to-string
+                           (princ rule))))
+             (when (eq target rule)
+               (add-text-properties 0 (length str)
+                                    (list 'face 'eldoc-highlight-function-argument)
+                                    str))
+             str))
+         info-sexp
+         " ")
+        ")")))))
+
+(defun gosh-eldoc--highlight-fn (info-sexp highlight)
+  (pcase-exhaustive highlight
+    (`(,index ,sym . ,options)
+     (let* ((real-sexp (gosh-eldoc--normalize-fn-sexp info-sexp))
+            (prev-sym (car options))
+            (kwd (or (and (keywordp sym) sym)
+                            (and (keywordp prev-sym) prev-sym)))
+            target)
+       (when kwd
+         (let ((kwd-sym
+                (intern-soft (substring (symbol-name kwd) 1)))
+               (keywords (cdr (memq :key info-sexp))))
+           (setq target (or
+                         ;; VARIABLE
+                         ;; (VARIABLE INIT-EXPR)
+                         ;; ((KEYWORD VARIABLE) INIT-EXPR)
+                         (assoc kwd keywords (lambda (cell _)
+                                               (pcase cell
+                                                 (`(,(and (pred keywordp) k) . ,_)
+                                                  (eq kwd k))
+                                                 ((and (pred symbolp) s)
+                                                  (eq kwd-sym s))
+                                                 (`(,(and (pred symbolp) s) . ,_)
+                                                  (eq kwd-sym s)))))))))
+       (unless target
+         (setq target (nth index real-sexp)))
+       ;; index exceed maximum but
+       ;; * (lambda args)
+       ;; * (lambda (:rest args))
+       (unless target
+         (if-let ((it (gosh-eldoc--sexp-rest-arg real-sexp)))
+             (setq target it)))
+       (concat
+        "("
+        (mapconcat
+         (lambda (exp)
+           (let ((str (gosh-eldoc--object->string exp)))
+             (when (eq target exp)
+               (add-text-properties 0 (length str)
+                                    (list 'face 'eldoc-highlight-function-argument)
+                                    str))
+             str))
+         info-sexp
+         " ")
+        ")")))))
 
 (defun gosh-eldoc--normalize-fn-sexp (sexp)
   (let (ret ignore)
@@ -2413,15 +2440,13 @@ Set this variable before open by `gosh-mode'."
     (nreverse ret)))
 
 (defun gosh-eldoc--base-type (x)
-  (if (not (consp x))
-      x
-    (cl-case (car x)
-      ((string list) (car x))
-      ((set) (or (cadr x) (car x)))
-      ((flags) 'integer)
-      ((lambda) 'procedure)
-      ((syntax) 'syntax)
-      (t x))))
+  (cl-case (car-safe x)
+    ((string list) (car x))
+    ((set) (or (cadr x) (car x)))
+    ((flags) 'integer)
+    ((lambda) 'procedure)
+    ((syntax) 'syntax)
+    (t x)))
 
 (defun gosh-eldoc--canonicalize-order (ls)
   ;; put optional arguments inside brackets (via a vector)
@@ -2429,26 +2454,27 @@ Set this variable before open by `gosh-mode'."
    ((memq :optional ls)
     (let ((res '())
           (opts '())
-          (kwds '())
-          item)
+          (kwds '()))
       (while ls
-        (setq item (car ls))
-        (setq ls (cdr ls))
-        (cond
-         ((eq item :optional)
-          (while (and (consp ls)
-                      (not (keywordp (car ls))))
-            (setq opts (cons (car ls) opts))
-            (setq ls (cdr ls))))
-         ((eq item :key)
+        (pcase ls
+         (`(:optional . ,ls*)
+          (while (and (consp ls*)
+                      (not (keywordp (car ls*))))
+            (setq opts (cons (car ls*) opts))
+            (setq ls* (cdr ls*)))
+          (setq ls ls*))
+         (`(:key . ,ls*)
           (unless (consp kwds)
-            (setq kwds (cons item kwds)))
-          (while (and (consp ls)
-                      (not (keywordp (car ls))))
-            (setq kwds (cons (car ls) kwds))
-            (setq ls (cdr ls))))
-         ((keywordp item))
-         (t
+            (setq kwds (cons :key kwds)))
+          (while (and (consp ls*)
+                      (not (keywordp (car ls*))))
+            (setq kwds (cons (car ls*) kwds))
+            (setq ls* (cdr ls*)))
+          (setq ls ls*))
+         (`((pred keywordp) . ,ls*)
+          (setq ls ls*))
+         (`(,item . ,ls*)
+          (setq ls ls*)
           (setq res (cons item res)))))
       (append (nreverse res)
               (mapcar 'vector (nreverse opts))
@@ -2559,68 +2585,71 @@ Set this variable before open by `gosh-mode'."
           specs))
 
 (defun gosh-eldoc--find-and-print-string (spec env highlight)
-  (cond
-   ((atom spec) nil)
-   ((consp (cdr spec))
-    (let* ((name (car spec))
-           (type (nth 1 spec))
-           (keytype (car-safe type)))
-      (concat
-       (cond
-        ((eq keytype 'class)
-         (let ((super (nth 1 type))
-               (slots (nth 2 type)))
-           (concat
-            "Class: "
-            (gosh-eldoc--object->string name)
-            ;;super class
-            (when super
-              (concat
-               " Base: "
-               (gosh-eldoc--object->string super)))
-            (when slots
-              (concat
-               " Slots: "
-               (gosh-eldoc--object->string
-                (mapcar 'car-safe slots)))))))
-        ((memq keytype '(syntax lambda))
-         (let ((args (cadr type)))
-           (concat
-            (and (eq keytype 'syntax)
-                 "Syntax: ")
-            (let ((sexp
-                   (cons name
-                         (gosh-eldoc--canonicalize-order
-                          (mapcar 'gosh-eldoc--base-type
-                                  (gosh-eldoc--translate-dot-cell args))))))
-              (if highlight
-                  (gosh-eldoc--highlight-sexp sexp highlight)
-                (gosh-eldoc--object->string sexp))))))
-        ((memq keytype '(parameter variable constant))
+  (pcase-exhaustive spec
+    ((pred atom) nil)
+    (`(,name ,type . ,args)
+     (concat
+      (pcase-exhaustive type
+        (`(class ,super ,slots)
+         (concat
+          "Class: "
+          (gosh-eldoc--object->string name)
+          ;;super class
+          (when super
+            (concat
+             " Base: "
+             (gosh-eldoc--object->string super)))
+          (when slots
+            (concat
+             " Slots: "
+             (gosh-eldoc--object->string
+              (mapcar 'car-safe slots))))))
+        (`(syntax ,args)
+         (concat
+          "Syntax: "
+          (let ((sexp
+                 (cons name
+                       (gosh-eldoc--canonicalize-order
+                        (mapcar 'gosh-eldoc--base-type
+                                (gosh-eldoc--translate-dot-cell args))))))
+            (if highlight
+                (gosh-eldoc--highlight-syntax sexp highlight)
+              (gosh-eldoc--object->string sexp)))))
+        (`(lambda ,args)
+         (concat
+          (let ((sexp
+                 (cons name
+                       (gosh-eldoc--canonicalize-order
+                        (mapcar 'gosh-eldoc--base-type
+                                (gosh-eldoc--translate-dot-cell args))))))
+            (if highlight
+                (gosh-eldoc--highlight-fn sexp highlight)
+              (gosh-eldoc--object->string sexp)))))
+        (`(,(and (or 'parameter 'variable 'constant) keytype))
          (format "%S: " (capitalize (symbol-name keytype))))
-        ((stringp type)
+        ((pred stringp)
          (concat
           "String: \""
           (gosh-eldoc--object->string type)
           "\""))
-        ((numberp type)
+        ((pred numberp)
          (concat
           "Number: "
           (gosh-eldoc--object->string type)))
-        ((gosh-symbol-p type)
+        ((pred gosh-symbol-p)
          (let ((spec (gosh-env-lookup env type)))
            ;; ignore `max-lisp-eval-depth' error
            (or (gosh-eldoc--find-and-print-string spec env highlight)
                (format "some parameter or alias typed `%s'" type))))
-        ((gosh-object-p type)
+        ((pred gosh-object-p)
          (concat
           (capitalize (symbol-name (gosh-object-type type)))
           ": "
           (gosh-eldoc--object->string (gosh-object-value type))))
-        (t
-         (gosh-eldoc--object->string type))))))
-   ((null (cdr spec))
-    "Some of ( Parameter | Alias | Dynamic loaded procedure )")))
+        (_
+         (gosh-eldoc--object->string type)))))
+    (`(,_)
+     "Some of ( Parameter | Alias | Dynamic loaded procedure )")))
 
 
 ;;;
