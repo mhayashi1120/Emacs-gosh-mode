@@ -1703,7 +1703,7 @@ d:/home == /cygdrive/d/home
            do (setq vars (and (consp vars)
                               (cdr vars)))))
 
-(defun gosh-extract-import-symbols (importers)
+(defun gosh-extract-import-symbols (importers &optional depth)
   (let ((res '()))
     (dolist (importer importers)
       (ignore-errors
@@ -1718,7 +1718,7 @@ d:/home == /cygdrive/d/home
                                (fullsym (intern (concat prefix dname))))
                           (cons fullsym body)))
                        (asis asis)))
-                   (gosh-cache-resolve-export-env module))))))
+                   (gosh-cache-resolve-export-env module depth))))))
           (setq res (append syms res)))))
     res))
 
@@ -2081,36 +2081,41 @@ TODO key should be module-file?? multiple executable make complex.")
               (gosh-cache--push file module cached res)
               res)))))))
 
-(defun gosh-cache-resolve-export-env (module)
-  (let* ((env (gosh-cache-module-export-env module))
-         forms global-env table import-env
-	       (resolve-import (lambda (name)
-                           (unless import-env
-                             (let ((importers (gosh-extract-importers forms)))
-                               (setq import-env (gosh-extract-import-symbols importers))))
-                           (cdr-safe (assq name import-env)))))
-    (mapcar
-     (lambda (e)
-       (pcase e
-         (`(,(and (pred gosh-symbol-p) name) . ,bodies)
-          (cond
-           ((consp bodies)
-            e)
-           (t
-            (unless forms
-              (setq forms (gosh-cache-module-forms module))
-              (setq global-env (gosh-extract-globals forms))
-              (setq table (gosh-extract-export-table forms global-env t))
-              )
-            (let ((bodies (pcase (rassq name table)
-                            (`(,source . ,_)
-                             ;; found (export (rename source NAME)) form
-                             (or (cdr-safe (assq source global-env))
-                                 (funcall resolve-import source)))
-                            (_
-                             (funcall resolve-import name)))))
-              (cons name bodies)))))))
-     env)))
+;; TODO name gosh-cache-* -> gosh-resolve-*
+(defun gosh-cache-resolve-export-env (module &optional depth)
+  (unless depth
+    (setq depth 0))
+  (when (<= depth gosh-env-export-nested-depth)
+    (let* ((env (gosh-cache-module-export-env module))
+           forms global-env table import-env
+	         (resolve-import (lambda (name)
+                             (unless import-env
+                               (let ((importers (gosh-extract-importers forms)))
+                                 (setq import-env (gosh-extract-import-symbols
+                                                   importers (+ depth 1)))))
+                             (cdr-safe (assq name import-env)))))
+      (mapcar
+       (lambda (e)
+         (pcase e
+           (`(,(and (pred gosh-symbol-p) name) . ,bodies)
+            (cond
+             ((consp bodies)
+              e)
+             (t
+              (unless forms
+                (setq forms (gosh-cache-module-forms module))
+                (setq global-env (gosh-extract-globals forms))
+                (setq table (gosh-extract-export-table forms global-env t))
+                )
+              (let ((bodies (pcase (rassq name table)
+                              (`(,source . ,_)
+                               ;; found (export (rename source NAME)) form
+                               (or (cdr-safe (assq source global-env))
+                                   (funcall resolve-import source)))
+                              (_
+                               (funcall resolve-import name)))))
+                (cons name bodies)))))))
+       env))))
 
 ;; Gather module all definitions which is derived by child module.
 (defun gosh-cache-module-global-env (module)
