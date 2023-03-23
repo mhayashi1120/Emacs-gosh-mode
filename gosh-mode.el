@@ -374,9 +374,11 @@ This function come from apel"
     (format "\\(\\(?:\\\\.\\|[^%s]\\)+\\)"
             chars)))
 
+;; TODO check regexp
 (defconst gosh-reader--charset-re
   "\\[\\(\\(?:\\[[^\[]+?\\]\\|\\\\.\\|[^\]]\\)*?\\)\\]")
 
+;; TODO check regexp
 (defconst gosh-reader--string-re
   "\"\\(\\(?:\\\\\.\\|[^\"]\\)*\\)\"")
 
@@ -1716,7 +1718,7 @@ d:/home == /cygdrive/d/home
                                (fullsym (intern (concat prefix dname))))
                           (cons fullsym body)))
                        (asis asis)))
-                   (gosh-cache-module-export-env module))))))
+                   (gosh-cache-resolve-export-env module))))))
           (setq res (append syms res)))))
     res))
 
@@ -1725,7 +1727,7 @@ d:/home == /cygdrive/d/home
     (dolist (sexp forms)
       (pcase sexp
         (`(autoload ,module . ,members)
-         (let ((env (gosh-cache-module-export-env module)))
+         (let ((env (gosh-cache-resolve-export-env module)))
            (dolist (m members)
              (pcase m
                ((and (pred gosh-symbol-p) name)
@@ -1786,7 +1788,7 @@ d:/home == /cygdrive/d/home
 (defun gosh-extract-syntax (transformer)
   (pcase transformer
     (`(syntax-rules
-       . 
+       .
        ,(or `(,(and (pred gosh-symbol-p) ellipsis) ,_ . ,rules*)
             `(,_ . ,rules*)))
      (mapcar
@@ -1869,7 +1871,7 @@ d:/home == /cygdrive/d/home
                        parents)
                       res))))
         (`(autoload ,module . ,members)
-         (let ((env (gosh-cache-module-export-env module)))
+         (let ((env (gosh-cache-resolve-export-env module)))
            (setq res (append
                       (mapcar
                        (lambda (sym)
@@ -2069,13 +2071,46 @@ TODO key should be module-file?? multiple executable make complex.")
         (gosh-env--srfi-exports srfi-n)))
      (t
       (let* ((file (gosh-module->file module))
-             (cached (and file (gosh-cache--pull file gosh-cache--module-export-env))))
+             (cached (and file
+                          (gosh-cache--pull
+                           file gosh-cache--module-export-env))))
         (or (gosh-cache--get cached)
             ;; (re)compute module exports
             (let* ((forms (gosh-cache-module-forms module))
                    (res (gosh-env-file-exports forms)))
               (gosh-cache--push file module cached res)
               res)))))))
+
+(defun gosh-cache-resolve-export-env (module)
+  (let* ((env (gosh-cache-module-export-env module))
+         forms global-env table import-env
+	       (resolve-import (lambda (name)
+                           (unless import-env
+                             (let ((importers (gosh-extract-importers forms)))
+                               (setq import-env (gosh-extract-import-symbols importers))))
+                           (cdr-safe (assq name import-env)))))
+    (mapcar
+     (lambda (e)
+       (pcase e
+         (`(,(and (pred gosh-symbol-p) name) . ,bodies)
+          (cond
+           ((consp bodies)
+            e)
+           (t
+            (unless forms
+              (setq forms (gosh-cache-module-forms module))
+              (setq global-env (gosh-extract-globals forms))
+              (setq table (gosh-extract-export-table forms global-env t))
+              )
+            (let ((bodies (pcase (rassq name table)
+                            (`(,source . ,_)
+                             ;; found (export (rename source NAME)) form
+                             (or (cdr-safe (assq source global-env))
+                                 (funcall resolve-import source)))
+                            (_
+                             (funcall resolve-import name)))))
+              (cons name bodies)))))))
+     env)))
 
 ;; Gather module all definitions which is derived by child module.
 (defun gosh-cache-module-global-env (module)
@@ -5024,7 +5059,7 @@ This mode is originated from `scheme-mode' but specialized to edit Gauche code."
         (goto-char (point-min))
         (or
          (re-search-forward (format "\\_<%s\\_>" sym) nil t)
-         ;;TODO ??? why globaldef?
+         ;;TODO ??? why globaldef? here
          (gosh-jump-to-globaldef sym))))))
 
 (defun gosh-jump-to-module-globaldef (module symbol forms)
