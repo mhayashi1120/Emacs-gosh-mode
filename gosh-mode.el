@@ -1895,7 +1895,7 @@ d:/home == /cygdrive/d/home
                                     parents))
                            res))))))
          (export-handler
-          (lambda (form)
+          (lambda (exports)
             (setq res (append
                        (mapcar
                         (lambda (item)
@@ -1906,7 +1906,7 @@ d:/home == /cygdrive/d/home
                              exported)
                             ;; Unknown
                             (_ nil)))
-                        (cdr form))
+                        exports)
                        res))))
          (export-all-handler
           (lambda ()
@@ -1928,14 +1928,15 @@ d:/home == /cygdrive/d/home
              (funcall export-handler
                       (gosh-append-map*
                        (lambda (decl)
-                         (and (eq 'export (car-safe decl))
-                              decl))
+                         (pcase decl
+                           (`(export . ,exports)
+                            exports)))
                        decls)))))
-          ((or 'export 'export-if-defined)
-           (funcall export-handler sexp))
-          ((or 'export-all)
+          (`(,(or 'export 'export-if-defined) . ,exports)
+           (funcall export-handler exports))
+          (`(,(or 'export-all) . ,_)
            (funcall export-all-handler))
-          ((or 'extend)
+          (`(,(or 'extend) . ,_)
            (funcall extend-handler sexp)))))
     res))
 
@@ -2079,6 +2080,11 @@ TODO key should be module-file?? multiple executable make complex.")
 ;;
 ;; env
 ;;
+
+(defcustom gosh-env-export-nested-depth 5
+  "Max depth of export symbol is resolved."
+  :group 'gosh-mode
+  :type 'integer)
 
 ;; TODO gosh-extract-exports
 (defun gosh-env-file-exports (forms)
@@ -2437,31 +2443,33 @@ Set this variable before open by `gosh-mode'."
                          ;; VARIABLE
                          ;; (VARIABLE INIT-EXPR)
                          ;; ((KEYWORD VARIABLE) INIT-EXPR)
-                         (assoc kwd keywords (lambda (cell _)
-                                               (pcase cell
-                                                 (`(,(and (pred keywordp) k) . ,_)
-                                                  (eq kwd k))
-                                                 ((and (pred symbolp) s)
-                                                  (eq kwd-sym s))
-                                                 (`(,(and (pred symbolp) s) . ,_)
-                                                  (eq kwd-sym s)))))))))
+                         (assoc kwd keywords
+                                (lambda (cell _)
+                                  (pcase cell
+                                    (`(,(and (pred keywordp) k) . ,_)
+                                     (eq kwd k))
+                                    ((and (pred symbolp) s)
+                                     (eq kwd-sym s))
+                                    (`(,(and (pred symbolp) s) . ,_)
+                                     (eq kwd-sym s)))))))))
        (unless target
          (setq target (nth index real-sexp)))
        ;; index exceed maximum but
        ;; * (lambda args)
        ;; * (lambda (:rest args))
        (unless target
-         (if-let ((it (gosh-eldoc--sexp-rest-arg real-sexp)))
-             (setq target it)))
+         (if-let ((sexp (gosh-eldoc--sexp-rest-arg real-sexp)))
+             (setq target sexp)))
        (concat
         "("
         (mapconcat
          (lambda (exp)
            (let ((str (gosh-eldoc--object->string exp)))
              (when (eq target exp)
-               (add-text-properties 0 (length str)
-                                    (list 'face 'eldoc-highlight-function-argument)
-                                    str))
+               (add-text-properties
+                0 (length str)
+                (list 'face 'eldoc-highlight-function-argument)
+                str))
              str))
          info-sexp
          " ")
