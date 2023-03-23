@@ -1212,6 +1212,32 @@ to change `scheme-mode' to `gosh-mode'"
     gosh-default-command-internal))
 
 ;;
+;; Cached index
+;;
+
+;;TODO testing maybe use file path or lazy list
+(defcustom gosh-index-user-cache nil
+  "List of user defined index. See `gosh-info-doc--env'"
+  :group 'gosh-mode
+  ;; TODO
+  :type 'list)
+
+(defun gosh-index--create-env (index)
+  (pcase-exhaustive index
+    ((pred stringp) ; guess as path
+     (cond
+      ((file-exists-p index)
+       (with-temp-buffer
+         (insert-file-contents index)
+         (goto-char (point-min))
+         (read (current-buffer))))
+      (t
+       (error "Not a supported index %s" index))))
+    ((pred listp)
+     index)))
+
+
+;;
 ;; For cygwin path
 ;;
 
@@ -1578,8 +1604,8 @@ d:/home == /cygdrive/d/home
                  ((lambda)
                   (gosh-extract--simple-args vars (nth 1 sexp)))
                  ((match)
-                  (let ((clause (cdr ctx)))
-                    (gosh-extract--match-vars vars (car-safe (car-safe clause)))))
+                  (let ((clauses (cdr ctx)))
+                    (gosh-extract--match-vars vars (car-safe (car-safe clauses)))))
                  ((match-let match-let*)
                   (dolist (pat-expr (nth 1 sexp))
                     (gosh-extract--match-vars vars (car-safe pat-expr))))
@@ -1594,7 +1620,7 @@ d:/home == /cygdrive/d/home
                     (gosh-extract--let-vars vars (nth 1 sexp)))))
                  ((let* and-let* letrec fluid-let)
                   (gosh-extract--let-vars vars (nth 1 sexp)))
-                 ((let1 rlet1 if-let1)
+                 ((let1 rlet1 if-let1 and-let1)
                   (gosh-extract--put-var vars (nth 1 sexp) (list (nth 2 sexp))))
                  ((let-values let*-values)
                   (dolist (var-expr (nth 1 sexp))
@@ -2082,6 +2108,12 @@ TODO key should be module-file?? multiple executable make complex.")
                   (gosh-info-doc-env (if for-completion t importers)))))
       (when base
         (push base env)))
+    ;; User cached index
+    (when for-completion
+      (dolist (index gosh-index-user-cache)
+        (let ((cache (gosh-index--create-env index)))
+          (dolist (c cache)
+            (push (cdr-safe c) env)))))
     ;; imports
     (let ((imports (ignore-errors
                      (gosh-extract-import-symbols importers))))
@@ -2830,17 +2862,15 @@ Set this variable before open by `gosh-mode'."
     (gosh-filter 'file-directory-p res2)))
 
 (defun gosh-complete-in-string (type)
-  (cl-case type
-    ((filename)
+  (pcase type
+    ('filename
      '(gosh-complete-file-name file-name-nondirectory))
-    ((directory)
+    ('directory
      '(gosh-complete-directory-name file-name-nondirectory))
-    (t
-     (cond
-      ((and (consp type) (eq 'string (car type)))
-       (cadr type))
-      ((and (consp type) (eq 'or (car type)))
-       (car (delete nil (mapcar 'gosh-complete-in-string (cdr type)))))))))
+    (`(string ,str)
+     str)
+    (`(or ,types)
+     (car (delete nil (mapcar 'gosh-complete-in-string types))))))
 
 (defun gosh-complete-apply-string-completer (cmpl sym)
   (let ((func (if (consp cmpl) (car cmpl) cmpl))
@@ -3653,9 +3683,14 @@ PROCEDURE-SYMBOL ::= symbol ;
 (defun gosh-smart-import-search-module (sym force-all)
   (catch 'found
     ;; search imported modules
-    (let ((module (gosh-info-doc-guess-module sym)))
+    (let ((module (gosh-smart-import-guess-module gosh-info-doc--env sym)))
       (when module
         (throw 'found module))
+      (dolist (index gosh-index-user-cache)
+        (let ((env (gosh-index--create-env index)))
+          (setq module (gosh-smart-import-guess-module env sym))
+          (when module
+            (throw 'found module))))
       (when force-all
         (dolist (path (gosh-load-path))
           (gosh--temp-message "Searching on %s" path)
@@ -3707,6 +3742,7 @@ PROCEDURE-SYMBOL ::= symbol ;
   (setq gosh-info-doc--env
         (gosh-info-doc--generate-signatures)))
 
+;; IMPORTERS : `t` or alist of (MODULE . PREFIX)
 (defun gosh-info-doc-env (importers)
   (gosh-append-map
    (lambda (e)
@@ -3733,9 +3769,6 @@ PROCEDURE-SYMBOL ::= symbol ;
         ;; This env is not depend on any module
         (t e))))
    gosh-info-doc--env))
-
-(defun gosh-info-doc-guess-module (symbol)
-  (gosh-smart-import-guess-module gosh-info-doc--env symbol))
 
 (defun gosh-info-doc--get-filename ()
   ;; `Info-find-file' break current window settings.
