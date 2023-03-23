@@ -1216,9 +1216,10 @@ to change `scheme-mode' to `gosh-mode'"
 ;;
 
 ;; maybe file path or lazy list
+;;
 (defcustom gosh-index-user-cache nil
   "testing introduce. List of user defined index. That hold path
- to cache or index environment.
+ to cache that hold s-exp or index s-exp.
 See `gosh-info-doc--env'"
   :group 'gosh-mode
   ;; TODO
@@ -3711,9 +3712,9 @@ PROCEDURE-SYMBOL ::= symbol ;
 ;;; info integration
 ;;;
 
-;; MODULE-ALIST: MODULE<symbol> . PROCEDURE-ALIST
-;; PROCEDURE-ALIST: PROCEDURE . PROCEDURE-SIGNATURE
-;; PROCEDURE-SIGNATURE: TODO descirbe more
+;; MODULE-ALIST: (MODULE<symbol> . SYMBOL-ALIST)
+;; SYMBOL-ALIST: ((SYMBOL [SIGNATURE]) ...)
+;; SIGNATURE: TODO descirbe more
 (defvar gosh-info-doc--env nil)
 
 (defun gosh-info-lookup-add-help (mode)
