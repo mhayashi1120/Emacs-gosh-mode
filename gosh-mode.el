@@ -1628,9 +1628,10 @@ d:/home == /cygdrive/d/home
                 (dolist (var-expr bindings)
                   (gosh-extract--simple-args vars (car var-expr))))
                (`(,(or 'let-syntax 'letrec-syntax) ,bindings . ,_)
-                ;;TODO test and extract syntax
                 (dolist (syn-expr bindings)
-                  (gosh-extract--put-var vars (car syn-expr) `((syntax)))))
+                  (pcase syn-expr
+                    (`(,name ,transformer . ,_)
+                     (gosh-extract--put-var vars name (gosh-extract-syntax transformer))))))
                (`(,(or 'do) ,exprs . ,_)
                 ;;TODO try it
                 (dolist (var-expr exprs)
@@ -1788,19 +1789,19 @@ d:/home == /cygdrive/d/home
         (pcase r
           (`((_ . ,args) . ,_)
            ;; TODO FIXME should replace ellipsis in args
-           (list name (list 'syntax args)))
+           `(syntax ,args))
           (_
            ;; FIXME reconsider it
-           (list name (list 'syntax 'unknown-syntax)))))
+           `(syntax unknown-syntax))))
       rules*))
     (_
      ;; FIXME no need support er-macro-transformer now. maybe too complex
-     `((,name (syntax))))))
+     `(syntax))))
 
 (defun gosh-extract-definition (sexp)
   (pcase sexp
     (`(define-syntax ,name ,transformer)
-     (gosh-extract-syntax transformer))
+     `((,name ,(gosh-extract-syntax transformer))))
     (`(define-macro (,name . ,args) . ,_)
      `((,name (syntax ,args))))
     (`(define-method ,name ,args . ,_)
@@ -2663,7 +2664,7 @@ Set this variable before open by `gosh-mode'."
                 (gosh-eldoc--highlight-fn sexp highlight)
               (gosh-eldoc--object->string sexp)))))
         (`(,(and (or 'parameter 'variable 'constant) keytype))
-         (format "%S: " (capitalize (symbol-name keytype))))
+         (format "%s: " (capitalize (symbol-name keytype))))
         ((pred stringp)
          (concat
           "String: \""
