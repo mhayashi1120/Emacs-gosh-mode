@@ -1718,7 +1718,7 @@ d:/home == /cygdrive/d/home
                                (fullsym (intern (concat prefix dname))))
                           (cons fullsym body)))
                        (asis asis)))
-                   (gosh-cache-resolve-export-env module depth))))))
+                   (gosh-env-resolve-exports module depth))))))
           (setq res (append syms res)))))
     res))
 
@@ -1727,7 +1727,7 @@ d:/home == /cygdrive/d/home
     (dolist (sexp forms)
       (pcase sexp
         (`(autoload ,module . ,members)
-         (let ((env (gosh-cache-resolve-export-env module)))
+         (let ((env (gosh-env-resolve-exports module)))
            (dolist (m members)
              (pcase m
                ((and (pred gosh-symbol-p) name)
@@ -1871,7 +1871,7 @@ d:/home == /cygdrive/d/home
                        parents)
                       res))))
         (`(autoload ,module . ,members)
-         (let ((env (gosh-cache-resolve-export-env module)))
+         (let ((env (gosh-env-resolve-exports module)))
            (setq res (append
                       (mapcar
                        (lambda (sym)
@@ -2081,19 +2081,44 @@ TODO key should be module-file?? multiple executable make complex.")
               (gosh-cache--push file module cached res)
               res)))))))
 
-;; TODO name gosh-cache-* -> gosh-resolve-*
-(defun gosh-cache-resolve-export-env (module &optional depth)
+;; Gather module all definitions which is derived by child module.
+(defun gosh-cache-module-global-env (module)
+  (let* ((file (gosh-module->file module))
+         (cached (and file (gosh-cache--pull file gosh-cache--file-global-env))))
+    (or (gosh-cache--get cached)
+        ;; (re)compute module exports
+        (let* ((forms (gosh-cache-module-forms module))
+               (res (gosh-extract-globals forms t)))
+          (gosh-cache--push file module cached res)
+          res))))
+
+;;TODO
+(defun gosh-cache-lookup-symbol (symbol)
+  )
+
+;;
+;; env
+;;
+
+(defcustom gosh-env-export-nested-depth 3
+  "Max depth of export symbol is resolved."
+  :group 'gosh-mode
+  :type 'integer)
+
+(defun gosh-env-resolve-exports (module &optional depth)
   (unless depth
     (setq depth 0))
+  ;; Just avoid eternal recursion or slow down
   (when (<= depth gosh-env-export-nested-depth)
     (let* ((env (gosh-cache-module-export-env module))
            forms global-env table import-env
-	         (resolve-import (lambda (name)
-                             (unless import-env
-                               (let ((importers (gosh-extract-importers forms)))
-                                 (setq import-env (gosh-extract-import-symbols
-                                                   importers (+ depth 1)))))
-                             (cdr-safe (assq name import-env)))))
+	         (resolve-import
+            (lambda (name)
+              (unless import-env
+                (let ((importers (gosh-extract-importers forms)))
+                  (setq import-env (gosh-extract-import-symbols
+                                    importers (+ depth 1)))))
+              (cdr-safe (assq name import-env)))))
       (mapcar
        (lambda (e)
          (pcase e
@@ -2116,30 +2141,6 @@ TODO key should be module-file?? multiple executable make complex.")
                                (funcall resolve-import name)))))
                 (cons name bodies)))))))
        env))))
-
-;; Gather module all definitions which is derived by child module.
-(defun gosh-cache-module-global-env (module)
-  (let* ((file (gosh-module->file module))
-         (cached (and file (gosh-cache--pull file gosh-cache--file-global-env))))
-    (or (gosh-cache--get cached)
-        ;; (re)compute module exports
-        (let* ((forms (gosh-cache-module-forms module))
-               (res (gosh-extract-globals forms t)))
-          (gosh-cache--push file module cached res)
-          res))))
-
-;;TODO
-(defun gosh-cache-lookup-symbol (symbol)
-  )
-
-;;
-;; env
-;;
-
-(defcustom gosh-env-export-nested-depth 5
-  "Max depth of export symbol is resolved."
-  :group 'gosh-mode
-  :type 'integer)
 
 (defun gosh-env-file-exports (forms)
   (let ((defs (gosh-extract-exported-definitions forms))
