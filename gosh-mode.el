@@ -1687,16 +1687,18 @@ d:/home == /cygdrive/d/home
            do (gosh-extract--put-var alist x nil)))
 
 (defun gosh-extract--simple-args (alist vars)
-  (cl-loop for x on vars
+  (cl-loop while vars
            do
-           (cond
-            ((atom x)
-             (gosh-extract--put-var alist x nil))
-            ((keywordp (car x)))
-            ((gosh-symbol-p (car x))
-             (gosh-extract--put-var alist (car x) nil))
-            ((consp (car x))
-             (gosh-extract--put-var alist (caar x) (cdar x))))))
+           (pcase vars
+             ((and (pred atom) var)
+              (gosh-extract--put-var alist var nil))
+             (`(,(and (pred keywordp) kwd) . ,_))
+             (`(,(and (pred gosh-symbol-p) var) . ,_)
+              (gosh-extract--put-var alist var nil))
+             (`((,name . ,value) . ,_)
+              (gosh-extract--put-var alist name value)))
+           do (setq vars (and (consp vars)
+                              (cdr vars)))))
 
 (defun gosh-extract-import-symbols (importers)
   (let ((res '()))
