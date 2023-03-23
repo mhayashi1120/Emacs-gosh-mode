@@ -3509,14 +3509,14 @@ Arg FORCE non-nil means forcely insert bracket."
           (current-column))
       (let* ((function (buffer-substring (point)
                                          (progn (forward-sexp 1) (point))))
-             (function-sym (intern-soft function))
-             (method (and (not (assq function-sym (gosh-extract-local-vars)))
-                          (get function-sym 'scheme-indent-function)))
+             (fnsym (intern-soft function))
+             (method (and (not (assq fnsym (gosh-extract-local-vars)))
+                          (get fnsym 'scheme-indent-function)))
              (importers (gosh-extract-importers
                          (gosh-parse-read-all)))
              indent)
         (cond
-         ((setq indent (gosh--smart-indent-assoc-symbol function-sym function importers))
+         ((setq indent (gosh--smart-indent-assoc-symbol fnsym function importers))
           (lisp-indent-specform indent state indent-point normal-indent))
          ((or (eq method 'defun)
               (and (null method)
