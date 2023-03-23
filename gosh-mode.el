@@ -3008,10 +3008,9 @@ Set this variable before open by `gosh-mode'."
                (memq (car inner-type) '(lambda)))
           (let* ((param-type (gosh-complete--lookup-type (cadr inner-type) inner-pos))
                  (set-or-flags
-                  (or (and (consp param-type)
-                           (cl-case (car param-type)
-                             ((set) (cddr param-type))
-                             ((flags) (cdr param-type))))
+                  (or (pcase param-type
+                        (`(set ,_ . ,value) value)
+                        (`(flags ,value) value))
                       ;; handle nested arithmetic functions inside a flags
                       ;; parameter
                       (and (not (zerop outer-pos))
