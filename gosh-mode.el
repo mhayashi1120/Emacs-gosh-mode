@@ -1215,9 +1215,11 @@ to change `scheme-mode' to `gosh-mode'"
 ;; Cached index
 ;;
 
-;;TODO testing maybe use file path or lazy list
+;; maybe file path or lazy list
 (defcustom gosh-index-user-cache nil
-  "List of user defined index. See `gosh-info-doc--env'"
+  "testing introduce. List of user defined index. That hold path
+ to cache or index environment.
+See `gosh-info-doc--env'"
   :group 'gosh-mode
   ;; TODO
   :type 'list)
