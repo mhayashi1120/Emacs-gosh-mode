@@ -1785,8 +1785,10 @@ d:/home == /cygdrive/d/home
 
 (defun gosh-extract-syntax (transformer)
   (pcase transformer
-    (`(syntax-rules . ,(or `(,(and (pred gosh-symbol-p) ellipsis) ,_ . ,rules*)
-                           `(,_ . ,rules*)))
+    (`(syntax-rules
+       . 
+       ,(or `(,(and (pred gosh-symbol-p) ellipsis) ,_ . ,rules*)
+            `(,_ . ,rules*)))
      (mapcar
       (lambda (r)
         (pcase r
@@ -1804,7 +1806,7 @@ d:/home == /cygdrive/d/home
 (defun gosh-extract-definition (sexp)
   (pcase sexp
     (`(define-syntax ,name ,transformer)
-     `((,name ,(gosh-extract-syntax transformer))))
+     `((,name ,@(gosh-extract-syntax transformer))))
     (`(define-macro (,name . ,args) . ,_)
      `((,name (syntax ,args))))
     (`(define-method ,name ,args . ,_)
@@ -1882,7 +1884,8 @@ d:/home == /cygdrive/d/home
                 res)))))
     res))
 
-(defun gosh-extract-exports (forms &optional only-current env)
+;; -> ({(SOURCE . PUBLISH) | SOURCE} ...)
+(defun gosh-extract-export-table (forms global-env &optional only-current)
   (let* ((res '())
          (extend-handler
           (lambda (form)
@@ -1902,8 +1905,9 @@ d:/home == /cygdrive/d/home
                           (pcase item
                             ((pred symbolp)
                              item)
-                            (`(rename ,_source ,exported)
-                             exported)
+                            (`(rename ,(and (pred gosh-symbol-p) source)
+                                      ,(and (pred gosh-symbol-p) exported))
+                             (cons source exported))
                             ;; Unknown
                             (_ nil)))
                         exports)
@@ -1911,9 +1915,7 @@ d:/home == /cygdrive/d/home
          (export-all-handler
           (lambda ()
             (setq res (append
-                       (mapcar
-                        'car
-                        (or env (gosh-extract-globals forms nil)))
+                       (mapcar 'car global-env)
                        res)))))
 
     (ignore-errors
@@ -1939,6 +1941,19 @@ d:/home == /cygdrive/d/home
           (`(,(or 'extend) . ,_)
            (funcall extend-handler sexp)))))
     res))
+
+(defun gosh-extract-exports (forms &optional only-current global-env)
+  (let ((table (gosh-extract-export-table
+                forms
+                (or global-env (gosh-extract-globals forms nil))
+                only-current)))
+    (mapcar
+     (lambda (x)
+       (pcase x
+         (`(,local . ,publish)
+          publish)
+         (symbol symbol)))
+     table)))
 
 (defun gosh-extract-exported-definitions (forms)
   (let* ((env (gosh-extract-globals forms))
@@ -2025,7 +2040,7 @@ TODO key should be module-file?? multiple executable make complex.")
 
 (defun gosh-cache--push (file mod cache value)
   (let ((mtime (gosh-file-mtime file)))
-    (setcdr cache `(,mod ,mtime ,value))))
+    (setcdr cache (list mod mtime value))))
 
 (defvar gosh-cache--file-forms '(t)
   "TODO comment ")
@@ -2086,7 +2101,6 @@ TODO key should be module-file?? multiple executable make complex.")
   :group 'gosh-mode
   :type 'integer)
 
-;; TODO gosh-extract-exports
 (defun gosh-env-file-exports (forms)
   (let ((defs (gosh-extract-exported-definitions forms))
         (modules (gosh-extract-base-modules forms)))
@@ -2098,7 +2112,6 @@ TODO key should be module-file?? multiple executable make complex.")
                     defs))))
     defs))
 
-;;TODO consider `gosh-env-file-exports'
 (defun gosh-env-exports-functions (file)
   (let ((forms (gosh-cache-file-forms file)))
     (gosh-extract-exports forms nil nil)))
