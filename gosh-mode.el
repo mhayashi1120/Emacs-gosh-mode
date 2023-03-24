@@ -3688,39 +3688,37 @@ PROCEDURE-SYMBOL ::= symbol ;
         procedure))))
 
 (defun gosh-smart-indent--assoc-symbol (symbol name &optional importers rules)
-  (let ((module (intern (gosh-parse-current-module)))
+  (let ((current-module (intern (gosh-parse-current-module)))
         (rules (or rules gosh--smart-indent-alist)))
     (catch 'found
       (dolist (r rules)
         (pcase r
           (`(,(and (pred symbolp) name) .
              ,(and (pred numberp) rule))
-           ;; car is symbol name
            (when (eq symbol name)
              (throw 'found rule)))
           (`(,(and (pred stringp) regexp) .
              ,(and (pred numberp) rule))
-           ;; car is regexp
            (when (string-match regexp name)
              (throw 'found rule)))
-          (`(,(and (pred symbolp) module-name) .
+          (`(,(and (pred symbolp) module*) .
              ,(and (pred consp) rules*))
            (dolist (importer importers)
              (pcase importer
-               (`(,mod ,prefix)
+               (`(,module ,prefix)
                 (let* (
                        (res
                         (cond
-                         ((eq module module-name)
+                         ((eq current-module module*)
                           (gosh-smart-indent--assoc-symbol symbol name importers rules*))
-                         ((not (eq mod module-name)) nil)
+                         ((not (eq module module*)) nil)
                          ((string= prefix "")
                           (gosh-smart-indent--assoc-symbol symbol name importers rules*))
                          ((gosh-string-prefix-p prefix name)
-                          (let* ((name2 (substring name (length prefix)))
-                                 (symbol2 (intern-soft name2)))
+                          (let* ((name* (substring name (length prefix)))
+                                 (symbol* (intern-soft name*)))
                             (gosh-smart-indent--assoc-symbol
-                             symbol2 name2 importers rules*)))
+                             symbol* name* importers rules*)))
                          (t nil))))
                   (when res
                     (throw 'found res)))))))
