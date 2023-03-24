@@ -1732,19 +1732,22 @@ d:/home == /cygdrive/d/home
              (pcase m
                ((and (pred gosh-symbol-p) name)
                 (pcase (assq name env)
+                  ;; local and import definitions
+                  (`(,_ ,body)
+                   (setq res (cons (list name body) res)))
                   (`(,_)
+                   ;; Gauche core library
                    (pcase (assq module gosh-info-doc--env)
                      (`(,_ . ,docs)
                       (pcase (assq name docs)
                         (`(,_ ,body)
                          (setq res (cons (list name body) res)))
                         (_
-                         (setq res (cons (list name) res)))))))
-                  (`(,_ ,body)
-                   (setq res (cons (list name body) res)))))))))))
+                         (setq res (cons (list name) res)))))))))))))))
     res))
 
 (defun gosh-extract-importers (forms)
+  ;; TODO improve support <import-option>
   ;; IMPORTERS ::= { IMPORTER } ;
   ;; IMPORTER  ::= MODULE , PREFIX ;
   (gosh-append-map 'gosh-extract--importer forms))
@@ -2100,47 +2103,51 @@ TODO key should be module-file?? multiple executable make complex.")
 ;; env
 ;;
 
-(defcustom gosh-env-export-nested-depth 3
-  "Max depth of export symbol is resolved."
+(defcustom gosh-env-export-nested-depth 1
+  "Max depth of export symbol is resolved.
+Larger value might be slow down editing. "
   :group 'gosh-mode
   :type 'integer)
 
 (defun gosh-env-resolve-exports (module &optional depth)
   (unless depth
     (setq depth 0))
-  ;; Just avoid eternal recursion or slow down
-  (when (<= depth gosh-env-export-nested-depth)
-    (let* ((env (gosh-cache-module-export-env module))
-           forms global-env table import-env
-	         (resolve-import
-            (lambda (name)
-              (unless import-env
-                (let ((importers (gosh-extract-importers forms)))
-                  (setq import-env (gosh-extract-import-symbols
-                                    importers (+ depth 1)))))
-              (cdr-safe (assq name import-env)))))
-      (mapcar
-       (lambda (e)
-         (pcase e
-           (`(,(and (pred gosh-symbol-p) name) . ,bodies)
-            (cond
-             ((consp bodies)
-              e)
-             (t
-              (unless forms
-                (setq forms (gosh-cache-module-forms module))
-                (setq global-env (gosh-extract-globals forms))
-                (setq table (gosh-extract-export-table forms global-env t))
-                )
-              (let ((bodies (pcase (rassq name table)
-                              (`(,source . ,_)
-                               ;; found (export (rename source NAME)) form
-                               (or (cdr-safe (assq source global-env))
-                                   (funcall resolve-import source)))
-                              (_
-                               (funcall resolve-import name)))))
-                (cons name bodies)))))))
-       env))))
+  (let ((env (gosh-cache-module-export-env module)))
+    ;; Just avoid eternal recursion or slow down
+    (cond
+     ((< depth gosh-env-export-nested-depth)
+      (let* (forms global-env table import-env
+	                 (resolve-import
+                    (lambda (name)
+                      (unless import-env
+                        (let ((importers (gosh-extract-importers forms)))
+                          (setq import-env (gosh-extract-import-symbols
+                                            importers (+ depth 1)))))
+                      (cdr-safe (assq name import-env)))))
+        (mapcar
+         (lambda (e)
+           (pcase e
+             (`(,(and (pred gosh-symbol-p) name) . ,bodies)
+              (cond
+               ((consp bodies)
+                e)
+               (t
+                (unless forms
+                  (setq forms (gosh-cache-module-forms module))
+                  (setq global-env (gosh-extract-globals forms))
+                  (setq table (gosh-extract-export-table forms global-env t))
+                  )
+                (let ((bodies (pcase (rassq name table)
+                                (`(,source . ,_)
+                                 ;; found (export (rename source NAME)) form
+                                 (or (cdr-safe (assq source global-env))
+                                     (funcall resolve-import source)))
+                                (_
+                                 (funcall resolve-import name)))))
+                  (cons name bodies)))))))
+         env)))
+     (t
+      env))))
 
 (defun gosh-env-file-exports (forms)
   (let ((defs (gosh-extract-exported-definitions forms))
@@ -3616,7 +3623,7 @@ Arg FORCE non-nil means forcely insert bracket."
                          (gosh-parse-read-all)))
              indent)
         (cond
-         ((setq indent (gosh--smart-indent-assoc-symbol fnsym function importers))
+         ((setq indent (gosh-smart-indent--assoc-symbol fnsym function importers))
           (lisp-indent-specform indent state indent-point normal-indent))
          ((or (eq method 'defun)
               (and (null method)
@@ -3680,45 +3687,45 @@ PROCEDURE-SYMBOL ::= symbol ;
                gosh--smart-indent-alist))
         procedure))))
 
-(defun gosh--smart-indent-assoc-symbol (symbol name &optional importers alist)
+(defun gosh-smart-indent--assoc-symbol (symbol name &optional importers rules)
   (let ((module (intern (gosh-parse-current-module)))
-        (alist (or alist gosh--smart-indent-alist)))
+        (rules (or rules gosh--smart-indent-alist)))
     (catch 'found
-      (dolist (x alist)
-        (cond
-         ((not (consp x)))
-         ((and (symbolp (car x))
-               (numberp (cdr x)))
-          ;; car is symbol name
-          (when (eq symbol (car x))
-            (throw 'found (cdr x))))
-         ((and (stringp (car x))
-               (numberp (cdr x)))
-          ;; car is regexp
-          (when (string-match (car x) name)
-            (throw 'found (cdr x))))
-         ((and (symbolp (car x))
-               (listp (cdr x)))
-          ;;TODO ???? in-module `t' ????
-          (dolist (importer importers)
-            (let* ((mod (nth 0 importer))
-                   (prefix (nth 1 importer))
-                   (res
-                    (cond
-                     ((null importer))
-                     ((eq module (car x))
-                      (gosh--smart-indent-assoc-symbol symbol name importers (cdr x)))
-                     ((not (eq mod (car x))) nil)
-                     ((string= prefix "")
-                      (gosh--smart-indent-assoc-symbol symbol name importers (cdr x)))
-                     ((gosh-string-prefix-p prefix name)
-                      (let* ((name2 (substring name (length prefix)))
-                             (symbol2 (intern-soft name2)))
-                        (gosh--smart-indent-assoc-symbol
-                         symbol2 name2 importers (cdr x))))
-                     (t nil))))
-              (when res
-                (throw 'found res)))))))
+      (dolist (r rules)
+        (pcase r
+          (`(,(and (pred symbolp) name) .
+             ,(and (pred numberp) rule))
+           ;; car is symbol name
+           (when (eq symbol name)
+             (throw 'found rule)))
+          (`(,(and (pred stringp) regexp) .
+             ,(and (pred numberp) rule))
+           ;; car is regexp
+           (when (string-match regexp name)
+             (throw 'found rule)))
+          (`(,(and (pred symbolp) module-name) .
+             ,(and (pred consp) rules*))
+           (dolist (importer importers)
+             (pcase importer
+               (`(,mod ,prefix)
+                (let* (
+                       (res
+                        (cond
+                         ((eq module module-name)
+                          (gosh-smart-indent--assoc-symbol symbol name importers rules*))
+                         ((not (eq mod module-name)) nil)
+                         ((string= prefix "")
+                          (gosh-smart-indent--assoc-symbol symbol name importers rules*))
+                         ((gosh-string-prefix-p prefix name)
+                          (let* ((name2 (substring name (length prefix)))
+                                 (symbol2 (intern-soft name2)))
+                            (gosh-smart-indent--assoc-symbol
+                             symbol2 name2 importers rules*)))
+                         (t nil))))
+                  (when res
+                    (throw 'found res)))))))
+          ;; just ignore otherwise
+          ))
       ;; not found
       nil)))
 
