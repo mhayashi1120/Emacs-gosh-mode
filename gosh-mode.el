@@ -1173,6 +1173,12 @@ to change `scheme-mode' to `gosh-mode'"
                   ?/ ?. (match-string 1 file))))))
     nil))
 
+(defun gosh-ensure-module (x)
+  (cond
+   ((symbolp x) x)
+   ((stringp x) (intern (subst-char-in-string ?/ ?. x)))
+   (t (error "Not a supported as module (%s)" x))))
+
 (defun gosh-environ-load-path ()
   (let ((path (split-string (or (getenv "GAUCHE_LOAD_PATH") "")
                             gosh-default-path-separator)))
@@ -1727,7 +1733,8 @@ d:/home == /cygdrive/d/home
     (dolist (sexp forms)
       (pcase sexp
         (`(autoload ,module . ,members)
-         (let ((env (gosh-env-resolve-exports module)))
+         (let ((module* (gosh-ensure-module module))
+               (env (gosh-env-resolve-exports module*)))
            (dolist (m members)
              (pcase m
                ((and (pred gosh-symbol-p) name)
@@ -1737,7 +1744,7 @@ d:/home == /cygdrive/d/home
                    (setq res (cons (list name body) res)))
                   (`(,_)
                    ;; Gauche core library
-                   (pcase (assq module gosh-info-doc--env)
+                   (pcase (assq module* gosh-info-doc--env)
                      (`(,_ . ,docs)
                       (pcase (assq name docs)
                         (`(,_ ,body)
@@ -1874,7 +1881,8 @@ d:/home == /cygdrive/d/home
                        parents)
                       res))))
         (`(autoload ,module . ,members)
-         (let ((env (gosh-env-resolve-exports module)))
+         (let* ((module* (gosh-ensure-module module))
+                (env (gosh-env-resolve-exports module*)))
            (setq res (append
                       (mapcar
                        (lambda (sym)
@@ -5064,22 +5072,26 @@ This mode is originated from `scheme-mode' but specialized to edit Gauche code."
                           (re-search-backward "^(" nil t)
                         (forward-char 1))
                       (point-min)))
-           (end (or (re-search-forward "^(" nil t) (point-max))))
+           (end (or (re-search-forward "^(" nil t) (point-max)))
+           (symnm (symbol-name sym)))
       (save-restriction
         (narrow-to-region start end)
         (goto-char (point-min))
         (or
-         (re-search-forward (format "\\_<%s\\_>" sym) nil t)
+         (re-search-forward (format "\\_<%s\\_>" (regexp-quote symnm)) nil t)
          ;;TODO ??? why globaldef? here
          (gosh-jump-to-globaldef sym))))))
 
 (defun gosh-jump-to-module-globaldef (module symbol forms)
   (when (assq symbol (gosh-cache-module-global-env module))
     (let* ((mod-file (gosh-module->file module))
-           (buf (get-file-buffer (file-truename mod-file))))
-      (set-buffer (or buf (gosh--find-file-noselect mod-file)))
-      (when (gosh-jump-to-globaldef symbol)
-        (switch-to-buffer (current-buffer))
+           (buf (or (get-file-buffer (file-truename mod-file))
+                    (gosh--find-file-noselect mod-file))))
+      (set-buffer buf)
+      (and-let* ((pos (gosh-jump-to-globaldef symbol)))
+        (switch-to-buffer buf)
+        ;; need explicit jump when the BUF is differ to `current-buffer'
+        (goto-char pos)
         t))))
 
 (defun gosh-jump-to-globaldef (definition)
@@ -5091,7 +5103,8 @@ This mode is originated from `scheme-mode' but specialized to edit Gauche code."
     (cond
      ((re-search-forward regexp nil t)
       (push-mark first)
-      (forward-line 0))
+      (forward-line 0)
+      (point))
      (t
       (goto-char first)
       nil))))
@@ -5158,12 +5171,11 @@ This mode is originated from `scheme-mode' but specialized to edit Gauche code."
                                (prefix-re (concat "\\`" (regexp-quote modprefix)))
                                ;; no prefix match to every symbol "\\`"
                                ((string-match prefix-re symnm))
-                               (symnm2 (substring symnm (length modprefix)))
-                               (sym2 (intern-soft symnm2)))
-                      (when (and mod-file
-                                 (memq sym2 (gosh-env-exports-functions mod-file)))
-                        (when (gosh-jump-to-module-globaldef module sym2 forms)
-                          (throw 'found t))))))
+                               (symnm* (substring symnm (length modprefix)))
+                               (sym* (intern-soft symnm*))
+                               ((memq sym* (gosh-env-exports-functions mod-file))))
+                      (when (gosh-jump-to-module-globaldef module sym* forms)
+                        (throw 'found t)))))
       ;; jump to module (cursor point as a module name)
       (let ((file (gosh-module->file sym)))
         (when file
