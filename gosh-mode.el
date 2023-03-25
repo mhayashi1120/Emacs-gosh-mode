@@ -4,7 +4,7 @@
 ;; Keywords: lisp gauche scheme edit
 ;; URL: https://github.com/mhayashi1120/Emacs-gosh-mode
 ;; Emacs: GNU Emacs 28 or later
-;; Version: 0.3.3
+;; Version: 0.3.4
 ;; Package-Requires: ((emacs "28.1"))
 
 ;; This program is free software; you can redistribute it and/or
@@ -30,7 +30,9 @@
 
 ;; ## Usage:
 
-;; * `C-c C-u`
+;; * For the Gauche beginner.
+;; * Not enough documantation.
+;; * `C-c C-u` to static test the module.
 
 ;; ## Thanks:
 ;; - scheme-complete.el
@@ -44,7 +46,7 @@
   :group 'lisp
   :prefix "gosh-")
 
-(defvar gosh-mode-version "0.3.2")
+(defvar gosh-mode-version "0.3.4")
 
 (eval-when-compile
   (require 'gosh-const))
