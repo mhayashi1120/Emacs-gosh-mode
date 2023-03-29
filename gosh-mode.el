@@ -1820,7 +1820,10 @@ d:/home == /cygdrive/d/home
 (defun gosh-extract-definition (sexp)
   (pcase sexp
     (`(define-syntax ,name ,transformer)
-     `((,name ,@(gosh-extract-syntax transformer))))
+     (mapcar
+      (lambda (syntax)
+        `(,name ,syntax))
+      (gosh-extract-syntax transformer)))
     (`(define-macro (,name . ,args) . ,_)
      `((,name (syntax ,args))))
     (`(define-method ,name ,args . ,_)
