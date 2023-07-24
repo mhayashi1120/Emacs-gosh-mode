@@ -4849,6 +4849,12 @@ This mode is originated from `scheme-mode' but specialized to edit Gauche code."
   (message "Module %s is imported now." module)
   (sit-for 0.5))
 
+(defun gosh-mode--insert-autoload-statement (symbol module)
+  (forward-line -1)
+  (insert (format "\n(autoload %s %s)\n" module symbol))
+  (message "Symbol %s on %s is autoloaded now." symbol module)
+  (sit-for 0.5))
+
 (defun gosh-mode--import-module (target current-module)
   (save-excursion
     (goto-char (point-min))
@@ -4887,8 +4893,7 @@ This mode is originated from `scheme-mode' but specialized to edit Gauche code."
        ((progn
           (goto-char init-point)
           (re-search-backward "^(" nil t))
-        (forward-line -1)
-        (insert (format "\n(autoload %s %s)\n" module symbol)))
+        (gosh-mode--insert-autoload-statement symbol module))
        (t
         (error "Unable find properly point to insert `autoload' statement"))))))
 
