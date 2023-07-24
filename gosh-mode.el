@@ -39,6 +39,9 @@
 ;;    gosh-mode is forked from scheme-complete.el
 ;;    Many code is duplicated but specialize to Gauche.
 
+;; ## TODO:
+;; * Move to LSP mode
+
 ;;; Code:
 
 (defgroup gosh-mode nil
@@ -416,10 +419,10 @@ This function come from apel"
 
 (defun gosh-reader-ignore ()
   (let ((start (point)))
-    (while (or (plusp (gosh-reader--skip-ws))
-               (plusp (gosh-reader--skip-comment))
-               (plusp (gosh-reader--skip-debug-macro))
-               (plusp (gosh-reader--skip-meta))))
+    (while (or (cl-plusp (gosh-reader--skip-ws))
+               (cl-plusp (gosh-reader--skip-comment))
+               (cl-plusp (gosh-reader--skip-debug-macro))
+               (cl-plusp (gosh-reader--skip-meta))))
     (- (point) start)))
 
 (defun gosh-reader--skip-meta ()
@@ -1070,9 +1073,10 @@ to change `scheme-mode' to `gosh-mode'"
   (when (and gosh-force-from-scheme-mode
              (eq major-mode 'scheme-mode)
              (not gosh-force-mode-progress)
-             (dolist (pred gosh-mode-maybe-predicate-hook)
-               (when (ignore-errors (save-excursion (funcall pred)))
-                 (cl-return t))))
+             (catch 'done
+               (dolist (pred gosh-mode-maybe-predicate-hook)
+                 (when (ignore-errors (save-excursion (funcall pred)))
+                   (throw 'done t)))))
     (run-with-timer 0.1 nil 'gosh-mode-from-scheme-mode (current-buffer))))
 
 (defun gosh-mode-maybe--from-file-name ()
@@ -3409,7 +3413,7 @@ Arg FORCE non-nil means forcely insert bracket."
           (let ((part (parse-partial-sexp s (point))))
             (cond
              ((zerop (car part)) 'balanced)
-             ((minusp (car part)) 'unbalanced)
+             ((cl-minusp (car part)) 'unbalanced)
              (t 'opening)))))))))
 
 (defun gosh-paren--insert-open (force default-open)
@@ -3559,7 +3563,7 @@ Arg FORCE non-nil means forcely insert bracket."
                     t)
                 (scan-error
                  (cond
-                  ((plusp c)
+                  ((cl-plusp c)
                    (cl-decf c)
                    (skip-chars-backward "\s\t\n(["))
                   ((looking-at "\\(?:\\sw\\|\\s_\\)")
