@@ -4649,15 +4649,17 @@ CHECK is function that accept no arg and return boolean."
   (when overlays
     (save-match-data
       (with-local-quit
-        (switch-to-buffer (overlay-buffer ov))
-        (goto-char (overlay-start ov))
-        (recenter)
-        (let ((next (gosh-refactor--rotate-next-overlay ov overlays)))
-          (setq gosh-refactor--rotate-timer
-                (run-with-timer
-                 1 nil
-                 'gosh-refactor--rotate-overlays
-                 (or next (car overlays)) overlays)))))))
+        (with-current-buffer (overlay-buffer ov)
+          (save-window-excursion
+            (set-window-buffer (selected-window) (current-buffer))
+            (goto-char (overlay-start ov))
+            (recenter)
+            (let ((next (gosh-refactor--rotate-next-overlay ov overlays)))
+              (setq gosh-refactor--rotate-timer
+                    (run-with-timer
+                     1 nil
+                     'gosh-refactor--rotate-overlays
+                     (or next (car overlays)) overlays)))))))))
 
 (defun gosh-refactor--rotate-next-overlay (base overlays)
   (let ((first (line-number-at-pos (window-start)))
